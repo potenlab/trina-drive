@@ -2,7 +2,7 @@
 // typed event; the notifier turns it into inbox rows and channel deliveries. Listeners must not throw into emitters.
 export const EVENT_KINDS = [
   'widened_draft', 'original_write_attempt', 'bulk_read', 'quarantine', 'new_client',
-  'admin_self_grant', 'password_reset', 'token_revoked', 'audit_anchor',
+  'admin_self_grant', 'password_reset', 'token_revoked', 'audit_anchor', 'provenance_reset',
 ] as const
 export type EventKind = (typeof EVENT_KINDS)[number]
 

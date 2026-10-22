@@ -7,8 +7,8 @@ import { appendAudit } from '../audit'
 import { isSystemName, nfc } from '../names'
 import { Rights, type Actor } from '../rights'
 import { addPerson, createToken, ensureFolder, LEVELS, registerFolder as storeRegister, StoreError, type FolderRow, type LevelName } from '../store'
-import { accountOf, checkPasswordRules, createLink, revokeSessionsOf, revokeTokensOf, setPassword, verifyPassword } from './auth'
-import { ApiError, bad, forbidden, notFound, type WebCtx } from './http'
+import { accountOf, checkPasswordRules, createLink, freshLogin, FRESH_LOGIN_MS, markReauth, revokeSessionsOf, revokeTokensOf, setPassword, verifyPassword } from './auth'
+import { ApiError, bad, forbidden, notFound, rateLimited, type WebCtx } from './http'
 import { notify, type NoticeKind } from './notices'
 import { ensureWebSchema, metaGet, metaSet } from './schema'
 
@@ -487,3 +487,40 @@ export function revokeOwnToken(op: Op, id: unknown) {
   return { ok: true }
 }
 
+
+// ---------- fresh login and provenance reset ("출처 초기화", plan 5.1) ----------
+/** Type the password again (rate limited like sign-in, per person). */
+export async function reauth(op: Op, sessionIdHash: string, body: { password?: unknown }) {
+  const key = `reauth:${op.actor.personId}`
+  if (op.w.loginByName.blocked(key)) throw rateLimited(op.w.loginByName.retryAfter(key))
+  const acc = accountOf(op.w.db, op.actor.personId)
+  if (typeof body.password !== 'string' || !(await verifyPassword(body.password, acc?.password_hash))) {
+    op.w.loginByName.hit(key)
+    throw bad('wrong_password', 'the password is not right')
+  }
+  op.w.loginByName.reset(key)
+  markReauth(op.w.db, sessionIdHash)
+  return { ok: true, fresh_for_s: FRESH_LOGIN_MS / 1000 }
+}
+
+/**
+ * Clear one of the caller's own tokens' 8-hour provenance window (R3). Needs a fresh login (the password typed within
+ * the last 5 minutes; `password` in the body counts). Drafts already written keep their sources (they never shrink).
+ * Audited, and the admins (and the person) are told through the notify bus with kind + count + link only (R11).
+ */
+export async function resetProvenance(op: Op, sessionIdHash: string, id: unknown, body: { password?: unknown }) {
+  const db = op.w.db
+  const t = db.query<{ id: number; name: string; person_id: number }, [number]>('SELECT id, name, person_id FROM tokens WHERE id = ?').get(Number(id))
+  if (!t || t.person_id !== op.actor.personId) throw notFound()
+  if (body.password !== undefined) await reauth(op, sessionIdHash, body)
+  if (!freshLogin(db, sessionIdHash)) throw new ApiError(403, 'reauth_required', 'type your password again to reset provenance')
+  let cleared = 0
+  db.transaction(() => {
+    cleared = db.query('DELETE FROM touches WHERE token_id = ?').run(t.id).changes
+    appendAudit(db, { personId: op.actor.personId, tokenId: t.id, tool: 'web', outcome: 'ok', files: [],
+      command: `provenance reset: token ${t.name} (${cleared} folder${cleared === 1 ? '' : 's'} cleared from its 8-hour window; existing drafts keep their sources)` })
+  })()
+  try { op.w.opts.emit?.({ kind: 'provenance_reset', subjectPersonId: op.actor.personId, tokenId: t.id, detail: { folders: cleared } }) }
+  catch (e) { console.error('[notify] provenance_reset emit failed:', e) }
+  return { ok: true, cleared }
+}

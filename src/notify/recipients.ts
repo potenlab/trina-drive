@@ -70,6 +70,10 @@ export function resolveRecipients(db: DB, e: ShelfEvent): Recipient[] {
     case 'audit_anchor':
       admins('detail')
       break
+    case 'provenance_reset': // 5.1: the admin is told; the person too (if it was not them, their password is known)
+      admins('detail')
+      subject()
+      break
   }
   return [...out.values()]
 }

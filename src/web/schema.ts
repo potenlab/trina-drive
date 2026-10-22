@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS web_links (
 CREATE TABLE IF NOT EXISTS notices (
   id INTEGER PRIMARY KEY, person_id INTEGER NOT NULL REFERENCES people(id), kind TEXT NOT NULL,
   count INTEGER NOT NULL DEFAULT 1, link TEXT NOT NULL, created_at INTEGER NOT NULL, read_at INTEGER);
+-- the last time a session's person typed their password again (fresh login for sensitive actions, e.g. provenance reset)
+CREATE TABLE IF NOT EXISTS web_reauth (id_hash TEXT PRIMARY KEY, at INTEGER NOT NULL);
 -- what changed on a folder and the value before (R5 "keep the previous NAS readers", R9 former personal folders)
 CREATE TABLE IF NOT EXISTS folder_history (
   id INTEGER PRIMARY KEY, folder_id INTEGER NOT NULL, at INTEGER NOT NULL, by_person INTEGER, field TEXT NOT NULL,

@@ -2,6 +2,7 @@
 // that calls the server's fetch handler directly.
 import { grantManage } from '../src/store'
 import { hashPassword } from '../src/web/auth'
+import type { WebOptions } from '../src/web/http'
 import { OutboxMailer } from '../src/web/mail'
 import { handleWeb, makeWebCtx } from '../src/web/server'
 import { setup } from './helpers'
@@ -10,10 +11,10 @@ export const ORIGIN = 'http://shelf.test'
 export const PASSWORD = 'correct horse battery'
 let sharedHash: string | null = null
 
-export async function webSetup(opts: { webDir?: string } = {}) {
+export async function webSetup(opts: { webDir?: string; emit?: WebOptions['emit'] } = {}) {
   const e = setup()
   const mailer = new OutboxMailer(e.dir, true)
-  const w = makeWebCtx(e.ctx, { mailer, webDir: opts.webDir ?? '/nonexistent' })
+  const w = makeWebCtx(e.ctx, { mailer, webDir: opts.webDir ?? '/nonexistent', emit: opts.emit })
   sharedHash ??= await hashPassword(PASSWORD)
   const pid = (name: string) => e.db.query<{ id: number }, [string]>('SELECT id FROM people WHERE name = ?').get(name)!.id
   for (const n of ['dion', 'kim', 'boss', 'lee', 'park'])

@@ -92,6 +92,21 @@ export function revokeTokensOf(db: DB, personId: number): number {
   return db.query('UPDATE tokens SET revoked_at = ? WHERE person_id = ? AND revoked_at IS NULL').run(now(), personId).changes
 }
 
+// ---------- fresh login (password typed again within the last few minutes) ----------
+export const FRESH_LOGIN_MS = 5 * 60_000
+
+export function markReauth(db: DB, idHash: string) {
+  ensureWebSchema(db)
+  db.query('INSERT INTO web_reauth (id_hash, at) VALUES (?, ?) ON CONFLICT (id_hash) DO UPDATE SET at = excluded.at').run(idHash, now())
+}
+/** The session was made by typing the password (sign-in, setup, invite/reset) or the password was typed again, within FRESH_LOGIN_MS. */
+export function freshLogin(db: DB, idHash: string): boolean {
+  ensureWebSchema(db)
+  const r = db.query<{ at: number }, [string, string]>(
+    'SELECT max(coalesce((SELECT created_at FROM web_sessions WHERE id_hash = ?), 0), coalesce((SELECT at FROM web_reauth WHERE id_hash = ?), 0)) AS at').get(idHash, idHash)
+  return !!r && now() - r.at < FRESH_LOGIN_MS
+}
+
 export const csrfOk = (s: WebSession, presented: string | null) =>
   !!presented && presented.length === s.csrf.length && crypto.timingSafeEqual(Buffer.from(presented), Buffer.from(s.csrf))
 
@@ -157,19 +172,5 @@ export function consumeSetupToken(db: DB, presented: unknown): boolean {
 }
 
 // ---------- rate limit ----------
-/** Fixed windows per key; used for sign-in (per name and per address) and for link use. */
-export class RateLimiter {
-  private readonly hits = new Map<string, { n: number; until: number }>()
-  constructor(readonly max: number, readonly windowMs: number) {}
-  /** false when the key is over its limit (the attempt is counted either way). */
-  hit(key: string): boolean {
-    const t = now()
-    const h = this.hits.get(key)
-    if (!h || h.until <= t) { this.hits.set(key, { n: 1, until: t + this.windowMs }); this.gc(t); return true }
-    h.n++
-    return h.n <= this.max
-  }
-  blocked(key: string) { const h = this.hits.get(key); return !!h && h.until > now() && h.n >= this.max }
-  reset(key: string) { this.hits.delete(key) }
-  private gc(t: number) { if (this.hits.size > 10_000) for (const [k, v] of this.hits) if (v.until <= t) this.hits.delete(k) }
-}
+/** Sign-in, link and setup-token limits (src/ratelimit.ts; kept in SQLite when given the database). */
+export { RateLimiter } from '../ratelimit'
