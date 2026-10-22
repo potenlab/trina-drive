@@ -42,6 +42,45 @@ The demo: people `dion` (admin), `kim` (member, not 경영), `boss` (경영), `l
 `경영`, `프로젝트`, `인사`, `영업`, `공용` and kim's personal folder `개인_kim`, with csv/md plus generated pdf, docx,
 xlsx, hwpx and hwp files. `bun run sim/provenance-day.ts` replays an office day (plan ★8, see below).
 
+## Web admin (v0.1)
+
+```sh
+bun run build:web                                   # web/ (Vite + React) -> web/dist, served by `serve` at /
+bun run src/cli.ts --data ./.shelf init             # prints a one-time web setup token (demo seed prints one too)
+bun run src/cli.ts --data ./.shelf serve --port 8787 [--public-url https://files.example.lan]
+open http://127.0.0.1:8787/                         # paste the setup token, create the admin, register folders
+```
+
+One Bun server: `/mcp` (Bearer tokens only), `/api` (people's sessions), the app at `/`. Sessions: argon2id
+passwords, cookie `shelf_session` (HttpOnly, SameSite=Strict, `Path=/api`, Secure on https), a CSRF token per session
+on every change, same-origin `Origin` required from browsers, JSON bodies only, sign-in rate limit per name and per
+address. First setup only with the setup token from `init` (loopback is not trusted). Invite and reset links are
+one-time and carry their secret in the `#fragment`. Mail is a pluggable `Mailer`; the built-in one appends to
+`<data>/outbox.log`. CSP `default-src 'self'`, `frame-ancestors 'none'`, nosniff, `Referrer-Policy: no-referrer`.
+
+Every handler asks `src/rights.ts` (R5/R7/R9: who may see or change which folder, built on `policy.effectiveLevel`)
+or `src/policy.ts` (drafts, R4 with the session as a full-scope token). What the caller may not see is 404.
+
+| | endpoints (`/api`) |
+|---|---|
+| before sign-in | `GET state`, `POST setup`, `POST login`, `POST links/check`, `POST links/accept` (invite / reset) |
+| session | `GET session`, `POST logout`, `POST me/password`, `GET notices`, `POST notices/read` |
+| people (admin changes) | `GET people`, `POST people` (→ invite link), `PATCH people/:id` (admin, active, email → old address told), `POST people/:id/invite`, `POST people/:id/reset` (link mailed to the person only; their tokens and sessions are cut) |
+| groups (admin) | `POST groups`, `DELETE groups/:id`, `PUT/DELETE groups/:id/members/:pid` |
+| folders | `GET folders`, `POST folders` (admin; templates public/team/management/personal/custom, NAS readers all/same-as-ai/chosen/unknown), `GET folders/:id` (the NAS/AI table), `PATCH folders/:id` (no_ai, inherit_break, quarantine, name), `DELETE folders/:id` (admin), `PUT folders/:id/rules`, `PUT folders/:id/nas`, `PUT folders/:id/owner`, `POST folders/:id/subfolders`, `PUT/DELETE folders/:id/managers/:pid` (admin) |
+| tokens (own only) | `GET tokens`, `POST tokens` (shown once), `DELETE tokens/:id` |
+| drafts (own, R4) | `GET drafts` (+ locked count and dates), `GET drafts/:id/download` |
+| audit | `GET audit?view=mine` · `view=folders` (folders you manage; others' command lines hidden) · `view=summary` (admin: who, which connection, how many; hash-chain check) |
+
+R7 as built: a manage holder edits AI readers and "start fresh here" in their folder and below, and can turn
+"No AI" on; NAS readers, "No AI" off, register/unregister, quarantine and manage grants are admin only (personal
+folders: NAS readers and "No AI" belong to the owner; nobody sets rules inside them). R9 notices (kind, count, link
+only) go to the folder's managers and the admin on self-grants (rule, group, manage, NAS readers), "No AI" off,
+personal-folder unregister/owner change, and re-registering a former personal folder.
+
+Web tables (created on demand by `src/web/schema.ts`, not in `db.ts`): `accounts`, `web_sessions`, `web_links`,
+`notices`, `folder_history`; keys `web_setup_token` and `everyone_group` in `meta`.
+
 ## CLI
 
 ```
@@ -119,6 +158,8 @@ src/mirror.ts      text mirror keyed by content sha256      src/shell.ts    Bash
 src/drafts.ts      draft box, versions, R4                  src/tools.ts    the five MCP tools
 src/audit.ts       hash-chained audit log                   src/mcp.ts      POST /mcp endpoint
 src/extract/       pdf (pdftotext), docx/xlsx/pptx, hwpx, hwp (own CFB reader), zip
+src/rights.ts      R5/R7/R9 admin-side decisions            src/web/        REST API, sessions, mail, notices, server
+web/               the admin app (Vite + React, en/ko)
 src/samples.ts     generated sample office files            src/demo.ts     demo seed       src/cli.ts  CLI
 sim/provenance-day.ts   plan ★8 replay                      test/           bun test
 ```
@@ -135,8 +176,8 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
   exist (by design: nothing outside `/drafts/` is writable).
 - No NAS watcher, no reconciliation of moved/renamed folders (a registered folder whose identity changed is simply
   closed), no file-identity index (so R1 ⑤ "same identity at another path" is covered only by `nlink == 1`), no Mac
-  alias/XSym detection, no "widened draft" detection, no notifications (R11), no `manage` enforcement beyond storing
-  grants, no web UI, no trash/purge of drafts (deleted drafts keep their rows and blobs).
+  alias/XSym detection, no "widened draft" detection, no webhook/Slack notifications (web notices + mail only), no
+  web file browser (v0.2), no trash/purge of drafts (deleted drafts keep their rows and blobs).
 - grep: BRE/ERE are translated to Rust regex (no backreferences/lookaround — refused with ripgrep's message);
   `sed`/`awk` regexes run in just-bash (it uses re2js, a linear engine, for most of them). Output of `wc` with no flag
   counts extracted text. Extraction runs on first use (no background queue yet).
