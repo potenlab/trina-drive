@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import fs from 'node:fs'
 import { LIMITS } from '../../src/config'
+import { closeDefaultExecutor, defaultExecutor } from '../../src/worker'
 import { securitySetup, type SecEnv } from './fixture'
 
 let e: SecEnv
@@ -146,7 +147,6 @@ describe('another token\'s ls keeps p99 < 200 ms during the attack', () => {
 
 describe('limits that are not built yet', () => {
   test.todo('per-token draft quota (count and bytes): today a token can store unlimited 8 MB drafts [owner: drafts]', () => {})
-  test.todo('per-token / per-person / global concurrent command limits (plan 5.1) [owner: worker sandbox]', () => {})
 })
 
 describe('memory cap per command: what one call may read into the server (scaled down: 9 MB per file, 20 MB per call)', () => {
@@ -198,5 +198,77 @@ describe('memory cap per command: what one call may read into the server (scaled
         expect(norm(a, hidden)).toBe(norm(b, missing))
       }
     }
+  })
+})
+
+// Plan 5.1: per-token / per-person / global limits on commands running at once, through the MCP tool path (callTool ->
+// runShell -> the process-wide executor). The executor is restarted with small limits from the environment
+// (SHELF_WORKERS_*). The in-process shell (development only) has no executor and no such limits.
+describe.skipIf(process.env.SHELF_SHELL === 'inprocess')('concurrent command limits (plan 5.1) through the bash tool', () => {
+  const LIM = { SHELF_WORKERS_GLOBAL: '4', SHELF_WORKERS_PER_TOKEN: '2', SHELF_WORKERS_PER_PERSON: '3', SHELF_WORKERS_QUEUE: '4' }
+  const saved: Record<string, string | undefined> = {}
+  beforeAll(async () => {
+    for (const [k, v] of Object.entries(LIM)) { saved[k] = process.env[k]; process.env[k] = v }
+    await closeDefaultExecutor()
+    for (const n of ['c1', 'c2', 'c3']) e.addToken(n, 'kim', { name: `kim-${n}` })
+  })
+  afterAll(async () => {
+    for (const k of Object.keys(LIM)) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k] }
+    await closeDefaultExecutor()
+  })
+
+  /** Runs the calls at once while sampling the executor; returns the most seen running per token, per person, overall. */
+  async function flood(calls: [string, string][]) {
+    const ex = defaultExecutor()
+    expect(ex.info().limits).toMatchObject({ global: 4, perToken: 2, perPerson: 3, maxQueuedPerToken: 4 })
+    const peak = { token: new Map<string, number>(), person: new Map<string, number>(), global: 0 }
+    const sample = () => {
+      const i = ex.info()
+      peak.global = Math.max(peak.global, i.running)
+      for (const [k, v] of Object.entries(i.runningBy.token)) peak.token.set(k, Math.max(peak.token.get(k) ?? 0, v))
+      for (const [k, v] of Object.entries(i.runningBy.person)) peak.person.set(k, Math.max(peak.person.get(k) ?? 0, v))
+    }
+    const timer = setInterval(sample, 2)
+    const t0 = performance.now()
+    const results = await Promise.all(calls.map(([who, cmd]) => e.tool(who, 'bash', { command: cmd })))
+    const ms = performance.now() - t0
+    clearInterval(timer)
+    const texts = results.map((r) => r.content.map((c) => c.text).join('\n'))
+    const tokenPeak = (who: string) => peak.token.get(String(e.tok(who).id)) ?? 0
+    const personPeak = (who: string) => peak.person.get(String(e.tok(who).person_id)) ?? 0
+    console.log(`[limits] ${calls.length} calls in ${Math.round(ms)} ms; peak running ${peak.global}`)
+    return { texts, ms, global: peak.global, tokenPeak, personPeak }
+  }
+
+  test('per token: one token\'s 4 commands run 2 at a time', async () => {
+    const r = await flood(Array.from({ length: 4 }, () => ['c1', 'sleep 0.5; echo done'] as [string, string]))
+    expect(r.texts.every((t) => t.includes('done') && t.includes('[exit code 0]'))).toBe(true)
+    expect(r.tokenPeak('c1')).toBe(2)
+    expect(r.ms).toBeGreaterThanOrEqual(1000) // two waves
+  })
+
+  test('per person: three tokens of one person run at most 3 commands together', async () => {
+    const r = await flood((['c1', 'c2', 'c3'] as const).flatMap((w) => [[w, 'sleep 0.5; echo done'], [w, 'sleep 0.5; echo done']] as [string, string][]))
+    expect(r.texts.every((t) => t.includes('done'))).toBe(true)
+    expect(r.personPeak('c1')).toBe(3)
+    for (const w of ['c1', 'c2', 'c3']) expect(r.tokenPeak(w)).toBeLessThanOrEqual(2)
+    expect(r.ms).toBeGreaterThanOrEqual(1000)
+  })
+
+  test('global: five people at once run at most 4 commands overall', async () => {
+    const people = ['dion', 'kim', 'boss', 'lee', 'park']
+    const r = await flood(people.flatMap((w) => [[w, 'sleep 0.5; echo done'], [w, 'sleep 0.5; echo done']] as [string, string][]))
+    expect(r.texts.every((t) => t.includes('done'))).toBe(true)
+    expect(r.global).toBe(4)
+    for (const w of people) expect(r.personPeak(w)).toBeLessThanOrEqual(2)
+    expect(r.ms).toBeGreaterThanOrEqual(1500) // 10 jobs, 4 at a time: three waves
+  })
+
+  test('a token past its queue is told to retry, others are not affected', async () => {
+    const r = await flood([...Array.from({ length: 9 }, () => ['c2', 'sleep 0.3; echo done'] as [string, string]), ['boss', 'echo boss-ok']])
+    const busy = r.texts.filter((t) => t.includes('too many commands are running for this token'))
+    expect(busy.length).toBe(3) // 2 running + 4 waiting
+    expect(r.texts.filter((t) => t.includes('done')).length).toBe(6)
+    expect(r.texts.at(-1)).toContain('boss-ok')
   })
 })
