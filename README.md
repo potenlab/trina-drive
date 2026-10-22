@@ -51,7 +51,11 @@ folder flag <path> no-ai|quarantine|widened-pending|inherit-break [--off]
 rule set <path> <person|@group> none|read|write [--break]
 manage grant <path> <person>
 token create <person> [--name N] [--scope path1,path2] [--read-only] [--ttl 8h] | token revoke <id>
-audit verify | demo seed | sh --token <pat> -c <command> | serve [--port] [--host] [--allow-origin]
+audit verify [--against <anchor-file>] | audit anchor [--force] | audit anchors
+connections list [--all] | connections revoke <token-id>
+notify contact <person> [--email E] [--slack URL] [--lang en|ko] | notify inbox <person> [--all] [--read]
+notify show | notify set <key> <json> | notify flush
+demo seed | sh --token <pat> -c <command> | serve [--port] [--host] [--allow-origin]
 ```
 
 ## MCP
@@ -108,6 +112,64 @@ and the token's scope is computed inside it.
   touches, draft writes and the audit row commit in one transaction, so if the audit row cannot be written the call
   fails and nothing it wrote is kept.
 
+## Alerts and audit
+
+Plan §4.1 R9/R11, §5.1 "출처와 기록", §7.1 (token leak, audit forgery). Code in `src/notify/`.
+
+**Events** (`src/notify/events.ts`, one `EventBus` per runtime):
+
+| event | emitted by | goes to |
+|---|---|---|
+| `widened_draft` | reconciler (not in this branch): `rt.emit({kind, sourceFolderIds, targetFolderId, weakOnly})` | source-folder `manage` holders (detail); a source with none → admins, count only; target-folder `manage` → "1 item" only. Weak-provenance-only → daily digest |
+| `original_write_attempt` | every committed call whose shell or `edit` tried to write an original | the token owner (detail), admins (count) |
+| `bulk_read` | bulk-read alarm (below) | the token owner (detail), admins (count) |
+| `quarantine` | reconciler: `{kind, folderId}` | admins and the folder's `manage` holders |
+| `new_client` | MCP endpoint / CLI `sh`: first request from a client the token has not used | the token owner |
+| `admin_self_grant` | admin API (not in this branch): `{kind, folderId, subjectPersonId}` | the folder's `manage` holders and the person concerned, at once |
+| `password_reset` | admin API: `{kind, subjectPersonId}` | only that person (their own address) |
+| `token_revoked` | `connections revoke`, `token revoke`, auto-suspend | the token owner |
+| `audit_anchor` | anchor timer, `audit anchor` | admins (email carries the signed anchor) |
+
+`manage` is inherited down (none inside personal folders); inactive people never receive anything.
+
+**Payloads (R11).** Every channel message is rendered from the event kind, a count and a link only
+(`messages.render`): `[shelf] 2 widened drafts to review` / `[shelf] 넓어진 초안 2건 확인 필요` plus
+`<baseUrl>/alerts/<kind>` (detail level) or `<baseUrl>/inbox` (count level). No file, folder or draft names, no
+provenance, no person names, no ids. The one addition: anchor emails carry the signed anchor (hash, row count, time,
+key fingerprint, signature). Event details (ids) are stored in `notify_events` for the logged-in screen only, which must
+apply R7. A property test generates random names for everything and checks no channel or inbox payload contains one.
+
+**Channels.** In-app inbox (`notify_inbox`, one unread row per person × kind, counts add up), Slack incoming webhook
+(`{"text": …}`) and email (`email.mode`: `outbox` = `.eml` files in `<data>/outbox` for development, `smtp` = a
+minimal SMTP client, plain or implicit TLS, AUTH PLAIN; `$SHELF_SMTP_PASS` overrides the stored password, `off`).
+Contacts per person: `notify contact kim --email kim@corp --slack https://hooks.slack.com/… --lang ko`. Delivery:
+pending rows are flushed every `flushMs` (5 s) by `serve`; same kind to the same destination coalesces into one message
+with the summed count; at most `perMinute` (6) messages per destination per minute, the rest waits and coalesces
+further (password reset, self-grant and revocations go first); failures retry with backoff, 5 attempts.
+
+**Bulk-read alarm.** Per token, a sliding window (`bulkRead.windowMs`, 10 min) over committed calls: files whose content
+was output (cat, read, grep matches; `ls`/non-matching grep do not count), their original bytes, distinct folders.
+Thresholds `bulkRead.files` 200, `bulkRead.bytes` 50 MB, `bulkRead.folders` 20 (0 = off); fires once per window.
+`bulkRead.autoSuspend` (off by default) revokes the token when it fires (suspension = revocation; the owner makes a new
+token). Example: `notify set bulkRead.files 500`.
+
+**Connections.** Each authenticated MCP message records token × client: `clientInfo` name/version from `initialize`,
+user-agent product (version stripped, so updates are not new clients) and source IP (`newClientByIp`, default on). CLI
+`sh` records itself as `shelf cli` from `local`. `connections list` shows token, person, client, IP, last used, request
+count; `connections revoke <token-id>` (= `token revoke`) revokes at once. `mcp.ts` checks the token (revoked, expired,
+inactive person) on every request, so the next request fails with 401; a test proves it in-process.
+
+**Audit anchor (principle 6).** An Ed25519 key is made at `init` (or first use) in `<data>/anchor/` (private key 0600).
+Every `anchor.intervalMs` (default daily; nothing is sent if the chain did not change) `serve` signs
+`{count, head hash, time, key fingerprint}`, stores it (`audit anchors`), writes it to `anchor.dir` (put this on
+another disk or a synced folder) and emails it to admins. `audit verify --against <file>` (the `.json` or the saved
+email) checks the anchor's signature, that this install still has the same key, that the chain verifies, and that row
+#count still has the anchored hash: an operator who rewrote or deleted earlier rows and recomputed every hash is caught,
+because the anchor already left the server. Exit code 1 on mismatch. `audit anchor [--force]` anchors now.
+
+**Settings** live in `<data>/notify.json` (`notify show`, `notify set <dotted.key> <json>`): `baseUrl`, `lang`
+(`en`/`ko`), `email`, `perMinute`, `flushMs`, `digestHour` (local hour, 9), `bulkRead`, `newClientByIp`, `anchor`.
+
 ## Layout
 
 ```
@@ -120,6 +182,8 @@ src/drafts.ts      draft box, versions, R4                  src/tools.ts    the 
 src/audit.ts       hash-chained audit log                   src/mcp.ts      POST /mcp endpoint
 src/extract/       pdf (pdftotext), docx/xlsx/pptx, hwpx, hwp (own CFB reader), zip
 src/samples.ts     generated sample office files            src/demo.ts     demo seed       src/cli.ts  CLI
+src/notify/        events, recipients, messages (R11), notifier (inbox, coalescing, rate limit, digest), channels
+                   (Slack, outbox, smtp), bulk-read alarm, connections, audit anchor, its CLI and tables (schema.ts)
 sim/provenance-day.ts   plan ★8 replay                      test/           bun test
 ```
 
@@ -135,13 +199,13 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
   exist (by design: nothing outside `/drafts/` is writable).
 - No NAS watcher, no reconciliation of moved/renamed folders (a registered folder whose identity changed is simply
   closed), no file-identity index (so R1 ⑤ "same identity at another path" is covered only by `nlink == 1`), no Mac
-  alias/XSym detection, no "widened draft" detection, no notifications (R11), no `manage` enforcement beyond storing
+  alias/XSym detection, no "widened draft" detection (the notifier takes `widened_draft` events, nothing emits them yet), no `manage` enforcement beyond storing
   grants, no web UI, no trash/purge of drafts (deleted drafts keep their rows and blobs).
 - grep: BRE/ERE are translated to Rust regex (no backreferences/lookaround — refused with ripgrep's message);
   `sed`/`awk` regexes run in just-bash (it uses re2js, a linear engine, for most of them). Output of `wc` with no flag
   counts extracted text. Extraction runs on first use (no background queue yet).
-- Timing differences between hidden and nonexistent paths are not equalised. Audit tail truncation is only caught with
-  an external anchor (not built).
+- Timing differences between hidden and nonexistent paths are not equalised. Audit tail truncation after the last anchor is not caught
+  (rows removed since then look like rows never written); the anchor covers everything up to it.
 - macOS and Linux only. On APFS two NFC/NFD spellings cannot coexist, so that case is tested with a simulated listing.
 
 ## Dependencies and licenses (plan ★1)

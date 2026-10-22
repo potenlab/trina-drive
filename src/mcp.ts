@@ -5,7 +5,11 @@ import type { Ctx } from './session'
 import { verifyToken, type TokenRow } from './store'
 import { AuditFailure, callTool, TOOL_DEFS } from './tools'
 
-export interface ServerOptions { allowedOrigins?: string[] }
+export interface ServerOptions {
+  allowedOrigins?: string[]
+  /** every authenticated JSON-RPC message (notify: connections, new-client alerts); errors are logged, never fail the request */
+  onRequest?: (token: TokenRow, info: { method: string; clientName?: string; clientVersion?: string; userAgent: string | null; ip: string | null }) => void
+}
 
 const INSTRUCTIONS = `Team folders, read-only. Use the bash tool (ls, cat, grep -r, rg, head, sed -n, awk …) to find and read files; ` +
   `office documents read as text. Write results to /drafts/ (markdown or csv); a person reviews and moves them.`
@@ -20,7 +24,7 @@ function originAllowed(origin: string | null, allowed: string[]): boolean {
   try { return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname) } catch { return false }
 }
 
-export async function handleRequest(ctx: Ctx, req: Request, opts: ServerOptions = {}): Promise<Response> {
+export async function handleRequest(ctx: Ctx, req: Request, opts: ServerOptions = {}, ip?: string): Promise<Response> {
   const url = new URL(req.url)
   if (url.pathname === '/health') return json({ ok: true, name: NAME, version: VERSION })
   if (url.pathname !== '/mcp') return json({ error: 'not found' }, 404)
@@ -43,6 +47,13 @@ export async function handleRequest(ctx: Ctx, req: Request, opts: ServerOptions 
   if (!msg || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
     // a response or something else from the client: nothing to answer
     return msg && msg.jsonrpc === '2.0' && !('method' in msg) ? new Response(null, { status: 202 }) : rpcError(msg?.id, -32600, 'invalid request', 400)
+  }
+  if (opts.onRequest) {
+    const ci = msg.method === 'initialize' ? (msg.params?.clientInfo ?? {}) as { name?: unknown; version?: unknown } : {}
+    try {
+      opts.onRequest(token, { method: msg.method, clientName: typeof ci.name === 'string' ? ci.name.slice(0, 128) : undefined,
+        clientVersion: typeof ci.version === 'string' ? ci.version.slice(0, 64) : undefined, userAgent: req.headers.get('user-agent'), ip: ip ?? null })
+    } catch (e) { console.error(`[${NAME}] onRequest failed:`, e) }
   }
   if (msg.id === undefined || msg.id === null) return new Response(null, { status: 202 }) // notification
 
@@ -72,5 +83,5 @@ export async function handleRequest(ctx: Ctx, req: Request, opts: ServerOptions 
 }
 
 export function serve(ctx: Ctx, port: number, hostname = '127.0.0.1', opts: ServerOptions = {}) {
-  return Bun.serve({ port, hostname, fetch: (req) => handleRequest(ctx, req, opts) })
+  return Bun.serve({ port, hostname, fetch: (req, srv) => handleRequest(ctx, req, opts, srv.requestIP(req)?.address) })
 }

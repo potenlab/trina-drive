@@ -110,6 +110,7 @@ export async function callTool(ctx: Ctx, token: TokenRow, name: string, args: Re
         audit = `edit ${p}`
         const h = vfs.resolve(p)
         if (!h) { result = fail(`No such file or directory: ${p}`); outcome = 'not found'; break }
+        if (h.t === 'file') s.notes.add(MSG.readOnly) // an attempt to write an original (notify)
         if (h.t !== 'draft') { result = fail(h.t === 'file' ? MSG.readOnly : `Not a file: ${p}`); outcome = 'refused'; break }
         if (!h.item.own) { result = fail(MSG.otherDraft); outcome = 'refused'; break }
         const cur = await vfs.bytesOf(h, p)
