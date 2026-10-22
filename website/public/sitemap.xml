@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Legal pages are placeholders (noindex) and are left out until their final text is published. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://drive.trina.app/</loc>
+    <lastmod>2026-10-23</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://drive.trina.app/"/>
+    <xhtml:link rel="alternate" hreflang="ko" href="https://drive.trina.app/ko"/>
+  </url>
+  <url>
+    <loc>https://drive.trina.app/ko</loc>
+    <lastmod>2026-10-23</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://drive.trina.app/"/>
+    <xhtml:link rel="alternate" hreflang="ko" href="https://drive.trina.app/ko"/>
+  </url>
+</urlset>
