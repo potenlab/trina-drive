@@ -8,7 +8,7 @@
 //   POST /oauth/register     RFC 7591, only when enabled (public enable --allow-dcr)
 // The consent decision itself is /api/oauth/* (consent.ts): it needs the web session and its CSRF token.
 import crypto from 'node:crypto'
-import { NAME } from '../config'
+import { PRODUCT } from '../config'
 import type { DB } from '../db'
 import { sha256 } from '../store'
 import { canonicalUrl, REQUEST_TTL_MS, SCOPES, type OAuthRuntime } from './config'
@@ -29,7 +29,7 @@ export function asMetadataPath(rt: OAuthRuntime) {
 
 export const protectedResourceMetadata = (rt: OAuthRuntime) => ({
   resource: rt.resource, authorization_servers: [rt.issuer], bearer_methods_supported: ['header'],
-  scopes_supported: [...SCOPES], resource_name: NAME,
+  scopes_supported: [...SCOPES], resource_name: PRODUCT,
 })
 
 export const authorizationServerMetadata = (rt: OAuthRuntime) => ({

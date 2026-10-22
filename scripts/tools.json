@@ -40,7 +40,7 @@
       "license": "GPL-2.0-only OR GPL-3.0-only (and the licenses of its libraries, copied to tools/licenses/)",
       "binaries": ["pdftotext"],
       "source": "homebrew",
-      "comment": "Poppler publishes no macOS binaries. The build machine's Homebrew bottle is copied with its library closure into tools/lib and relinked to @rpath (install_name_tool), then re-signed. Only a build host of the same CPU type can vendor it. Linux (Docker image, linux-*): Debian's poppler-utils package from the pinned base image's release, current security updates at build time; the image records the exact version (/usr/share/shelf/tools.json, SBOM).",
+      "comment": "Poppler publishes no macOS binaries. The build machine's Homebrew bottle is copied with its library closure into tools/lib and relinked to @rpath (install_name_tool), then re-signed. Only a build host of the same CPU type can vendor it. Linux (Docker image, linux-*): Debian's poppler-utils package from the pinned base image's release, current security updates at build time; the image records the exact version (/usr/share/trina-drive/tools.json, SBOM).",
       "targets": {
         "darwin-arm64": { "brewPrefix": "/opt/homebrew" },
         "darwin-x64": { "brewPrefix": "/usr/local" },

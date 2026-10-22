@@ -3,7 +3,7 @@
 node_modules
 dist
 web/dist
-.shelf
+.trina-drive
 **/*.db
 **/*.db-wal
 **/*.db-shm

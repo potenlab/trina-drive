@@ -860,7 +860,7 @@
      "s390x"
     ]
    },
-   "comment": "shelf: bubblewrap, namespaces only with a new user namespace"
+   "comment": "trina-drive: bubblewrap, namespaces only with a new user namespace"
   },
   {
    "names": [
@@ -881,7 +881,7 @@
      "s390x"
     ]
    },
-   "comment": "shelf: bubblewrap (s390 swaps the clone arguments)"
+   "comment": "trina-drive: bubblewrap (s390 swaps the clone arguments)"
   },
   {
    "names": [
@@ -896,7 +896,7 @@
      "op": "SCMP_CMP_MASKED_EQ"
     }
    ],
-   "comment": "shelf: bubblewrap, namespaces only with a new user namespace"
+   "comment": "trina-drive: bubblewrap, namespaces only with a new user namespace"
   },
   {
    "names": [
@@ -905,7 +905,7 @@
     "pivot_root"
    ],
    "action": "SCMP_ACT_ALLOW",
-   "comment": "shelf: bubblewrap builds the sandbox root; the kernel refuses these outside a user namespace the caller owns"
+   "comment": "trina-drive: bubblewrap builds the sandbox root; the kernel refuses these outside a user namespace the caller owns"
   }
  ]
 }

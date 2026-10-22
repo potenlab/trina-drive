@@ -18,12 +18,12 @@ describe('first setup', () => {
     const b = new e.Browser()
     expect((await b.call('GET', '/api/state')).data).toMatchObject({ setup_pending: false, setup_done: false })
     const secret = issueSetupToken(e.db)!
-    expect(secret).toStartWith('shelf_setup_')
+    expect(secret).toStartWith('tdrive_setup_')
     expect((await b.call('GET', '/api/state')).data.setup_pending).toBe(true)
     const form = { name: 'dion', email: 'dion@example.com', password: PASSWORD }
     // a loopback-looking request without the token gets nothing
     expect((await b.call('POST', '/api/setup', form, { origin: 'http://127.0.0.1', host: '127.0.0.1' })).status).toBe(403)
-    expect((await b.call('POST', '/api/setup', { ...form, setup_token: 'shelf_setup_wrong' })).status).toBe(403)
+    expect((await b.call('POST', '/api/setup', { ...form, setup_token: 'tdrive_setup_wrong' })).status).toBe(403)
     const ok = await b.call('POST', '/api/setup', { ...form, setup_token: secret })
     expect(ok.status).toBe(200)
     expect(ok.data.me).toMatchObject({ name: 'dion', admin: true })
@@ -147,7 +147,7 @@ describe('CSRF and Origin', () => {
     expect(r.status).toBe(403) // no CSRF header on a form post
     const { handleWeb } = await import('../src/web/server')
     const res = await handleWeb(e.w, new Request(ORIGIN + '/api/tokens', {
-      method: 'POST', headers: { cookie: `shelf_session=${b.cookie}`, origin: ORIGIN, 'x-csrf-token': b.csrf!, 'content-type': 'text/plain' }, body: 'name=x&ttl=7d' }))
+      method: 'POST', headers: { cookie: `tdrive_session=${b.cookie}`, origin: ORIGIN, 'x-csrf-token': b.csrf!, 'content-type': 'text/plain' }, body: 'name=x&ttl=7d' }))
     expect(res.status).toBe(415)
   })
 })
@@ -157,7 +157,7 @@ describe('/mcp never takes a cookie', () => {
     const b = await e.as('kim')
     const { handleWeb } = await import('../src/web/server')
     const res = await handleWeb(e.w, new Request(ORIGIN + '/mcp', {
-      method: 'POST', headers: { cookie: `shelf_session=${b.cookie}`, 'content-type': 'application/json', 'x-csrf-token': b.csrf! },
+      method: 'POST', headers: { cookie: `tdrive_session=${b.cookie}`, 'content-type': 'application/json', 'x-csrf-token': b.csrf! },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) }))
     expect(res.status).toBe(401)
     const ok = await handleWeb(e.w, new Request(ORIGIN + '/mcp', {

@@ -19,7 +19,7 @@ export interface SignedAnchor {
  * What happened. Only ids go in here (they decide recipients and feed the logged-in detail screen); names never reach
  * a channel because rendering takes only kind, count and a link (R11).
  */
-export interface ShelfEvent {
+export interface DriveEvent {
   kind: EventKind
   at?: number
   /** how many items this event stands for (default 1) */
@@ -42,12 +42,12 @@ export interface ShelfEvent {
   detail?: Record<string, unknown>
 }
 
-export type Listener = (e: ShelfEvent & { id?: number }) => void
+export type Listener = (e: DriveEvent & { id?: number }) => void
 
 export class EventBus {
   private readonly listeners = new Set<Listener>()
   on(l: Listener): () => void { this.listeners.add(l); return () => this.listeners.delete(l) }
-  emit(e: ShelfEvent) {
+  emit(e: DriveEvent) {
     for (const l of this.listeners) {
       try { l(e) } catch (err) { console.error(`[notify] listener failed for ${e.kind}:`, err) }
     }

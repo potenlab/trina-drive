@@ -10,7 +10,7 @@
 // It starts only when the public gate passes: an HTTPS public URL, an admin who can sign in, a second factor for every
 // admin (mfa.ts requireAdmin2FA) and the v0.2 security gate confirmed (plan 10: "통과 전에는 공개 주소를 열지 않는다").
 import net from 'node:net'
-import { LIMITS, NAME, VERSION } from '../config'
+import { CLI, LIMITS, NAME, PRODUCT, VERSION } from '../config'
 import type { DB } from '../db'
 import { readPublicSettings, type PublicSettings } from '../oauth/settings'
 import { setupDone } from './auth'
@@ -75,7 +75,7 @@ export function publicGate(db: DB, s: PublicSettings = readPublicSettings(db)): 
     { id: 'enabled', ok: s.enabled, required: true, text: 'public listener enabled (public enable)' },
     { id: 'https_url', ok: !urlProblem, required: true, text: urlProblem ? `public URL: ${urlProblem}` : `public URL ${s.url} (OAuth issuer; MCP resource ${s.url}/mcp)` },
     { id: 'admin', ok: setupDone(db), required: true, text: 'an admin can sign in on the web' },
-    { id: 'admin_2fa', ok: !twofa, required: true, text: twofa ? `admin second factor: ${twofa} (web: Settings → Second factor; shelf mfa status)` : 'every admin has a second factor (passkey or authenticator app)' },
+    { id: 'admin_2fa', ok: !twofa, required: true, text: twofa ? `admin second factor: ${twofa} (web: Settings → Second factor; ${CLI} mfa status)` : 'every admin has a second factor (passkey or authenticator app)' },
     { id: 'security_gate', ok: s.gateConfirmedAt != null, required: true,
       text: s.gateConfirmedAt != null ? `v0.2 security gate confirmed ${new Date(s.gateConfirmedAt).toISOString().slice(0, 10)}${s.gateVersion ? ` for ${s.gateVersion}` : ''}` : 'v0.2 security gate passed (plan 10; public enable --confirm-security-gate)' },
     { id: 'loopback_listener', ok: isLoopbackHost(s.host), required: false, text: `public listener on ${s.host}:${s.port} (loopback recommended: the tunnel connector runs on this machine)` },
@@ -140,4 +140,4 @@ export function startPublicListener(w: WebCtx, s: PublicSettings = readPublicSet
 }
 
 export const publicBanner = (s: PublicSettings, port: number) =>
-  `${NAME} ${VERSION} public listener: http://${s.host}:${port}/ for the tunnel → ${s.url}  (MCP ${s.url}/mcp; only /mcp, /oauth, /.well-known, sign-in and consent)`
+  `${PRODUCT} ${VERSION} public listener: http://${s.host}:${port}/ for the tunnel → ${s.url}  (MCP ${s.url}/mcp; only /mcp, /oauth, /.well-known, sign-in and consent)`

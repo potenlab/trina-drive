@@ -123,15 +123,15 @@ describe('another token\'s ls keeps p99 < 200 ms during the attack', () => {
     expect(p99).toBeLessThan(200)
   }, 30_000)
 
-  // These block the server when commands run in-process (SHELF_SHELL=inprocess); the isolated executor keeps them off it.
+  // These block the server when commands run in-process (TDRIVE_SHELL=inprocess); the isolated executor keeps them off it.
   for (const [c, why] of HEAVY) {
-    test.skipIf(process.env.SHELF_SHELL === 'inprocess')(`${c}  [isolated executor: in-process ${why}]`, async () => {
+    test.skipIf(process.env.TDRIVE_SHELL === 'inprocess')(`${c}  [isolated executor: in-process ${why}]`, async () => {
       const { p99 } = await underAttack(c)
       expect(p99).toBeLessThan(200)
     }, DEADLINE + 10_000)
   }
 
-  test.skipIf(process.env.SHELF_SHELL === 'inprocess')('five tokens of one person running heavy commands at once  [isolated executor: per-token/person limits]', async () => {
+  test.skipIf(process.env.TDRIVE_SHELL === 'inprocess')('five tokens of one person running heavy commands at once  [isolated executor: per-token/person limits]', async () => {
     const extra = ['a1', 'a2', 'a3', 'a4', 'a5']
     for (const n of extra) e.addToken(n, 'kim', { name: `kim-${n}` })
     const { r } = await underAttack('5 x sort of an 8 MB draft', async () => {
@@ -202,9 +202,9 @@ describe('memory cap per command: what one call may read into the server (scaled
 
 // Plan 5.1: per-token / per-person / global limits on commands running at once, through the MCP tool path (callTool ->
 // runShell -> the process-wide executor). The executor is restarted with small limits from the environment
-// (SHELF_WORKERS_*). The in-process shell (development only) has no executor and no such limits.
-describe.skipIf(process.env.SHELF_SHELL === 'inprocess')('concurrent command limits (plan 5.1) through the bash tool', () => {
-  const LIM = { SHELF_WORKERS_GLOBAL: '4', SHELF_WORKERS_PER_TOKEN: '2', SHELF_WORKERS_PER_PERSON: '3', SHELF_WORKERS_QUEUE: '4' }
+// (TDRIVE_WORKERS_*). The in-process shell (development only) has no executor and no such limits.
+describe.skipIf(process.env.TDRIVE_SHELL === 'inprocess')('concurrent command limits (plan 5.1) through the bash tool', () => {
+  const LIM = { TDRIVE_WORKERS_GLOBAL: '4', TDRIVE_WORKERS_PER_TOKEN: '2', TDRIVE_WORKERS_PER_PERSON: '3', TDRIVE_WORKERS_QUEUE: '4' }
   const saved: Record<string, string | undefined> = {}
   beforeAll(async () => {
     for (const [k, v] of Object.entries(LIM)) { saved[k] = process.env[k]; process.env[k] = v }

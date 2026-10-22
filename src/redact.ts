@@ -4,7 +4,7 @@
 //
 // Our own tokens keep their stored hint (prefix + 4 characters, the same as `tokens.hint`) so an admin can tell which
 // token leaked; everything else is replaced by a marker naming the kind of secret.
-import { NAME, TOKEN_PREFIX } from './config'
+import { SECRET_TAG, TOKEN_PREFIX } from './config'
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const R = (kind: string) => `[REDACTED:${kind}]`
@@ -16,7 +16,7 @@ const RULES: [RegExp, string | ((...m: string[]) => string)][] = [
   // our personal access tokens: keep the hint (as stored in tokens.hint)
   [new RegExp(`${esc(TOKEN_PREFIX)}([A-Za-z0-9_-]{4})[A-Za-z0-9_-]+`, 'g'), (_m, hint) => `${TOKEN_PREFIX}${hint}…${R('token')}`],
   // our other secrets (web setup token, …): <name>_<kind>_<random>
-  [new RegExp(`\\b${esc(NAME)}_(setup|[a-z]+)_[A-Za-z0-9_-]{12,}`, 'g'), (_m, kind) => `${NAME}_${kind}_${R('token')}`],
+  [new RegExp(`\\b${esc(SECRET_TAG)}_(setup|[a-z]+)_[A-Za-z0-9_-]{12,}`, 'g'), (_m, kind) => `${SECRET_TAG}_${kind}_${R('token')}`],
   // Authorization headers and bare Bearer/Basic credentials
   [/\b(authorization\s*[:=]\s*["']?)(?:(bearer|basic|token|digest)\s+)?[^\s"',;]{6,}/gi, (_m, head, scheme) => `${head}${scheme ? scheme + ' ' : ''}${R('credential')}`],
   [/\b(bearer|basic)(\s+)(?!\[REDACTED)[A-Za-z0-9._~+/=-]{12,}/gi, (_m, scheme, sp) => `${scheme}${sp}${R('credential')}`],

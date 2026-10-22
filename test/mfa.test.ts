@@ -83,7 +83,7 @@ describe('recovery codes', () => {
 describe('passkeys', () => {
   const cfg = passkeyConfig('https://files.example.com')!
   test('RP ID comes from the public https address; LAN http and IP addresses have none', () => {
-    expect(cfg).toEqual({ rpId: 'files.example.com', origin: 'https://files.example.com', rpName: 'shelf' })
+    expect(cfg).toEqual({ rpId: 'files.example.com', origin: 'https://files.example.com', rpName: 'Trina Drive' })
     expect(passkeyConfig(undefined)).toBeNull()
     expect(passkeyConfig('http://files.lan:8787')).toBeNull()
     expect(passkeyConfig('https://192.168.0.10')).toBeNull()

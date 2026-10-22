@@ -5,13 +5,13 @@
 //   bun src/backup/cli.ts [--data DIR] [backup] <keygen|target|run|list|verify|restore> …
 import fs from 'node:fs'
 import path from 'node:path'
-import { defaultDataDir, ENV_PREFIX, NAME } from '../config'
+import { CLI, defaultDataDir, ENV_PREFIX } from '../config'
 import { detectLayout } from '../layout'
 import { BackupError, generateKey, fingerprint, parsePublic, parseSecret, type SecretKey } from './crypto'
 import { DEFAULT_KEEP, NOT_BACKED_UP, readConfig, readRecipient, restoreArchive, runConfigured, verifyArchive, writeConfig, type CheckReport } from './index'
 import { parseTarget, isArchiveName } from './target'
 
-export const BACKUP_HELP = `usage: ${NAME} [--data DIR] backup <command>
+export const BACKUP_HELP = `usage: ${CLI} [--data DIR] backup <command>
 
   keygen [--set] [--recipient-out FILE]
         make a new backup key pair. The SECRET key is printed once on stdout and never stored; keep it offline
@@ -118,7 +118,7 @@ export async function backupCommand(argv: string[], o: { dataDir: string; io?: I
           const r = readRecipient(l)
           io.out(`target:  ${c.target ?? '(none: scheduled backups are skipped)'}`)
           io.out(`keep:    newest ${c.keep}`)
-          io.out(`key:     ${r ? fingerprint(r) : `(none: run \`${NAME} backup keygen --set\`)`}`)
+          io.out(`key:     ${r ? fingerprint(r) : `(none: run \`${CLI} backup keygen --set\`)`}`)
           return 0
         }
         if (sub !== 'set') throw new BackupError('config', 'usage: backup target set <DIR|s3://…> | backup target show')
@@ -195,7 +195,7 @@ export async function backupCommand(argv: string[], o: { dataDir: string; io?: I
         printReport(r, io)
         io.out(`restored into ${r.dataDir} (${r.layout} layout)`)
         io.out(`The registered folders' original files are not in a backup; check that the NAS shares are reachable at the same paths.`)
-        io.out(`The backup key is not restored: put the public key back with \`${NAME} backup keygen --set\` (new key) or copy config/backup-recipient.`)
+        io.out(`The backup key is not restored: put the public key back with \`${CLI} backup keygen --set\` (new key) or copy config/backup-recipient.`)
         return 0
       }
 

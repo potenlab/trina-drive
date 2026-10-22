@@ -141,7 +141,7 @@ describe('folder sizes and counts do not move when hidden things appear', () => 
 })
 
 describe('timing: hidden vs nonexistent (reported; fails only above 3x)', () => {
-  const N = Number(process.env.SHELF_TIMING_RUNS ?? 200)
+  const N = Number(process.env.TDRIVE_TIMING_RUNS ?? 200)
   const pct = (xs: number[], q: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(q * xs.length))]!
   const cases: [string, string, Role, string][] = [
     ['cat /인사/c.csv', 'cat /인사x/c.csv', 'kim', 'hidden mount'],

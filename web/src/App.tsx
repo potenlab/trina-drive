@@ -1,6 +1,7 @@
 // Shell: session state, hash routes (#/folders/3 …; invite and reset secrets live in the #fragment, so they never
 // reach a server log or a Referer), header navigation.
 import { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react'
+import { PRODUCT } from '../../src/brand'
 import { api, get, setCsrf, whenSignedOut, type Me } from './api'
 import { LOCALES, setLocale, t, useLocale } from './i18n'
 import { Approvals } from './pages/Approvals'
@@ -41,7 +42,7 @@ export function App() {
   const refresh = () => get<{ me: Me; csrf: string }>('/session').then((s) => { setCsrf(s.csrf); setMe(s.me) }, () => setMe(null))
   useEffect(() => {
     whenSignedOut(() => { setMe(null) })
-    Promise.all([get<{ setup_pending: boolean; name: string; public_listener?: boolean }>('/state').then((s) => { setSetupPending(s.setup_pending); setPublicListener(!!s.public_listener); document.title = s.name }, () => {}), refresh()])
+    Promise.all([get<{ setup_pending: boolean; public_listener?: boolean }>('/state').then((s) => { setSetupPending(s.setup_pending); setPublicListener(!!s.public_listener) }, () => {}), refresh()])
       .finally(() => setReady(true))
   }, [])
 
@@ -73,7 +74,7 @@ export function App() {
 function Bare({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
   return (
     <main className={`bare ${wide ? 'wide' : ''}`}>
-      <div className="brand-line"><span className="brand">{document.title || 'shelf'}</span><LangSwitch /></div>
+      <div className="brand-line"><span className="brand">{PRODUCT}</span><LangSwitch /></div>
       {children}
     </main>
   )
@@ -113,7 +114,7 @@ function Shell({ route }: { route: string }) {
   return (
     <div className="shell">
       <header className="top">
-        <a className="brand" href={me!.admin ? '#/folders' : '#/files'}>{document.title || 'shelf'}</a>
+        <a className="brand" href={me!.admin ? '#/folders' : '#/files'}>{PRODUCT}</a>
         <nav className="nav">
           <a href="#/files" className={files ? 'active' : ''}>{ft('nav_files')}</a>
           <a href="#/approvals" className={approval ? 'active' : ''}>{at('nav_approvals')}{(me!.approvals ?? 0) > 0 && <span className="count">{me!.approvals}</span>}</a>

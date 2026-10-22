@@ -8,7 +8,7 @@ import { detectLayout } from './layout'
 import { inheritedSources } from './inplace/closures'
 import { Mirror } from './mirror'
 import { Access, type FileEntry, type Node } from './policy'
-import type { ShelfEvent } from './notify/events'
+import type { DriveEvent } from './notify/events'
 import { ensureFolder, identityKey, type TokenRow } from './store'
 
 /** A free draft path next to `rel` for a hidden draft moved out of the way: "a/b.md" -> "a/b (earlier 12).md". */
@@ -29,7 +29,7 @@ export interface Ctx {
   /** after a call is committed (notify: bulk-read alarm, original-write attempts); errors are logged, never fail the call */
   onCommit?: (s: Session, tool: string, outcome: string) => void
   /** the notify bus (src/notify attaches it): events whose channel payloads follow R11 */
-  emit?: (e: ShelfEvent) => void
+  emit?: (e: DriveEvent) => void
   /** the server's public web address, for links handed to agents (approval pages) */
   publicUrl?: string
 }

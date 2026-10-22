@@ -98,14 +98,14 @@ export async function forge(name: string): Promise<string> {
 }
 
 /** Reads another process's argv + initial environment (sysctl KERN_PROCARGS2); `name` = pid. Reports whether
- *  the variable SHELF_TEST_CANARY was visible. */
+ *  the variable TDRIVE_TEST_CANARY was visible. */
 export function procargs(name: string): string {
   const lib = dlopen('/usr/lib/libSystem.B.dylib', { sysctl: { args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u64], returns: FFIType.i32 } })
   const mib = new Int32Array([1, 49, Number(name)]) // CTL_KERN, KERN_PROCARGS2, pid
   const buf = new Uint8Array(1 << 18)
   const len = new BigUint64Array([BigInt(buf.length)])
   if (lib.symbols.sysctl(ptr(mib), 3, ptr(buf), ptr(len), null, 0) !== 0) return 'PROCARGS-BLOCKED'
-  return `PROCARGS-OK canary=${new TextDecoder().decode(buf.subarray(0, Number(len[0]))).includes('SHELF_TEST_CANARY=')}`
+  return `PROCARGS-OK canary=${new TextDecoder().decode(buf.subarray(0, Number(len[0]))).includes('TDRIVE_TEST_CANARY=')}`
 }
 
 /** Sends signal 0 to `name` (a pid). */
@@ -121,7 +121,7 @@ export async function readFlood(name: string): Promise<string> {
 }
 
 /** Linux: every process this worker can see in /proc, their command lines, and whether any readable environment or
- *  command line holds SHELF_TEST_CANARY (the test runner's environment). */
+ *  command line holds TDRIVE_TEST_CANARY (the test runner's environment). */
 export function procScan(): string {
   const pids = fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).map(Number)
   const cmdlines: string[] = [], environs: string[] = []
@@ -131,7 +131,7 @@ export function procScan(): string {
       try {
         const t = fs.readFileSync(`/proc/${p}/${file}`, 'utf8')
         out.push(`${p}:${t.replace(/\0/g, ' ').trim()}`)
-        if (t.includes('SHELF_TEST_CANARY')) canary = true
+        if (t.includes('TDRIVE_TEST_CANARY')) canary = true
       } catch (e) { out.push(`${p}:${(e as NodeJS.ErrnoException).code}`) }
     }
   }

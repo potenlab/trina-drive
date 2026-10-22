@@ -1,0 +1,4 @@
+#!/bin/sh
+# The CLI and server in the container image (Dockerfile): `tdrive serve`, `tdrive init`, `tdrive backup run`, ...
+# The data directory is $TDRIVE_HOME (/data). Workers run the same sources under bwrap (src/worker/sandbox.ts).
+exec /usr/local/bin/bun /app/src/cli.ts "$@"

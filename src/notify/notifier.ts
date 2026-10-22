@@ -4,7 +4,7 @@ import path from 'node:path'
 import type { DB } from '../db'
 import { FileOutbox, type Mailer, postSlack, SmtpMailer } from './channels'
 import type { NotifyConfig } from './config'
-import type { EventKind, ShelfEvent, SignedAnchor } from './events'
+import type { EventKind, DriveEvent, SignedAnchor } from './events'
 import { anchorBlock, type Lang, type Level, linkFor, render } from './messages'
 import { resolveRecipients } from './recipients'
 import { ensureNotifySchema } from './schema'
@@ -59,7 +59,7 @@ export class Notifier {
 
   // ---------- events ----------
   /** Record the event, fill inboxes, queue deliveries. Returns the event id. */
-  handle(e: ShelfEvent): number {
+  handle(e: DriveEvent): number {
     const db = this.db
     const at = e.at ?? this.now()
     const count = Math.max(1, e.count ?? 1)

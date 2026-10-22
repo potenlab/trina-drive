@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.7
 # The server for a Linux box (plan 5.2 "리눅스 Docker"; not for NAS-internal Docker, see docs/DOCKER.md).
 #
-#   docker build -t shelf:dev .                                   # this machine's platform
-#   docker buildx build --platform linux/amd64,linux/arm64 .      # both (amd64 builds under emulation on arm64)
-#   docker build --target test -t shelf:test .                    # + dev dependencies and the test suite
+#   docker build -t trina-drive:dev .                              # this machine's platform
+#   docker buildx build --platform linux/amd64,linux/arm64 .       # both (amd64 builds under emulation on arm64)
+#   docker build --target test -t trina-drive:test .               # + dev dependencies and the test suite
 #
 # Runtime: Debian 13 slim, Bun (the server runs its TypeScript sources: isolated workers start `bun
 # src/worker/entry.ts` under bwrap, so there is no single compiled binary), bubblewrap (worker sandbox), ripgrep
@@ -48,27 +48,27 @@ ARG VERSION=0.0.1
 ARG REVISION=unknown
 ARG CREATED=unknown
 # Debian packages come from the base image's release with the security updates current at build time; the exact
-# versions are listed in /usr/share/shelf/packages.txt and in the SBOM (docs/DOCKER.md, "Supply chain").
+# versions are listed in /usr/share/trina-drive/packages.txt and in the SBOM (docs/DOCKER.md, "Supply chain").
 RUN apt-get update \
  && apt-get install -y --no-install-recommends bubblewrap poppler-utils poppler-data tini tzdata ca-certificates \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /var/log/apt /var/log/dpkg.log \
- && mkdir -p /usr/share/shelf \
- && dpkg-query -W -f '${Package} ${Version}\n' > /usr/share/shelf/packages.txt
+ && mkdir -p /usr/share/trina-drive \
+ && dpkg-query -W -f '${Package} ${Version}\n' > /usr/share/trina-drive/packages.txt
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=build /out/tools/bin/rg /usr/local/bin/rg
-COPY --from=build /out/tools/licenses /usr/share/shelf/licenses
-COPY --from=build /out/tools.json /usr/share/shelf/tools.json
+COPY --from=build /out/tools/licenses /usr/share/trina-drive/licenses
+COPY --from=build /out/tools.json /usr/share/trina-drive/tools.json
 COPY --from=build /app /app
-COPY --chmod=0755 docker/shelf /usr/local/bin/shelf
+COPY --chmod=0755 docker/tdrive /usr/local/bin/tdrive
 # the server's account; /data is its data directory (the installed layout, src/layout.ts), mounted as a volume
-RUN groupadd --system --gid 10001 shelf \
- && useradd --system --uid 10001 --gid 10001 --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin shelf \
+RUN groupadd --system --gid 10001 tdrive \
+ && useradd --system --uid 10001 --gid 10001 --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin tdrive \
  && mkdir -p /data && chown 10001:10001 /data && chmod 0700 /data
-ENV SHELF_HOME=/data \
-    SHELF_LAYOUT=installed \
-    SHELF_RG=/usr/local/bin/rg \
-    SHELF_PDFTOTEXT=/usr/bin/pdftotext \
-    SHELF_CONTAINER=docker \
+ENV TDRIVE_HOME=/data \
+    TDRIVE_LAYOUT=installed \
+    TDRIVE_RG=/usr/local/bin/rg \
+    TDRIVE_PDFTOTEXT=/usr/bin/pdftotext \
+    TDRIVE_CONTAINER=docker \
     HOME=/tmp \
     LANG=C.UTF-8 \
     TZ=UTC \
@@ -79,15 +79,17 @@ USER 10001:10001
 VOLUME ["/data"]
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD ["/usr/local/bin/bun", "-e", "fetch(process.env.SHELF_HEALTH_URL || 'http://127.0.0.1:8787/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/shelf"]
+  CMD ["/usr/local/bin/bun", "-e", "fetch(process.env.TDRIVE_HEALTH_URL || 'http://127.0.0.1:8787/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/tdrive"]
 CMD ["serve", "--host", "0.0.0.0", "--port", "8787"]
-LABEL org.opencontainers.image.title="shelf" \
-      org.opencontainers.image.description="Permission-aware read shell and draft box for AI agents over existing team folders (codename shelf)" \
+LABEL org.opencontainers.image.title="Trina Drive" \
+      org.opencontainers.image.description="Self-hosted, permission-aware team file server for AI agents (MCP): agents see only what each person may see, never touch originals, every read is logged" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.created="${CREATED}" \
-      org.opencontainers.image.source="https://github.com/potenlab/shelf" \
+      org.opencontainers.image.source="https://github.com/potenlab/trina-drive" \
+      org.opencontainers.image.url="https://drive.trina.app" \
+      org.opencontainers.image.vendor="Trina Inc." \
       org.opencontainers.image.licenses="NOASSERTION" \
       org.opencontainers.image.base.name="docker.io/library/debian:trixie-slim"
 
@@ -103,7 +105,7 @@ COPY scripts /app/scripts
 COPY web /app/web
 COPY --from=build /src/web/dist /app/web/dist
 # the tests choose their own data directories and layouts
-ENV SHELF_HOME= SHELF_LAYOUT=
+ENV TDRIVE_HOME= TDRIVE_LAYOUT=
 USER 10001:10001
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/bin/bun", "test"]

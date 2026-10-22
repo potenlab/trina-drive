@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { verifyAudit } from '../audit'
 import { NAME } from '../config'
+import { ANCHOR_LABEL } from './messages'
 import type { DB } from '../db'
 import type { SignedAnchor } from './events'
 import { ensureNotifySchema } from './schema'
@@ -68,7 +69,7 @@ export function writeAnchorFile(db: DB, dir: string, a: SignedAnchor): string {
 /** An anchor from a JSON file, or from any text holding the anchor block (an email, also base64 .eml bodies). */
 export function parseAnchor(text: string): SignedAnchor {
   try { const j = JSON.parse(text) as SignedAnchor; if (j?.anchor && j.signature) return j } catch {}
-  const block = (t: string) => new RegExp(`-----BEGIN ${NAME.toUpperCase()} AUDIT ANCHOR-----\\s*([\\s\\S]*?)\\s*-----END`).exec(t)?.[1]
+  const block = (t: string) => new RegExp(`-----BEGIN ${ANCHOR_LABEL}-----\\s*([\\s\\S]*?)\\s*-----END`).exec(t)?.[1]
   let b = block(text)
   if (!b && /Content-Transfer-Encoding:\s*base64/i.test(text)) {
     const body = text.split(/\r?\n\r?\n/).slice(1).join('\n').replace(/\s+/g, '')

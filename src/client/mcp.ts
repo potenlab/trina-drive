@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { ENV_PREFIX, NAME, TOKEN_PREFIX } from '../config'
+import { ENV_PREFIX, NAME, PRODUCT, SECRET_TAG, TOKEN_PREFIX } from '../config'
 
 export const CLIENTS = ['claude', 'codex', 'cursor'] as const
 export type Client = (typeof CLIENTS)[number]
@@ -187,7 +187,7 @@ class Api {
     let res: Response
     try { res = await this.f(this.base + '/api' + p, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error' }) }
     catch (e) { throw new UsageError(`cannot reach ${this.base} (${(e as Error).message})`) }
-    const m = new RegExp(`(${NAME}_session=[^;]*)`).exec(res.headers.get('set-cookie') ?? '')
+    const m = new RegExp(`(${SECRET_TAG}_session=[^;]*)`).exec(res.headers.get('set-cookie') ?? '')
     if (m) this.cookie = m[1]!
     const data = await res.json().catch(() => ({})) as T & { csrf?: string; message?: string }
     if (data && typeof data.csrf === 'string') this.csrf = data.csrf
@@ -234,7 +234,7 @@ export function setTomlKey(text: string, name: string, key: string, value: strin
 
 /** ~/.config/<name>/env.sh: one export line per variable (replaced in place). */
 function upsertEnvLine(file: string, varName: string, line: string) {
-  const cur = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : `# ${NAME}: tokens for AI clients that read them from the environment (Codex, Cursor).\n# Source this from your shell profile: . "${file}"\n`
+  const cur = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : `# ${PRODUCT}: tokens for AI clients that read them from the environment (Codex, Cursor).\n# Source this from your shell profile: . "${file}"\n`
   const kept = cur.split('\n').filter((l) => !l.startsWith(`export ${varName}=`))
   while (kept.length && kept.at(-1) === '') kept.pop()
   writeFileAtomic(file, [...kept, line].join('\n') + '\n')
@@ -347,7 +347,7 @@ async function add(o: Opts, io: McpIO): Promise<number> {
     say(`Keychain: service ${KEYCHAIN_SERVICE}, account ${account}`)
     if (!o.dryRun) {
       // through `security -i` on stdin: the token never appears in a process argument list
-      const r = spawnSync(security!, ['-i'], { input: `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "${account}" -l "${NAME} MCP token (${o.client})" -w "${token}"\n`, env: env as NodeJS.ProcessEnv, encoding: 'utf8' })
+      const r = spawnSync(security!, ['-i'], { input: `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "${account}" -l "${PRODUCT} MCP token (${o.client})" -w "${token}"\n`, env: env as NodeJS.ProcessEnv, encoding: 'utf8' })
       if (r.status !== 0) throw new UsageError(`could not store the token in the Keychain: ${(r.stderr || r.stdout || '').trim()}`)
     }
   } else if (store === 'file') {

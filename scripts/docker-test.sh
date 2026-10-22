@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Builds the image, runs it the way docker-compose.yml does with demo data, checks it end to end, then runs the whole
 # test suite inside the test image under the same security settings. Needs a Linux Docker host (or colima / Docker
-# Desktop) and, on an AppArmor host, the profile docker/apparmor-shelf-bwrap loaded (the script says how if not).
+# Desktop) and, on an AppArmor host, the profile docker/apparmor-trina-drive-bwrap loaded (the script says how if not).
 #
 #   scripts/docker-test.sh                 # everything
 #   scripts/docker-test.sh --smoke-only    # build + smoke, no test suite
 #   scripts/docker-test.sh --tests-only    # build the test image + test suite
-#   scripts/docker-test.sh --no-build      # use the images already built (shelf:dev, shelf:test)
-#   IMAGE=shelf:dev TEST_IMAGE=shelf:test APPARMOR=shelf-bwrap scripts/docker-test.sh
+#   scripts/docker-test.sh --no-build      # use the images already built (trina-drive:dev, trina-drive:test)
+#   IMAGE=trina-drive:dev TEST_IMAGE=trina-drive:test APPARMOR=trina-drive-bwrap scripts/docker-test.sh
 #
 # Smoke: /health, the web app (200), MCP initialize + tools/list, the bash tool as kim (`ls /`: no 경영; `ls /경영` and
 # grep for 매출 find nothing of 경영), as boss (경영 visible, a PDF read through pdftotext in a worker), the start-up line
@@ -163,7 +163,7 @@ if [ $TESTS = 1 ]; then
   s=$SECONDS
   set +e
   docker run --rm "${SEC[@]}" --tmpfs /tmp:size=2g,mode=1777,nosuid,nodev,exec \
-    -e SHELF_EXPECT_ISOLATION=bwrap -e SHELF_TEST_CANARY=canary-in-the-test-runner-environment -e FUZZ_TEST_SECONDS="${FUZZ_TEST_SECONDS:-16}" \
+    -e TDRIVE_EXPECT_ISOLATION=bwrap -e TDRIVE_TEST_CANARY=canary-in-the-test-runner-environment -e FUZZ_TEST_SECONDS="${FUZZ_TEST_SECONDS:-16}" \
     "$TEST_IMAGE" bun test --timeout 30000 > "$TMP/test.log" 2>&1
   code=$?
   set -e

@@ -1,18 +1,18 @@
-# AppArmor profile for the shelf container: Docker's own docker-default profile (moby/profiles apparmor v0.1.0, as
+# AppArmor profile for the Trina Drive container: Docker's own docker-default profile (moby/profiles apparmor v0.1.0, as
 # shipped with Docker 29) plus the three things bubblewrap needs to build a worker sandbox inside the container:
 #   userns      create a user namespace (Ubuntu 23.10+ restricts this for unconfined and unlisted programs)
 #   mount       mount inside that namespace (the kernel still refuses mounts in the container's own namespace:
 #   pivot_root  the container has no capabilities there)
 # Everything else is unchanged from docker-default. Load it once on the Docker host (it is not persistent unless you
 # also copy it to /etc/apparmor.d/):
-#   sudo apparmor_parser -r docker/apparmor-shelf-bwrap
-# and use it with:  security_opt: [ "apparmor=shelf-bwrap" ]   (docs/DOCKER.md, "Security settings")
+#   sudo apparmor_parser -r docker/apparmor-trina-drive-bwrap
+# and use it with:  security_opt: [ "apparmor=trina-drive-bwrap" ]   (docs/DOCKER.md, "Security settings")
 # AppArmor 3 hosts (Debian 12, Ubuntu 22.04): delete the `abi` line and the `userns,` rule; those kernels do not
 # restrict user namespaces through AppArmor.
 abi <abi/4.0>,
 include <tunables/global>
 
-profile shelf-bwrap flags=(attach_disconnected,mediate_deleted) {
+profile trina-drive-bwrap flags=(attach_disconnected,mediate_deleted) {
   include <abstractions/base>
 
   network,
@@ -33,7 +33,7 @@ profile shelf-bwrap flags=(attach_disconnected,mediate_deleted) {
   # crun may send signals to container processes (for "docker stop" when used with crun OCI runtime).
   signal (receive) peer=crun,
   # Container processes may send signals amongst themselves.
-  signal (send,receive) peer=shelf-bwrap,
+  signal (send,receive) peer=trina-drive-bwrap,
 
   deny @{PROC}/* w,   # deny write for all files directly in /proc (not in a subdir)
   # deny write to files not in /proc/<number>/** or /proc/sys/**
@@ -53,5 +53,5 @@ profile shelf-bwrap flags=(attach_disconnected,mediate_deleted) {
   deny /sys/kernel/security/** rwklx,
 
   # suppress ptrace denials when using 'docker ps' or using 'ps' inside a container
-  ptrace (trace,read,tracedby,readby) peer=shelf-bwrap,
+  ptrace (trace,read,tracedby,readby) peer=trina-drive-bwrap,
 }

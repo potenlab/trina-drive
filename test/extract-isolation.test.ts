@@ -62,7 +62,7 @@ async function victimP99(attack: () => Promise<unknown>) {
 }
 
 test('extraction is isolated by default', () => {
-  expect(process.env.SHELF_EXTRACT === 'inprocess' ? 'inprocess' : 'isolated').toBe(extractMode())
+  expect(process.env.TDRIVE_EXTRACT === 'inprocess' ? 'inprocess' : 'isolated').toBe(extractMode())
 })
 
 describe.skipIf(extractMode() === 'inprocess')('malicious documents are killed in the worker, other tokens unaffected', () => {

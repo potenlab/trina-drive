@@ -1,6 +1,9 @@
 // Channel text. R11: a payload is built from the event kind, a count and a link, nothing else — the render functions
 // cannot see names because they are never given them.
-import { NAME } from '../config'
+import { PRODUCT } from '../config'
+
+/** The armor around a signed audit anchor in mail: -----BEGIN TRINA DRIVE AUDIT ANCHOR----- */
+export const ANCHOR_LABEL = `${PRODUCT.toUpperCase()} AUDIT ANCHOR`
 import type { EventKind, SignedAnchor } from './events'
 
 export type Lang = 'en' | 'ko'
@@ -28,7 +31,7 @@ export interface Payload { kind: EventKind; count: number; link: string; subject
 
 export function render(kind: EventKind, count: number, link: string, lang: Lang, digest = false): Payload {
   const line = (digest ? DIGEST[lang] : '') + LINES[kind][lang](count)
-  return { kind, count, link, subject: `[${NAME}] ${line}`, text: `[${NAME}] ${line}\n${FOOT[lang]} ${link}` }
+  return { kind, count, link, subject: `[${PRODUCT}] ${line}`, text: `[${PRODUCT}] ${line}\n${FOOT[lang]} ${link}` }
 }
 
 /** Links carry only the kind (an enum) — never ids that could be guessed into names, never names. */
@@ -41,5 +44,5 @@ export function linkFor(baseUrl: string, kind: EventKind, level: Level): string 
 
 /** The audit anchor block appended to anchor emails: hash, count, time, key fingerprint, signature (no names). */
 export function anchorBlock(a: SignedAnchor): string {
-  return `\n\n-----BEGIN ${NAME.toUpperCase()} AUDIT ANCHOR-----\n${JSON.stringify(a)}\n-----END ${NAME.toUpperCase()} AUDIT ANCHOR-----\n`
+  return `\n\n-----BEGIN ${ANCHOR_LABEL}-----\n${JSON.stringify(a)}\n-----END ${ANCHOR_LABEL}-----\n`
 }

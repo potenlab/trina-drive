@@ -26,7 +26,7 @@ let e: WebEnv
 let home: string, bin: string, out: string[], err: string[]
 beforeEach(async () => {
   e = await webSetup()
-  home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-home-')))
+  home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tdrive-home-')))
   bin = path.join(home, '..', path.basename(home) + '-bin')
   fs.mkdirSync(bin)
   for (const [n, body] of Object.entries(FAKES)) fs.writeFileSync(path.join(bin, n), body, { mode: 0o755 })
@@ -91,7 +91,7 @@ describe('Claude Code', () => {
     // the client CLI ran in HOME (never a project directory), user scope, and never saw the token
     const log = logArgs('claude.log')
     expect(log[0]).toBe(`cwd=${home}`)
-    expect(log.slice(1, 6)).toEqual(['arg=mcp', 'arg=add-json', 'arg=--scope', 'arg=user', 'arg=shelf'])
+    expect(log.slice(1, 6)).toEqual(['arg=mcp', 'arg=add-json', 'arg=--scope', 'arg=user', 'arg=trina-drive'])
     const entry = JSON.parse(log[6]!.slice(4))
     expect(entry).toMatchObject({ type: 'http', url: `${SERVER}/mcp` })
     expect(entry.headers).toBeUndefined()
@@ -115,22 +115,22 @@ describe('Claude Code', () => {
     expect(j.mcpServers.other).toEqual({ type: 'stdio', command: 'x' })
     expect(j.projects['/repo'].mcpServers).toEqual({})
     expect(fs.statSync(cfg).mode & 0o777).toBe(0o600)
-    const file = path.join(home, '.config', 'shelf', 'tokens', 'claude-shelf')
+    const file = path.join(home, '.config', 'trina-drive', 'tokens', 'claude-trina-drive')
     expect(fs.statSync(file).mode & 0o777).toBe(0o600)
     const token = fs.readFileSync(file, 'utf8').trim()
-    expect(JSON.parse(shell(j.mcpServers.shelf.headersHelper))).toEqual({ Authorization: `Bearer ${token}` })
-    expect(clearTextFiles(token)).toEqual(['.config/shelf/tokens/claude-shelf'])
+    expect(JSON.parse(shell(j.mcpServers['trina-drive'].headersHelper))).toEqual({ Authorization: `Bearer ${token}` })
+    expect(clearTextFiles(token)).toEqual(['.config/trina-drive/tokens/claude-trina-drive'])
     expect(fs.existsSync(path.join(home, '.mcp.json'))).toBe(false)
   })
 
   test('an entry with the same name is not replaced without --force; with --force the old one is removed first', async () => {
-    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { shelf: { type: 'http', url: 'http://elsewhere/mcp' } } }))
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'trina-drive': { type: 'http', url: 'http://elsewhere/mcp' } } }))
     expect(await add(['claude', '--login', 'kim'])).toBe(1)
     expect(err.join('\n')).toContain('--force')
     expect(tokensOf('kim').filter((t) => t.name.startsWith('claude@'))).toHaveLength(0) // refused before a token was made
     expect(await add(['claude', '--login', 'kim', '--force'])).toBe(0)
     const log = logArgs('claude.log')
-    expect(log.slice(1, 6)).toEqual(['arg=mcp', 'arg=remove', 'arg=--scope', 'arg=user', 'arg=shelf'])
+    expect(log.slice(1, 6)).toEqual(['arg=mcp', 'arg=remove', 'arg=--scope', 'arg=user', 'arg=trina-drive'])
   })
 })
 
@@ -138,12 +138,12 @@ describe('Codex', () => {
   test('`codex mcp add --url --bearer-token-env-var`; the env file reads the Keychain; approvals stay with the person by default', async () => {
     expect(await add(['codex', '--login', 'kim'])).toBe(0)
     const log = logArgs('codex.log')
-    expect(log).toEqual([`cwd=${home}`, 'arg=mcp', 'arg=add', 'arg=shelf', 'arg=--url', `arg=${SERVER}/mcp`, 'arg=--bearer-token-env-var', 'arg=SHELF_TOKEN_CODEX'])
+    expect(log).toEqual([`cwd=${home}`, 'arg=mcp', 'arg=add', 'arg=trina-drive', 'arg=--url', `arg=${SERVER}/mcp`, 'arg=--bearer-token-env-var', 'arg=TDRIVE_TOKEN_CODEX'])
     const toml = Bun.TOML.parse(fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8')) as any
-    expect(toml.mcp_servers.shelf.default_tools_approval_mode).toBeUndefined()
-    const envFile = path.join(home, '.config', 'shelf', 'env.sh')
+    expect(toml.mcp_servers['trina-drive'].default_tools_approval_mode).toBeUndefined()
+    const envFile = path.join(home, '.config', 'trina-drive', 'env.sh')
     const token = lastToken()
-    expect(shell(`. '${envFile}'; printf %s "$SHELF_TOKEN_CODEX"`)).toBe(token)
+    expect(shell(`. '${envFile}'; printf %s "$TDRIVE_TOKEN_CODEX"`)).toBe(token)
     expect(clearTextFiles(token)).toEqual(['keychain.txt'])
     expect(out.join('\n')).toContain('--auto-approve')
   })
@@ -151,18 +151,18 @@ describe('Codex', () => {
   test('--auto-approve sets default_tools_approval_mode = "approve" in that server\'s table only', async () => {
     expect(await add(['codex', '--login', 'kim', '--auto-approve'])).toBe(0)
     const toml = Bun.TOML.parse(fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8')) as any
-    expect(toml.mcp_servers.shelf).toEqual({ url: `${SERVER}/mcp`, bearer_token_env_var: 'SHELF_TOKEN_CODEX', default_tools_approval_mode: 'approve' })
+    expect(toml.mcp_servers['trina-drive']).toEqual({ url: `${SERVER}/mcp`, bearer_token_env_var: 'TDRIVE_TOKEN_CODEX', default_tools_approval_mode: 'approve' })
   })
 
   test('without the codex CLI: edits ~/.codex/config.toml, keeping other settings and servers; CODEX_HOME is honoured', async () => {
     const ch = path.join(home, 'codexhome')
     fs.mkdirSync(ch)
-    fs.writeFileSync(path.join(ch, 'config.toml'), 'model = "o3"\n\n[mcp_servers.docs]\ncommand = "docs-mcp"\n\n[mcp_servers.shelf]\nurl = "http://old/mcp"\n\n[mcp_servers.shelf.tools.bash]\napproval_mode = "approve"\n\n[profiles.x]\nmodel = "y"\n')
+    fs.writeFileSync(path.join(ch, 'config.toml'), 'model = "o3"\n\n[mcp_servers.docs]\ncommand = "docs-mcp"\n\n[mcp_servers.trina-drive]\nurl = "http://old/mcp"\n\n[mcp_servers.trina-drive.tools.bash]\napproval_mode = "approve"\n\n[profiles.x]\nmodel = "y"\n')
     expect(await add(['codex', '--login', 'kim', '--force'], io(PASSWORD, { bins: ['security'], env: { CODEX_HOME: ch } }))).toBe(0)
     const toml = Bun.TOML.parse(fs.readFileSync(path.join(ch, 'config.toml'), 'utf8')) as any
     expect(toml.model).toBe('o3')
     expect(toml.mcp_servers.docs).toEqual({ command: 'docs-mcp' })
-    expect(toml.mcp_servers.shelf).toEqual({ url: `${SERVER}/mcp`, bearer_token_env_var: 'SHELF_TOKEN_CODEX' })
+    expect(toml.mcp_servers['trina-drive']).toEqual({ url: `${SERVER}/mcp`, bearer_token_env_var: 'TDRIVE_TOKEN_CODEX' })
     expect(toml.profiles.x).toEqual({ model: 'y' })
     expect(fs.existsSync(path.join(home, '.codex'))).toBe(false)
   })
@@ -180,9 +180,9 @@ describe('Cursor', () => {
     expect(await add(['cursor', '--login', 'kim'])).toBe(0)
     const j = JSON.parse(fs.readFileSync(path.join(home, '.cursor', 'mcp.json'), 'utf8'))
     expect(j.mcpServers.gh).toEqual({ command: 'gh-mcp' })
-    expect(j.mcpServers.shelf).toEqual({ url: `${SERVER}/mcp`, headers: { Authorization: 'Bearer ${env:SHELF_TOKEN_CURSOR}' } })
+    expect(j.mcpServers['trina-drive']).toEqual({ url: `${SERVER}/mcp`, headers: { Authorization: 'Bearer ${env:TDRIVE_TOKEN_CURSOR}' } })
     const token = lastToken()
-    expect(shell(`. '${path.join(home, '.config', 'shelf', 'env.sh')}'; printf %s "$SHELF_TOKEN_CURSOR"`)).toBe(token)
+    expect(shell(`. '${path.join(home, '.config', 'trina-drive', 'env.sh')}'; printf %s "$TDRIVE_TOKEN_CURSOR"`)).toBe(token)
     expect(clearTextFiles(token)).toEqual(['keychain.txt'])
   })
 
@@ -216,14 +216,14 @@ describe('refusals and dry run', () => {
     expect(tokensOf('kim').length).toBe(before)
     expect(fs.readdirSync(home)).toEqual([])
     const text = out.join('\n')
-    expect(text).toContain('add-json --scope user shelf')
-    expect(text).toContain('codex mcp add shelf --url')
-    expect(text).toContain('Bearer ${env:SHELF_TOKEN_CURSOR}')
+    expect(text).toContain('add-json --scope user trina-drive')
+    expect(text).toContain('codex mcp add trina-drive --url')
+    expect(text).toContain('Bearer ${env:TDRIVE_TOKEN_CURSOR}')
   })
 
   test('the CLI entry point: `mcp add … --dry-run` with HOME set never opens a data directory or writes', () => {
     const r = spawnSync(process.execPath, ['run', path.join(import.meta.dir, '..', 'src', 'cli.ts'), 'mcp', 'add', 'cursor', '--server', SERVER, '--dry-run'],
-      { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, SHELF_HOME: path.join(home, 'nodata') }, encoding: 'utf8' })
+      { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, TDRIVE_HOME: path.join(home, 'nodata') }, encoding: 'utf8' })
     expect(r.status).toBe(0)
     expect(r.stdout).toContain(path.join(home, '.cursor', 'mcp.json'))
     // Bun's own transpiler cache: ~/Library/Caches on macOS, ~/.bun or ~/.cache on Linux
@@ -271,7 +271,7 @@ describe('refusals and dry run', () => {
     expect(await add(['cursor', '--login', 'kim', '--store', 'inline'])).toBe(0)
     expect(err.join('\n')).toContain('clear text')
     const j = JSON.parse(fs.readFileSync(path.join(home, '.cursor', 'mcp.json'), 'utf8'))
-    expect(j.mcpServers.shelf.headers.Authorization).toStartWith(`Bearer ${TOKEN_PREFIX}`)
+    expect(j.mcpServers['trina-drive'].headers.Authorization).toStartWith(`Bearer ${TOKEN_PREFIX}`)
     expect(fs.existsSync(path.join(home, 'keychain.txt'))).toBe(false)
   })
 })

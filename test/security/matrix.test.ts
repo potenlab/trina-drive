@@ -42,7 +42,7 @@ const expectClosed = async (env: SecEnv, roles: readonly string[], vpath: string
 /** The admin acting through the web layer (R9 steps that notify and audit). */
 function adminOp(env: SecEnv) {
   const w = makeWebCtx(env.ctx, { mailer: new OutboxMailer(env.dir, true), webDir: '/nonexistent' })
-  return { w, actor: { personId: pid(env, 'dion'), admin: true }, base: 'http://shelf.test' }
+  return { w, actor: { personId: pid(env, 'dion'), admin: true }, base: 'http://drive.test' }
 }
 const noticesOf = (env: SecEnv, name: string, kind: string) =>
   env.db.query<{ kind: string }, [number, string]>('SELECT kind FROM notices WHERE person_id = ? AND kind = ?').all(pid(env, name), kind)
@@ -107,7 +107,7 @@ describe('CLI sh (subprocess, the real entrance)', () => {
     for (const c of e.allowed(role).filter((x) => x.startsWith('CANARY_'))) expect(r.stdout).toContain(c)
   })
   test.each([['expired'], ['revoked'], ['garbage']])('%s token is refused', (kind) => {
-    const secret = kind === 'expired' ? e.expiredSecret : kind === 'revoked' ? e.revokedSecret : 'shelf_pat_nope'
+    const secret = kind === 'expired' ? e.expiredSecret : kind === 'revoked' ? e.revokedSecret : 'tdrive_pat_nope'
     const r = cli(secret, 'ls /')
     expect(r.exitCode).toBe(1)
     expect(r.stdout).toBe('')

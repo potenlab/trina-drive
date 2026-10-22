@@ -7,7 +7,7 @@ import { openDb } from '../src/db'
 import { reconcile, summary } from '../src/inplace/reconcile'
 import { addPerson, registerFolder } from '../src/store'
 
-const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-bench-')))
+const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tdrive-bench-')))
 afterAll(() => fs.rmSync(base, { recursive: true, force: true }))
 
 test('10k files: baseline, unchanged pass, pass with changes', async () => {

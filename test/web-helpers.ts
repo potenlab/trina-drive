@@ -7,7 +7,7 @@ import { OutboxMailer } from '../src/web/mail'
 import { handleWeb, makeWebCtx } from '../src/web/server'
 import { setup } from './helpers'
 
-export const ORIGIN = 'http://shelf.test'
+export const ORIGIN = 'http://drive.test'
 export const PASSWORD = 'correct horse battery'
 let sharedHash: string | null = null
 
@@ -29,14 +29,14 @@ export async function webSetup(opts: { webDir?: string; emit?: WebOptions['emit'
     lastSetCookie: string | null = null
     async raw(method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
       const h: Record<string, string> = { ...headers }
-      if (this.cookie) h.cookie = `shelf_session=${this.cookie}`
+      if (this.cookie) h.cookie = `tdrive_session=${this.cookie}`
       if (body !== undefined) h['content-type'] = 'application/json'
       if (method !== 'GET' && !('origin' in h)) h.origin = ORIGIN
       if (method !== 'GET' && this.csrf && !('x-csrf-token' in h)) h['x-csrf-token'] = this.csrf
       for (const [k, v] of Object.entries(h)) if (v === '') delete h[k]
       const res = await handleWeb(w, new Request(ORIGIN + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) }), '10.0.0.1')
       this.lastSetCookie = res.headers.get('set-cookie')
-      const m = /shelf_session=([^;]*)/.exec(this.lastSetCookie ?? '')
+      const m = /tdrive_session=([^;]*)/.exec(this.lastSetCookie ?? '')
       if (m) this.cookie = m[1] || undefined
       return res
     }

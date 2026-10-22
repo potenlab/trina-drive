@@ -47,7 +47,7 @@ describe('audit anchor', () => {
     expect(await n.rt.anchorNow()).toBeNull()
     const mail = readOutbox(n.outbox)
     expect(mail.length).toBe(1)
-    expect(mail[0]!.subject).toBe('[shelf] Audit anchor: 3 rows')
+    expect(mail[0]!.subject).toBe('[Trina Drive] Audit anchor: 3 rows')
     // the emailed copy is just as good as the file
     expect(parseAnchor(mail[0]!.raw)).toEqual(r.anchor)
     expect(verifyAgainst(e.db, e.dir, parseAnchor(mail[0]!.raw)).ok).toBe(true)

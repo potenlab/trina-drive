@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Admin CLI. Usage: bun run src/cli.ts [--data DIR] <command> …   (run without arguments for help)
 import { verifyAudit } from './audit'
-import { defaultDataDir, NAME, VERSION } from './config'
+import { CLI, defaultDataDir, ENV_PREFIX, NAME, PRODUCT, VERSION } from './config'
 import { backupCommand } from './backup/cli'
 import { openDb } from './db'
 import { seedDemo } from './demo'
@@ -25,9 +25,9 @@ import { PUBLIC_HELP, publicCommand } from './web/public-cli'
 import { publicBanner, startPublicListener } from './web/public'
 import { mfaCommand, MFA_HELP, mfaServeNotice } from './web/mfa-cli'
 
-const HELP = `${NAME} ${VERSION} — permission-aware read shell and draft box for AI agents (phase-0 prototype)
+const HELP = `${PRODUCT} ${VERSION} — your team's files for AI agents, permission-aware (${CLI})
 
-usage: ${NAME} [--data DIR] <command>
+usage: ${CLI} [--data DIR] <command>
 
   init                                   create the data directory; prints the one-time web setup token
   person add <name> [--admin]
@@ -59,7 +59,7 @@ in-place reconciler (outside changes, R1 ⑤–⑦, R6, R10):
   quarantine list [--all] | quarantine release <id> --by <person>   (moved/lost: admin; widened: admin or source manager)
   widened list | widened rejudge         NAS copies of drafts; re-judge after rule / group / NAS-reader changes
 
-data directory: --data, $${NAME.toUpperCase()}_HOME, or ~/.${NAME}`
+data directory: --data, $${ENV_PREFIX}_HOME, or ~/.${NAME}`
 
 function takeFlag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name)
@@ -155,7 +155,7 @@ async function main(argv: string[]) {
       if (!token) throw new StoreError('invalid, expired or revoked token')
       const ctx = makeCtx(db, dataDir)
       const notify = attachNotify(ctx)
-      notify.connections.seen(token, { clientName: `${NAME} cli`, clientVersion: VERSION, userAgent: `${NAME}-cli/${VERSION}`, ip: 'local' })
+      notify.connections.seen(token, { clientName: `${CLI} cli`, clientVersion: VERSION, userAgent: `${CLI}-cli/${VERSION}`, ip: 'local' })
       const s = new Session(ctx, token)
       // one command, then exit: the isolated executor's warm workers must not keep this process alive
       const r = await runShell(s, c).finally(closeDefaultExecutor)
@@ -219,7 +219,7 @@ async function main(argv: string[]) {
       const notify = attachNotify(ctx)
       notify.start()
       const { server, w } = serveWeb(ctx, port, host, { allowedOrigins: origin ? [origin] : [], publicUrl, onRequest: notify.onMcpRequest, emit: notify.emit })
-      console.log(`${NAME} ${VERSION} web: http://${host}:${server.port}/   MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
+      console.log(`${PRODUCT} ${VERSION} web: http://${host}:${server.port}/   MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
       // the public listener (plan 5.2): a separate port for the tunnel, only when `public enable` was run and the gate passes
       const pub = startPublicListener(w)
       if (pub.server) console.log(publicBanner(readPublicSettings(db), pub.server.port ?? 0))

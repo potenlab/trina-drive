@@ -5,6 +5,7 @@
 // attachments served with a generic type.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { NAME } from '../../../src/brand'
 import { ApiError, get } from '../api'
 import { go } from '../App'
 import { fmtDate, getLocale, useLocale } from '../i18n'
@@ -118,9 +119,9 @@ export function Files({ route }: { route: string }) {
   const [searching, setSearching] = useState(false)
   const [selected, setSelected] = useState<FileItem | null>(null)
   const [cursor, setCursor] = useState(0)
-  const [view, setView] = useStored<'list' | 'grid'>('shelf.files.view', 'list', ['list', 'grid'])
-  const [sortKey, setSortKey] = useStored<SortKey>('shelf.files.sort', 'name', ['name', 'date', 'size'])
-  const [order, setOrder] = useStored<'asc' | 'desc'>('shelf.files.order', 'asc', ['asc', 'desc'])
+  const [view, setView] = useStored<'list' | 'grid'>(`${NAME}.files.view`, 'list', ['list', 'grid'])
+  const [sortKey, setSortKey] = useStored<SortKey>(`${NAME}.files.sort`, 'name', ['name', 'date', 'size'])
+  const [order, setOrder] = useStored<'asc' | 'desc'>(`${NAME}.files.order`, 'asc', ['asc', 'desc'])
   const [treeOpen, setTreeOpen] = useState(false)
   const [reloadN, setReloadN] = useState(0)
   const [drafts, setDrafts] = useState<number | null>(null)

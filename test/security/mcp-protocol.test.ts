@@ -116,7 +116,7 @@ describe('protocol versions', () => {
 describe('authentication: only the Authorization header carries a token', () => {
   const ping = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' })
   test.each([
-    ['cookie only', {}, (s: string) => ({ cookie: `token=${s}; shelf_token=${s}; session=${s}` })],
+    ['cookie only', {}, (s: string) => ({ cookie: `token=${s}; tdrive_token=${s}; session=${s}` })],
     ['query ?access_token=', { q: 'access_token' }, () => ({})],
     ['query ?token=', { q: 'token' }, () => ({})],
     ['query ?authorization=Bearer', { q: 'authorization' }, () => ({})],
@@ -136,7 +136,7 @@ describe('authentication: only the Authorization header carries a token', () => 
     expect(r.headers.get('www-authenticate')).toMatch(/^Bearer /)
   })
   test('a valid cookie does not upgrade an invalid bearer', async () => {
-    expect((await post(ping, { authorization: 'Bearer shelf_pat_wrong', cookie: `token=${e.secrets.kim}` })).status).toBe(401)
+    expect((await post(ping, { authorization: 'Bearer tdrive_pat_wrong', cookie: `token=${e.secrets.kim}` })).status).toBe(401)
   })
   test('the auth scheme is case-insensitive (RFC 7235) and a valid token works', async () => {
     expect((await post(ping, { authorization: `bearer ${e.secrets.kim}` })).status).toBe(200)
@@ -154,7 +154,7 @@ describe('Origin (DNS-rebinding guard)', () => {
   })
   test('an Origin refused before authentication does not reveal whether the token is valid', async () => {
     const a = await post(ping, { ...auth(), origin: 'https://evil.example' })
-    const b = await post(ping, { authorization: 'Bearer shelf_pat_nope', origin: 'https://evil.example' })
+    const b = await post(ping, { authorization: 'Bearer tdrive_pat_nope', origin: 'https://evil.example' })
     expect([a.status, await a.text()]).toEqual([b.status, await b.text()])
   })
   test('preflight (OPTIONS) from a foreign origin gets no CORS grant', async () => {

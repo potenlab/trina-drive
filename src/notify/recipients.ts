@@ -3,7 +3,7 @@
 import type { DB } from '../db'
 import { approvalById, countOnlyManagers, eligibleApprovers } from '../promote'
 import type { FolderRow } from '../store'
-import type { ShelfEvent } from './events'
+import type { DriveEvent } from './events'
 import type { Level } from './messages'
 
 export interface Recipient { personId: number; level: Level; count: number; digest: boolean }
@@ -26,7 +26,7 @@ export function manageHolders(db: DB, folderId: number): number[] {
   return [...new Set(ids.flatMap((id) => q.all(id).map((r) => r.person_id)))]
 }
 
-export function resolveRecipients(db: DB, e: ShelfEvent): Recipient[] {
+export function resolveRecipients(db: DB, e: DriveEvent): Recipient[] {
   const n = Math.max(1, e.count ?? 1)
   const out = new Map<number, Recipient>()
   const add = (personId: number, level: Level, count: number, digest = false) => {

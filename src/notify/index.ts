@@ -11,10 +11,10 @@ import { BulkReadMonitor } from './bulk'
 import type { Mailer } from './channels'
 import { loadNotifyConfig, type NotifyConfig } from './config'
 import { type ClientSeen, Connections } from './connections'
-import { EventBus, type ShelfEvent, type SignedAnchor } from './events'
+import { EventBus, type DriveEvent, type SignedAnchor } from './events'
 import { Notifier } from './notifier'
 
-export { EventBus, type ShelfEvent } from './events'
+export { EventBus, type DriveEvent } from './events'
 export { Notifier } from './notifier'
 
 export interface McpRequestInfo extends ClientSeen { method: string }
@@ -25,7 +25,7 @@ export interface NotifyRuntime {
   notifier: Notifier
   bulk: BulkReadMonitor
   connections: Connections
-  emit(e: ShelfEvent): void
+  emit(e: DriveEvent): void
   /** installed as ctx.onCommit */
   onCommit(s: Session, tool: string, outcome: string): void
   /** for ServerOptions.onRequest */

@@ -47,7 +47,7 @@ test('the app served at / is the build that holds the Files page (en + ko)', asy
 
 test('kim browses, searches and downloads over HTTP with the cookie only; 경영 is as missing as a typo', async () => {
   const login = await fetch(base + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ login: 'kim', password: PASSWORD }) })
-  const cookie = /shelf_session=[^;]+/.exec(login.headers.get('set-cookie')!)![0]
+  const cookie = /tdrive_session=[^;]+/.exec(login.headers.get('set-cookie')!)![0]
   const g = (p: string) => fetch(base + '/api' + p, { headers: { cookie } })
   const root = await (await g('/files')).json() as { entries: { name: string }[] }
   expect(root.entries.map((x) => x.name).sort()).toEqual(['개인_kim', '공용', '프로젝트'].sort())

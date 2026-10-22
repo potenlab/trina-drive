@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "shelf",
+      "name": "trina-drive",
       "dependencies": {
         "@simplewebauthn/server": "13.3.3",
         "just-bash": "3.6.0",

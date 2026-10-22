@@ -7,7 +7,7 @@
 //   POST /api/oauth/requests/:id/deny      -> { redirect_to }
 // TODO(passkeys): a step-up (passkey) before approving belongs here once the web has it (other stream).
 import { appendAudit } from '../audit'
-import { NAME } from '../config'
+import { PRODUCT } from '../config'
 import { sha256 } from '../store'
 import { originOk, readCookie } from '../web/api'
 import { csrfOk, lookupSession, SESSION_COOKIE } from '../web/auth'
@@ -52,7 +52,7 @@ export async function handleConsentApi(w: WebCtx, rt: OAuthRuntime | null, req: 
     return json({
       client: { name: client.name, domain: client.domain, client_id: client.client_id, kind: client.kind, verified: client.verified,
         redirect_host: redirectHost, loopback: isLoopbackRedirect(r.redirect_uri), loopback_only: client.redirect_uris.every(isLoopbackRedirect) },
-      server: NAME, resource: r.resource, scopes, can_write: canWrite, admin: s.admin, folders,
+      server: PRODUCT, resource: r.resource, scopes, can_write: canWrite, admin: s.admin, folders,
       ttl_options: Object.keys(GRANT_TTLS), default_ttl: '30d', expires_at: r.expires_at,
     })
   }

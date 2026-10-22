@@ -42,8 +42,8 @@ describe('discovery', () => {
   test('/mcp without a token: 401 with resource_metadata and no error code; with a wrong one: error="invalid_token"', async () => {
     const none = await o.http('POST', '/mcp', { headers: { 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":1,"method":"ping"}' })
     expect(none.status).toBe(401)
-    expect(challengeOf(none.headers)).toBe(`Bearer realm="shelf", resource_metadata="${ISSUER}/.well-known/oauth-protected-resource/mcp"`)
-    const bad = await o.mcpBash('shelf_oat_nope', 'ls /')
+    expect(challengeOf(none.headers)).toBe(`Bearer realm="trina-drive", resource_metadata="${ISSUER}/.well-known/oauth-protected-resource/mcp"`)
+    const bad = await o.mcpBash('tdrive_oat_nope', 'ls /')
     expect(bad.status).toBe(401)
     expect(challengeOf(bad.headers)).toContain('error="invalid_token"')
     expect(challengeOf(bad.headers)).toContain('resource_metadata=')
@@ -63,8 +63,8 @@ describe('authorization code + PKCE through the consent page', () => {
     expect(c.back.searchParams.get('iss')).toBe(ISSUER)
     expect(c.back.searchParams.get('state')).toBe(c.state)
     expect(c.tokens).toMatchObject({ token_type: 'Bearer', scope: 'files:read', expires_in: 3600 })
-    expect(c.tokens.access_token.startsWith('shelf_oat_')).toBe(true)
-    expect(c.tokens.refresh_token.startsWith('shelf_ort_')).toBe(true)
+    expect(c.tokens.access_token.startsWith('tdrive_oat_')).toBe(true)
+    expect(c.tokens.refresh_token.startsWith('tdrive_ort_')).toBe(true)
 
     const ls = await o.mcpBash(c.tokens.access_token, 'ls /')
     expect(ls.status).toBe(200)
@@ -274,8 +274,8 @@ describe('refresh, revocation, expiry, audience', () => {
     } finally { o.env.w.oauth = before }
     // a live grant whose access token row names another resource
     const grant = o.env.db.query<{ grant_id: number }, [string]>('SELECT grant_id FROM oauth_tokens WHERE hash = ?').get(sha256(c.tokens.access_token))!.grant_id
-    o.env.db.query(`INSERT INTO oauth_tokens (hash, grant_id, kind, resource, created_at, expires_at) VALUES (?, ?, 'access', ?, ?, ?)`).run(sha256('shelf_oat_forged'), grant, 'https://evil.example/mcp', Date.now(), Date.now() + 3600_000)
-    expect((await o.mcpBash('shelf_oat_forged', 'ls /')).status).toBe(401)
+    o.env.db.query(`INSERT INTO oauth_tokens (hash, grant_id, kind, resource, created_at, expires_at) VALUES (?, ?, 'access', ?, ?, ?)`).run(sha256('tdrive_oat_forged'), grant, 'https://evil.example/mcp', Date.now(), Date.now() + 3600_000)
+    expect((await o.mcpBash('tdrive_oat_forged', 'ls /')).status).toBe(401)
     expect((await o.mcpBash(c.tokens.access_token, 'ls /')).status).toBe(200)
   })
 

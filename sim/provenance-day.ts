@@ -12,7 +12,7 @@ import { makeCtx, Session } from '../src/session'
 import { runShell } from '../src/shell'
 import { createToken, verifyToken } from '../src/store'
 
-const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-sim-')))
+const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tdrive-sim-')))
 const db = openDb(dir)
 const { root, tokens } = seedDemo(db, dir)
 const secrets: Record<string, string> = { boss: tokens.boss.token, kim: tokens.kim.token, park: createToken(db, 'park', { name: 'park-laptop' }).token, dion: createToken(db, 'dion', { name: 'dion-desk' }).token }

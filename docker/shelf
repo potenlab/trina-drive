@@ -1,4 +1,0 @@
-#!/bin/sh
-# The CLI and server in the container image (Dockerfile): `shelf serve`, `shelf init`, `shelf backup run`, ...
-# The data directory is $SHELF_HOME (/data). Workers run the same sources under bwrap (src/worker/sandbox.ts).
-exec /usr/local/bin/bun /app/src/cli.ts "$@"

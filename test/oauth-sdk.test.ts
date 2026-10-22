@@ -64,7 +64,7 @@ describe('MCP SDK OAuth client', () => {
     expect(back.searchParams.get('iss')).toBe(ISSUER)
     expect(back.searchParams.get('state')).toBe('sdk-state')
     expect(await auth(p, { serverUrl: RESOURCE, authorizationCode: back.searchParams.get('code')!, fetchFn })).toBe('AUTHORIZED')
-    expect(p.saved?.access_token).toMatch(/^shelf_oat_/)
+    expect(p.saved?.access_token).toMatch(/^tdrive_oat_/)
 
     const client = new Client({ name: 'sdk', version: '1' })
     await client.connect(new StreamableHTTPClientTransport(new URL(RESOURCE), { authProvider: p, fetch: fetchFn }))

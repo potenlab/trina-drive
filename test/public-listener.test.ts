@@ -77,10 +77,10 @@ describe('allowlist', () => {
   test('the approval inbox answers through the public listener (behind sign-in)', async () => {
     expect((await pub('GET', '/api/approvals')).status).toBe(401)
     const login = await pub('POST', '/api/login', { headers: { 'content-type': 'application/json', origin: ISSUER }, body: JSON.stringify({ login: 'boss', password: PASSWORD }) })
-    const cookie = /shelf_session=([^;]+)/.exec(login.headers.get('set-cookie') ?? '')![1]!
-    expect((await pub('GET', '/api/approvals', { headers: { cookie: `shelf_session=${cookie}` } })).status).toBe(200)
-    expect((await pub('GET', '/api/me/2fa', { headers: { cookie: `shelf_session=${cookie}` } })).status).toBe(200)
-    expect((await pub('GET', '/api/drafts', { headers: { cookie: `shelf_session=${cookie}` } })).status).toBe(404)
+    const cookie = /tdrive_session=([^;]+)/.exec(login.headers.get('set-cookie') ?? '')![1]!
+    expect((await pub('GET', '/api/approvals', { headers: { cookie: `tdrive_session=${cookie}` } })).status).toBe(200)
+    expect((await pub('GET', '/api/me/2fa', { headers: { cookie: `tdrive_session=${cookie}` } })).status).toBe(200)
+    expect((await pub('GET', '/api/drafts', { headers: { cookie: `tdrive_session=${cookie}` } })).status).toBe(404)
   })
 })
 
@@ -91,7 +91,7 @@ describe('sign-in and consent through the public address', () => {
     expect(login.status).toBe(200)
     const setCookie = login.headers.get('set-cookie') ?? ''
     expect(setCookie).toContain('Secure')
-    const cookie = /shelf_session=([^;]+)/.exec(setCookie)![1]!
+    const cookie = /tdrive_session=([^;]+)/.exec(setCookie)![1]!
     const { csrf } = await login.json() as { csrf: string }
     // a cross-site page cannot sign in
     expect((await pub('POST', '/api/login', { headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: JSON.stringify({ login: 'kim', password: PASSWORD }) })).status).toBe(403)
@@ -101,7 +101,7 @@ describe('sign-in and consent through the public address', () => {
     const auth = await pub('GET', `/oauth/authorize?${q}`)
     expect(auth.status).toBe(302)
     const rid = /#\/oauth\/(.+)$/.exec(auth.headers.get('location')!)![1]!
-    const h = { cookie: `shelf_session=${cookie}`, 'content-type': 'application/json', origin, 'x-csrf-token': csrf }
+    const h = { cookie: `tdrive_session=${cookie}`, 'content-type': 'application/json', origin, 'x-csrf-token': csrf }
     const details = await pub('GET', `/api/oauth/requests/${rid}`, { headers: { cookie: h.cookie } })
     expect(details.status).toBe(200)
     // the signed-in person still cannot reach the admin API here
@@ -144,7 +144,7 @@ describe('the public gate', () => {
   test('url rules', () => {
     expect(publicUrlProblem('https://files.example.com')).toBeNull()
     expect(publicUrlProblem('https://files.example.com/')).toBeNull()
-    for (const bad of ['http://files.example.com', 'https://files.example.com/shelf', 'https://127.0.0.1', 'https://localhost', 'https://intranet', 'https://files.example.com?x=1', null]) {
+    for (const bad of ['http://files.example.com', 'https://files.example.com/drive', 'https://127.0.0.1', 'https://localhost', 'https://intranet', 'https://files.example.com?x=1', null]) {
       expect(publicUrlProblem(bad)).not.toBeNull()
     }
   })
