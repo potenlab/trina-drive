@@ -16,6 +16,8 @@ export interface RuleRow { folder_id: number; subject_type: 'person' | 'group'; 
 export interface TokenRow {
   id: number; person_id: number; name: string; hint: string; scope: string | null; read_only: number
   created_at: number; expires_at: number | null; revoked_at: number | null; last_used_at: number | null
+  /** 'pat' (personal access token) or 'oauth' (a grant made on the consent page; src/oauth) */
+  kind?: string; client_id?: string | null
 }
 
 export const LEVELS = { none: 0, read: 1, write: 2 } as const
@@ -139,7 +141,8 @@ export function verifyToken(db: DB, raw: string, client?: string): TokenRow | nu
   const t = db.query<TokenRow & { active: number }, [string]>(
     'SELECT t.*, p.active FROM tokens t JOIN people p ON p.id = t.person_id WHERE t.hash = ?').get(sha256(raw))
   const now = Date.now()
-  if (!t || t.revoked_at != null || !t.active || (t.expires_at != null && t.expires_at <= now)) return null
+  // an OAuth grant row is never a bearer secret itself (its access tokens are checked in src/oauth/tokens.ts)
+  if (!t || t.kind !== 'pat' || t.revoked_at != null || !t.active || (t.expires_at != null && t.expires_at <= now)) return null
   db.query('UPDATE tokens SET last_used_at = ?, last_client = coalesce(?, last_client) WHERE id = ?').run(now, client ?? null, t.id)
   return t
 }

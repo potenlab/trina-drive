@@ -1,5 +1,6 @@
 // Remote MCP over Streamable HTTP, the minimal stateless form: POST /mcp with one JSON-RPC message, answered with
-// application/json (no SSE stream, no session). Bearer personal access tokens only; cookies are never read here.
+// application/json (no SSE stream, no session). Bearer tokens only (personal access tokens, and OAuth access tokens when
+// the authorization server is on, src/oauth); cookies are never read here.
 import { LATEST_PROTOCOL_VERSION, LIMITS, NAME, SUPPORTED_PROTOCOL_VERSIONS, VERSION } from './config'
 import { McpLimiter, type Refusal } from './ratelimit'
 import type { Ctx } from './session'
@@ -12,6 +13,17 @@ export interface ServerOptions {
   onRequest?: (token: TokenRow, info: { method: string; clientName?: string; clientVersion?: string; userAgent: string | null; ip: string | null }) => void
   /** rate and concurrency limits (plan 7.1); serve() and the web server always set one */
   limiter?: McpLimiter
+  /** OAuth access tokens (src/oauth): checked besides personal access tokens, and the 401 points at the RFC 9728 document */
+  oauth?: McpOAuth
+}
+
+export interface McpOAuth {
+  /** the grant behind an access token issued for this server's resource (RFC 8707), or why not */
+  verify: (raw: string, client?: string) => { ok: true; token: TokenRow } | { ok: false; reason: 'invalid' | 'audience' }
+  /** the access token prefix (anything else is tried as a personal access token) */
+  prefix: string
+  /** RFC 9728 protected resource metadata URL */
+  resourceMetadataUrl: string
 }
 
 const INSTRUCTIONS = `Team folders, read-only. Use the bash tool (ls, cat, grep -r, rg, head, sed -n, awk …) to find and read files; ` +
@@ -45,9 +57,20 @@ export async function handleRequest(ctx: Ctx, req: Request, opts: ServerOptions 
 
   const auth = req.headers.get('authorization') ?? ''
   const m = /^Bearer\s+(\S+)$/i.exec(auth)
-  const token: TokenRow | null = m ? verifyToken(ctx.db, m[1]!, req.headers.get('user-agent') ?? undefined) : null
+  const ua = req.headers.get('user-agent') ?? undefined
+  let token: TokenRow | null = null
+  let why = 'a valid access token is required'
+  if (m && opts.oauth && m[1]!.startsWith(opts.oauth.prefix)) {
+    const r = opts.oauth.verify(m[1]!, ua)
+    if (r.ok) token = r.token
+    else if (r.reason === 'audience') why = 'this token was issued for another resource' // RFC 8707: never accepted here
+  } else if (m) token = verifyToken(ctx.db, m[1]!, ua)
   if (!token) lim?.failedAuth(addr)
-  if (!token) return json({ error: 'invalid_token', error_description: 'a valid personal access token is required' }, 401, { 'www-authenticate': `Bearer realm="${NAME}", error="invalid_token"` })
+  if (!token) {
+    // RFC 6750 3 / RFC 9728 5.1: no error code when no credential came; resource_metadata tells an OAuth client where to start
+    const params = [`realm="${NAME}"`, ...(opts.oauth ? [`resource_metadata="${opts.oauth.resourceMetadataUrl}"`] : []), ...(m || !opts.oauth ? ['error="invalid_token"'] : [])]
+    return json({ error: 'invalid_token', error_description: why }, 401, { 'www-authenticate': `Bearer ${params.join(', ')}` })
+  }
 
   if (Number(req.headers.get('content-length') ?? 0) > LIMITS.requestBytes) return json({ error: `request body is larger than ${LIMITS.requestBytes} bytes` }, 413)
 

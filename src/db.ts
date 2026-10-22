@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { detectLayout } from './layout'
 import { INPLACE_SCHEMA } from './inplace/schema'
+import { ensureOAuthSchema } from './oauth/schema'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -71,5 +72,6 @@ export function openDb(dataDir: string): DB {
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
   db.exec(SCHEMA)
   db.exec(INPLACE_SCHEMA)
+  ensureOAuthSchema(db)
   return db
 }
