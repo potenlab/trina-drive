@@ -187,6 +187,14 @@ describe.if(SANDBOXED)('sandbox (macOS sandbox-exec)', () => {
     expect((await extract('readFrom', secret)).text).toContain('READ-BLOCKED')
   })
 
+  test('signals to other processes are blocked; same-uid process arguments are a known gap', async () => {
+    expect((await extract('signal', String(process.pid))).text).toContain('SIGNAL-BLOCKED')
+    // KNOWN LIMITATION (docs/worker.md): sandbox-exec does not mediate sysctl KERN_PROCARGS2, so a worker running as
+    // the server's uid can read the argv and initial environment of the server. Only a separate worker user stops it.
+    const leak = await extract('procargs', String(process.pid))
+    console.log(`[worker] same-uid process arguments from inside the sandbox: ${leak.text} (user=${ex.info().user ?? 'server user'})`)
+  })
+
   test('starting other programs is blocked', async () => {
     expect((await extract('exec', '/bin/sh')).text).toContain('EXEC-BLOCKED')
     expect((await extract('exec', '/usr/bin/curl')).text).toContain('EXEC-BLOCKED')

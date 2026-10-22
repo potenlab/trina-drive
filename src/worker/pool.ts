@@ -448,6 +448,8 @@ export class Executor {
     const tmpBase = cfg.tmpRoot ?? path.join(os.tmpdir(), `${ENV_PREFIX.toLowerCase()}-work-${process.getuid?.() ?? 'u'}`)
     fs.mkdirSync(tmpBase, { recursive: true, mode: 0o700 })
     this.tmpRoot = fs.realpathSync(tmpBase)
+    // a worker user must be able to pass through to its own job dir (it cannot list the others)
+    if (this.ids) fs.chmodSync(this.tmpRoot, 0o711)
     this.codePaths = (cfg.codePaths ?? defaultCodePaths()).map((p) => realOrNull(p)).filter((p): p is string => !!p)
     // both the configured path (often a symlink) and its target: exec checks may see either
     this.execPaths = [...new Set((cfg.execPaths ?? []).flatMap((p) => { const r = realOrNull(p); return r ? [path.resolve(p), r] : [] }))]

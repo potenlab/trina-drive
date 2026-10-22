@@ -1,5 +1,6 @@
 // "Extractors" that misbehave, loaded inside the worker by tests/worker.test.ts. Each is called as fn(name, bytes);
 // `name` carries the test's argument. They return a description of what happened, so the test can assert on it.
+import { dlopen, FFIType, ptr } from 'bun:ffi'
 import fs from 'node:fs'
 import net from 'node:net'
 
@@ -94,4 +95,20 @@ export async function forge(name: string): Promise<string> {
     fs.writeSync(1, encodeFrame({ t: 'fs', id: 9002, op: 'write', args: ['/drafts/late.txt'] }, new TextEncoder().encode('sneaked in')))
   }
   for (;;) { /* wait to be killed */ }
+}
+
+/** Reads another process's argv + initial environment (sysctl KERN_PROCARGS2); `name` = pid. Reports whether
+ *  the variable SHELF_TEST_CANARY was visible. */
+export function procargs(name: string): string {
+  const lib = dlopen('/usr/lib/libSystem.B.dylib', { sysctl: { args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u64], returns: FFIType.i32 } })
+  const mib = new Int32Array([1, 49, Number(name)]) // CTL_KERN, KERN_PROCARGS2, pid
+  const buf = new Uint8Array(1 << 18)
+  const len = new BigUint64Array([BigInt(buf.length)])
+  if (lib.symbols.sysctl(ptr(mib), 3, ptr(buf), ptr(len), null, 0) !== 0) return 'PROCARGS-BLOCKED'
+  return `PROCARGS-OK canary=${new TextDecoder().decode(buf.subarray(0, Number(len[0]))).includes('SHELF_TEST_CANARY=')}`
+}
+
+/** Sends signal 0 to `name` (a pid). */
+export function signal(name: string): string {
+  try { process.kill(Number(name), 0); return 'SIGNAL-OK' } catch (e) { return `SIGNAL-BLOCKED ${(e as NodeJS.ErrnoException).code}` }
 }

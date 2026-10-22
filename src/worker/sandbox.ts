@@ -30,6 +30,11 @@ const MAC_SYSTEM_READ_LITERAL = ['/', '/dev/null', '/dev/zero', '/dev/random', '
   // the /etc, /var, /tmp symlinks and their targets' parents, so /etc/localtime resolves (local time in ls -l, date)
   '/etc', '/var', '/tmp', '/private', '/private/etc', '/private/var', '/private/var/db']
 
+/** sysctl names a worker may read (a trailing dot = prefix). */
+const SYSCTL_READ = ['hw.', 'machdep.cpu.', 'machdep.ptrauth_enabled', 'vm.', 'sysctl.proc_cputype', 'sysctl.proc_native', 'sysctl.proc_translated',
+  'kern.osrelease', 'kern.ostype', 'kern.osversion', 'kern.osproductversion', 'kern.osvariant_status', 'kern.version', 'kern.boottime',
+  'kern.hostname', 'kern.maxfiles', 'kern.maxfilesperproc', 'kern.argmax', 'kern.ngroups', 'kern.secure_kernel', 'kern.bootargs', 'kern.usrstack64', 'kern.monotonicclock']
+
 const q = (s: string) => '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
 
 function ancestors(p: string): string[] {
@@ -50,7 +55,8 @@ export function macProfile(spec: SandboxSpec): string {
     `(allow process-exec (literal ${q(spec.runtime)})${spec.execPaths.map((p) => ` (literal ${q(p)})`).join('')})`,
     spec.execPaths.length ? '(allow process-fork)' : '',
     '(allow signal (target self))',
-    '(allow sysctl-read)',
+    // only what a runtime asks about the machine; not kern.proc* / kern.procargs* (other processes' argv and environment)
+    `(allow sysctl-read ${SYSCTL_READ.map((n) => n.endsWith('.') ? `(sysctl-name-prefix ${q(n)})` : `(sysctl-name ${q(n)})`).join(' ')})`,
     `(allow file-read* ${MAC_SYSTEM_READ.map((p) => `(subpath ${q(p)})`).join(' ')} ${MAC_SYSTEM_READ_LITERAL.map((p) => `(literal ${q(p)})`).join(' ')})`,
     `(allow file-read* ${reads.map((p) => `(subpath ${q(p)})`).join(' ')})`,
     // module resolution stats the folders above the code; it learns that they exist, not what is in them
