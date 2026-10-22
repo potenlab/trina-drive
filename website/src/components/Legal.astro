@@ -1,0 +1,28 @@
+---
+// Placeholder legal page. TODO(payments): replace the notice with the final Terms / Privacy / Refund text before
+// paid plans go on sale (Korean e-commerce law needs the Korean versions under /ko/). Remove `noindex` then.
+import type { Copy } from '../content/en'
+import Base from '../layouts/Base.astro'
+import { CONTACT_EMAIL } from '../site'
+import Footer from './Footer.astro'
+import Nav from './Nav.astro'
+
+interface Props { t: Copy; page: 'terms' | 'privacy' | 'refund' }
+const { t, page } = Astro.props
+const home = t.lang === 'ko' ? '/ko' : '/'
+const title = t.legal[page].title
+const other = t.lang === 'ko' ? `/${page}` : `/ko/${page}`
+---
+<Base t={t} title={`${title} — Trina Drive`} noindex>
+  <Nav t={t} home={home} langHref={other} />
+  <main id="main" class="container legal">
+    <h1>{title}</h1>
+    <p class="notice">{t.legal.draft} {t.legal.contact} <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a></p>
+    <!-- TODO(payments): final {page} text goes here. -->
+    <a class="back" href={home}>← {t.legal.back}</a>
+  </main>
+  <Footer t={t} home={home} />
+  <script>
+    import '../scripts/main'
+  </script>
+</Base>

@@ -1,0 +1,50 @@
+---
+import type { Copy } from '../content/en'
+import { COMPANY, CONTACT_EMAIL, LINKS } from '../site'
+import Logo from './Logo.astro'
+
+interface Props { t: Copy; home: string }
+const { t, home } = Astro.props
+const f = t.footer
+const l = f.links
+const p = t.lang === 'ko' ? '/ko' : ''
+const a = (id: string) => `${home}#${id}`
+---
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="logo" href={home}><Logo /><span>Trina Drive</span></a>
+        <p class="footer-tag">{f.tagline}</p>
+      </div>
+      <div>
+        <h4>{f.product}</h4>
+        <ul>
+          <li><a href={a('features')}>{l.features}</a></li>
+          <li><a href={a('how')}>{l.how}</a></li>
+          <li><a href={a('pricing')}>{l.pricing}</a></li>
+          <li><a href={a('security')}>{l.security}</a></li>
+          <li><a href={a('faq')}>{l.faq}</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>{f.resources}</h4>
+        <ul>
+          <li><a href={LINKS.github} rel="noopener">{l.github}</a></li>
+          <li><a href={LINKS.securityModel} rel="noopener">{l.securityModel}</a></li>
+          <li><a href={`mailto:${CONTACT_EMAIL}`}>{l.contact}</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>{f.legal}</h4>
+        <ul>
+          <li><a href={`${p}/terms`}>{l.terms}</a></li>
+          <li><a href={`${p}/privacy`}>{l.privacy}</a></li>
+          <li><a href={`${p}/refund`}>{l.refund}</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="biz">{COMPANY[t.lang].line.map((s) => <span>{s}</span>)}</p>
+    <p class="copyright">{f.copyright}</p>
+  </div>
+</footer>

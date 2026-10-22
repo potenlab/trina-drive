@@ -1,0 +1,63 @@
+---
+// Plans from research/trina-drive/PRICING.md (2026-10-23). Both currencies are in the HTML; the toggle flips
+// data-currency on the section. Buttons with data-plan call startCheckout() (src/checkout.ts) from main.ts.
+import type { Copy } from '../content/en'
+import { LINKS } from '../site'
+import Icon from './Icon.astro'
+interface Props { t: Copy }
+const { t } = Astro.props
+const p = t.pricing
+const defaultCurrency = t.lang === 'ko' ? 'KRW' : 'USD'
+const fill = (s: string, extra: { USD: string; KRW: string } | undefined, cur: 'USD' | 'KRW') =>
+  extra ? s.replace('{extra}', extra[cur]) : s
+---
+<section class="section" id="pricing" aria-labelledby="pricing-title" data-pricing data-currency={defaultCurrency}>
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">{p.eyebrow}</span>
+      <h2 id="pricing-title">{p.title}</h2>
+      <p>{p.sub}</p>
+    </div>
+    <div class="pricing-top">
+      <div class="seg" role="group" aria-label={p.currencyLabel}>
+        <button type="button" data-currency-btn="KRW" aria-pressed={defaultCurrency === 'KRW' ? 'true' : 'false'}>KRW ₩</button>
+        <button type="button" data-currency-btn="USD" aria-pressed={defaultCurrency === 'USD' ? 'true' : 'false'}>USD $</button>
+      </div>
+      <div class="pricing-notes">
+        <span>{p.trialNote}</span>
+        <span class="price-krw">{p.vatNote}</span>
+      </div>
+    </div>
+    <div class="plans">
+      {p.plans.map((plan) => (
+        <article class={`plan${plan.featured ? ' plan-featured' : ''}`} aria-labelledby={`plan-${plan.id}`}>
+          {plan.featured && <span class="plan-badge">{p.popular}</span>}
+          <h3 class="plan-name" id={`plan-${plan.id}`}>{plan.name}</h3>
+          <p class="plan-kind">{plan.kind}</p>
+          {(['USD', 'KRW'] as const).map((cur) => (
+            <div class={cur === 'USD' ? 'price-usd' : 'price-krw'}>
+              <p class="plan-price"><span class="plan-amount">{plan.price[cur]}</span>{plan.unit[cur] && <span class="plan-unit">{plan.unit[cur]}</span>}</p>
+              <p class="plan-annual">{plan.annual[cur]}</p>
+            </div>
+          ))}
+          <ul>
+            {plan.features.map((f) => (
+              <li>
+                <Icon name="check" />
+                {f.includes('{extra}')
+                  ? <>
+                      <span class="price-usd">{fill(f, plan.extra, 'USD')}</span>
+                      <span class="price-krw">{fill(f, plan.extra, 'KRW')}</span>
+                    </>
+                  : f}
+              </li>
+            ))}
+          </ul>
+          {plan.ctaKind === 'link'
+            ? <a class="btn btn-secondary btn-block" href={LINKS.github} rel="noopener">{plan.cta}</a>
+            : <button type="button" class={`btn btn-block ${plan.featured ? 'btn-primary' : 'btn-secondary'}`} data-plan={plan.id}>{plan.cta}</button>}
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
