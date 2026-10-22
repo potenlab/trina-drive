@@ -45,18 +45,19 @@ export async function handleRequest(ctx: Ctx, req: Request, opts: ServerOptions 
     return msg && msg.jsonrpc === '2.0' && !('method' in msg) ? new Response(null, { status: 202 }) : rpcError(msg?.id, -32600, 'invalid request', 400)
   }
   if (msg.id === undefined || msg.id === null) return new Response(null, { status: 202 }) // notification
+  if (msg.params !== undefined && (msg.params === null || typeof msg.params !== 'object' || Array.isArray(msg.params))) return rpcError(msg.id, -32602, 'params must be an object')
 
   const { id, method, params = {} } = msg
   switch (method) {
     case 'initialize': {
-      const asked = String(params.protocolVersion ?? '')
+      const asked = typeof params.protocolVersion === 'string' ? params.protocolVersion : ''
       const protocolVersion = (SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(asked) ? asked : LATEST_PROTOCOL_VERSION
       return json({ jsonrpc: '2.0', id, result: { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: NAME, version: VERSION }, instructions: INSTRUCTIONS } })
     }
     case 'ping': return json({ jsonrpc: '2.0', id, result: {} })
     case 'tools/list': return json({ jsonrpc: '2.0', id, result: { tools: TOOL_DEFS } })
     case 'tools/call': {
-      const name = String(params.name ?? '')
+      const name = typeof params.name === 'string' ? params.name : ''
       if (!TOOL_DEFS.some((t) => t.name === name)) return rpcError(id, -32602, `unknown tool: ${name}`)
       const args = (params.arguments ?? {}) as Record<string, unknown>
       try {
@@ -72,5 +73,15 @@ export async function handleRequest(ctx: Ctx, req: Request, opts: ServerOptions 
 }
 
 export function serve(ctx: Ctx, port: number, hostname = '127.0.0.1', opts: ServerOptions = {}) {
-  return Bun.serve({ port, hostname, fetch: (req) => handleRequest(ctx, req, opts) })
+  return Bun.serve({
+    port, hostname,
+    // never Bun's development error page (it shows source and stack traces to the caller)
+    development: false,
+    fetch: async (req) => {
+      try { return await handleRequest(ctx, req, opts) } catch (e) {
+        console.error(`[${NAME}] request failed:`, e)
+        return rpcError(null, -32603, 'internal error', 500)
+      }
+    },
+  })
 }
