@@ -17,6 +17,7 @@ import { runShell } from './shell'
 import { closeDefaultExecutor } from './worker'
 import { addGroup, addMember, addPerson, createToken, grantManage, LEVELS, parseDuration, person, registerFolder, revokeToken, setFlag, setRule, StoreError, verifyToken, type LevelName, type NasReaders } from './store'
 import { notifyCommand, NOTIFY_HELP } from './notify/cli'
+import { MCP_HELP, mcpCommand, ttyPassword } from './client/mcp'
 import { attachNotify } from './notify'
 
 const HELP = `${NAME} ${VERSION} — permission-aware read shell and draft box for AI agents (phase-0 prototype)
@@ -39,6 +40,9 @@ ${NOTIFY_HELP}
   sh --token <pat> -c <command>          run one shell command as that token (audited)
   serve [--port 8787] [--host 127.0.0.1] [--allow-origin URL] [--public-url URL]   web admin at /, MCP at /mcp
   backup …                 (encrypted backups; see: backup help)
+
+on your own computer (talks to the server; writes only user-scope client settings):
+${MCP_HELP}
 
 in-place reconciler (outside changes, R1 ⑤–⑦, R6, R10):
   share add <path> | share list          also index this whole share (identity + hash only), not just registered folders
@@ -73,6 +77,8 @@ async function main(argv: string[]) {
   if (!cmd || cmd === 'help' || cmd === '--help') return console.log(HELP)
   // backup works on a data directory (and may run as root via launchd/sudo): never open or create a database for it
   if (cmd === 'backup') { process.exitCode = await backupCommand(args.slice(1), { dataDir }); return }
+  // mcp add runs on a person's computer: no data directory there
+  if (cmd === 'mcp') { process.exitCode = await mcpCommand(args.slice(1), { env: process.env, out: console.log, err: console.error, promptPassword: ttyPassword }); return }
   const db = openDb(dataDir)
   const need = (v: string | undefined, what: string) => { if (!v) throw new StoreError(`missing ${what}`); return v }
 
