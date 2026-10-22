@@ -133,6 +133,9 @@ EOF
   r=$(bash_tool "$KIM" 'cat /proc/self/environ; curl http://example.com; echo x > /공용/x')
   check "kim: no /proc of the server, no curl, originals read-only" has "$r" 'read-only'
   docker exec "$C" sh -c 'cd /app && sha256sum -c --quiet SHA256SUMS' >/dev/null && ok "/app matches its SHA256SUMS" || fail "/app SHA256SUMS"
+  # the job dirs' tmpfs is noexec, and that holds inside the sandbox: a worker cannot run a program it wrote
+  r=$(docker exec "$C" sh -c 'd=$(mktemp -d) && cp /usr/bin/true $d/t && bwrap --unshare-all --ro-bind /usr/lib /usr/lib --symlink usr/lib /lib --proc /proc --dev /dev --bind $d $d --remount-ro / $d/t; echo "exit=$?"; rm -rf $d' 2>&1)
+  check "a program written to a job dir cannot run inside bwrap (noexec /tmp)" has "$r" "Permission denied"
 
   step "smoke: Docker's default security settings refuse shell and extraction, and say why"
   docker volume create "$P-default" >/dev/null
@@ -154,12 +157,13 @@ fi
 
 if [ $TESTS = 1 ]; then
   # --timeout: the preload's setDefaultTimeout (test/setup.ts) does not reach every file of a full run in bun 1.3.12,
-  # and a few suites take 5-10 s on a 4-CPU VM (they take 1-3 s natively)
+  # and a few suites take 5-10 s on a 4-CPU VM (they take 1-3 s natively). FUZZ_TEST_SECONDS: the fuzz test wants > 100
+  # iterations; 8 s (its default) gave 96-110 on such a VM
   step "bun test inside $TEST_IMAGE (same security settings; /tmp may hold executable test stubs)"
   s=$SECONDS
   set +e
-  docker run --rm "${SEC[@]}" --tmpfs /tmp:size=2g,mode=1777,nosuid,nodev \
-    -e SHELF_EXPECT_ISOLATION=bwrap -e SHELF_TEST_CANARY=canary-in-the-test-runner-environment \
+  docker run --rm "${SEC[@]}" --tmpfs /tmp:size=2g,mode=1777,nosuid,nodev,exec \
+    -e SHELF_EXPECT_ISOLATION=bwrap -e SHELF_TEST_CANARY=canary-in-the-test-runner-environment -e FUZZ_TEST_SECONDS="${FUZZ_TEST_SECONDS:-16}" \
     "$TEST_IMAGE" bun test --timeout 30000 > "$TMP/test.log" 2>&1
   code=$?
   set -e
