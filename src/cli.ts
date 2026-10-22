@@ -115,6 +115,7 @@ async function main(argv: string[]) {
       if (!token) throw new StoreError('invalid, expired or revoked token')
       const ctx = makeCtx(db, dataDir)
       const notify = attachNotify(ctx)
+      notify.connections.seen(token, { clientName: `${NAME} cli`, clientVersion: VERSION, userAgent: `${NAME}-cli/${VERSION}`, ip: 'local' })
       const s = new Session(ctx, token)
       const r = await runShell(s, c)
       s.commit('bash', c, `exit ${r.exitCode}`)
