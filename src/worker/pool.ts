@@ -23,7 +23,8 @@ export interface BackendDirent { name: string; isFile: boolean; isDirectory: boo
 /**
  * The filesystem a shell worker sees: a subset of just-bash's IFileSystem, so the server's permission-filtered VirtualFs
  * (src/vfs.ts) can be passed as is. Errors with a string `code` (ENOENT, EROFS, ...) are passed to the shell; any other
- * error ends the job with status 'host-error'.
+ * error is a backend bug: it is logged and counted (RunStats.backendErrors), and the shell sees a fixed EIO for that
+ * call (never the error's text, which may hold real paths). The job goes on, as it would in-process.
  */
 export interface FsBackend {
   readFileBuffer(path: string): Promise<Uint8Array>
@@ -123,9 +124,10 @@ export type RunStatus =
   | 'busy'        // refused at admission (token queue full)
   | 'aborted'     // caller's signal
   | 'refused'     // isolation required but not available
-  | 'host-error'  // the backend threw a non-fs error (error holds it)
 
-export interface RunStats { queuedMs: number; startMs: number; runMs: number; totalMs: number; warm: boolean; peakRssBytes: number; fsCalls: number; pid: number }
+export interface RunStats { queuedMs: number; startMs: number; runMs: number; totalMs: number; warm: boolean; peakRssBytes: number; fsCalls: number; pid: number
+  /** backend calls (fs or parent-run command) that threw something other than an fs error; answered with EIO */
+  backendErrors: number }
 
 export interface RunResult<T = unknown> {
   status: RunStatus
@@ -169,7 +171,7 @@ export function toolReadPaths(bin: string): string[] {
 
 // ---------- one worker process ----------
 
-type KillReason = 'timeout' | 'memory' | 'output' | 'crashed' | 'aborted' | 'host-error' | 'done'
+type KillReason = 'timeout' | 'memory' | 'output' | 'crashed' | 'aborted' | 'done'
 
 class Worker {
   readonly proc: Subprocess<'pipe', 'pipe', 'pipe'>
@@ -177,7 +179,7 @@ class Worker {
   readonly exited: Promise<number>
   readonly startedAt = performance.now()
   killReason: KillReason | null = null
-  hostError: Error | null = null
+  backendErrors = 0
   peakRss = 0
   fsCalls = 0
   log = ''
@@ -341,13 +343,22 @@ class Worker {
         return this.reply(h.id, { code, message: String(err.message ?? code), path: typeof err.path === 'string' ? err.path : undefined })
       }
       if (e instanceof ArgError) return this.reply(h.id, { code: 'EINVAL', message: e.message })
-      this.hostError = e instanceof Error ? e : new Error(String(e))
-      this.kill('host-error')
+      // a backend bug: logged here, a fixed answer there (the same whatever the path is, so it tells the worker nothing)
+      this.backendErrors++
+      onBackendError(h.t === 'fs' ? h.op : h.name, e)
+      const p = h.t === 'fs' && typeof h.args[0] === 'string' ? h.args[0] : undefined
+      this.reply(h.id, h.t === 'fs'
+        ? { code: 'EIO', message: `EIO: input/output error${p ? `, ${h.op} '${p.slice(0, 4096)}'` : ''}`, path: p }
+        : { code: 'EIO', message: 'input/output error' })
     }
   }
 }
 
 class ArgError extends Error {}
+
+/** Where backend bugs are reported (server log by default). */
+let onBackendError = (what: string, e: unknown) => console.error(`[worker] backend error in ${what}:`, e)
+export function setBackendErrorHandler(fn: (what: string, e: unknown) => void) { onBackendError = fn }
 
 const str = (x: unknown, what = 'path'): string => { if (typeof x !== 'string' || x.length > 4096 || x.includes('\0')) throw new ArgError(`bad ${what}`); return x }
 const bool = (x: unknown) => x === true
@@ -469,7 +480,7 @@ export class Executor {
   /** Runs one job in an isolated worker. Never throws for job failures: see RunResult.status. */
   async run<T = unknown>(job: JobSpec, opts: RunOptions): Promise<RunResult<T>> {
     const t0 = performance.now()
-    const stats: RunStats = { queuedMs: 0, startMs: 0, runMs: 0, totalMs: 0, warm: false, peakRssBytes: 0, fsCalls: 0, pid: 0 }
+    const stats: RunStats = { queuedMs: 0, startMs: 0, runMs: 0, totalMs: 0, warm: false, peakRssBytes: 0, fsCalls: 0, pid: 0, backendErrors: 0 }
     const result = (status: RunStatus, extra: Partial<RunResult<T>> = {}): RunResult<T> => {
       stats.totalMs = performance.now() - t0
       return { status, isolation: this.isolation, user: this.user, stats, log: '', ...extra }
@@ -517,11 +528,12 @@ export class Executor {
       stats.runMs = performance.now() - t2
       stats.peakRssBytes = w.peakRss
       stats.fsCalls = w.fsCalls
+      stats.backendErrors = w.backendErrors
       // a limit breach wins over a `done` that raced with the kill
       const reason = w.killReason
       if (reason && reason !== 'done') {
         await w.dispose()
-        return result(reason === 'aborted' ? 'aborted' : reason, { error: reason === 'host-error' ? w.hostError ?? undefined : undefined, log: w.log })
+        return result(reason, { log: w.log })
       }
       if (!done) {
         await w.dispose()

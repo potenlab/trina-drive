@@ -4,7 +4,7 @@ import { InMemoryFs } from 'just-bash'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { defaultCodePaths, Executor, extractIsolated, runShellIsolated, type CommandResult, type FsBackend, type RunOptions } from '../src/worker'
+import { defaultCodePaths, Executor, extractIsolated, runShellIsolated, setBackendErrorHandler, type CommandResult, type FsBackend, type RunOptions } from '../src/worker'
 import { FairScheduler } from '../src/worker/scheduler'
 import { encodeFrame, FrameDecoder, ProtocolError } from '../src/worker/protocol'
 import { macProfile } from '../src/worker/sandbox'
@@ -295,6 +295,26 @@ describe('shell in a worker over a proxied filesystem', () => {
     const r = await sh('mkdir -p /drafts/q && cat /docs/a.txt | sort -r > /drafts/q/out.txt && cat /drafts/q/out.txt')
     expect(r.stdout).toBe('gamma\nbeta\nalpha\n')
     expect(await backend.mem.readFile('/drafts/q/out.txt')).toBe('gamma\nbeta\nalpha\n')
+  })
+
+  test('a backend bug (an error without an fs code) is logged and answered with EIO; the job goes on', async () => {
+    const bad = new TestBackend()
+    bad.readFileBuffer = async (p: string) => { if (p === '/docs/a.txt') throw new Error(`db gone at /srv/secret${p}`); return bad.mem.readFileBuffer(p) }
+    const seen: string[] = []
+    setBackendErrorHandler((what, e) => seen.push(`${what}: ${(e as Error).message}`))
+    try {
+      const r = await runShellIsolated('cat /docs/a.txt; echo "exit=$?"; cat /docs/b.txt; echo x | grep x', bad, {
+        executor: ex, token: 'tok', person: 'kim', job: { parentCommands: ['grep'] },
+        hooks: { runCommand: async () => { throw new Error('grep exploded at /srv/secret') } },
+      })
+      expect(r.run.status).toBe('ok')
+      expect(r.stdout).toBe('exit=1\nbeta two\n')
+      // (just-bash's cat reports any read failure as "No such file or directory")
+      expect(r.stderr).toBe('cat: /docs/a.txt: No such file or directory\ngrep: input/output error\n')
+      expect(r.stderr).not.toContain('secret')
+      expect(r.run.stats.backendErrors).toBe(2)
+      expect(seen).toEqual(['read: db gone at /srv/secret/docs/a.txt', 'grep: grep exploded at /srv/secret'])
+    } finally { setBackendErrorHandler((what, e) => console.error(`[worker] backend error in ${what}:`, e)) }
   })
 
   test('calls inside wrapped commands carry the command line (for read modes)', async () => {

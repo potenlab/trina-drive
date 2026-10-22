@@ -44,7 +44,12 @@ const { status, text } = await extractIsolated(bytes, 'docx', { token, person })
 | `busy` | refused at admission: this token already has `maxQueuedPerToken` jobs waiting |
 | `aborted` | the caller's `AbortSignal` |
 | `refused` | isolation is required but not available (or `requireRunAs` and the user could not be applied) |
-| `host-error` | the **backend** threw a non-fs error (a server bug); `runShellIsolated` rethrows it |
+
+A backend call (fs or parent-run command) that throws something other than an fs error is a server bug: it is logged
+(`setBackendErrorHandler`), counted in `stats.backendErrors`, and the shell sees a fixed `EIO` for that one call (never
+the error's text, which may hold real paths). The job goes on, as it would in-process. (There used to be a `host-error`
+status that aborted the whole command; an abort is a distinct answer, so it could tell a hidden path from a missing one
+whenever the error depended on the path.)
 
 `shellFailure(result)` turns the failure statuses into shell-like output (`timeout` → exit 124, `memory` → 137, ...).
 
@@ -105,7 +110,7 @@ The server treats the worker as hostile: header ≤ 1 MB and body ≤ `maxFrameB
 before buffering; total bytes ≤ `maxChannelBytes`; ≤ 256 requests in flight; shapes, op names, argument types and
 path lengths are validated; an unknown command or malformed frame kills the job (`crashed`). Backend errors with a
 string `code` (or just-bash's `ENOENT: ...` message convention) go back to the shell; any other error is a server
-bug and ends the job as `host-error`.
+bug, logged and answered with a fixed `EIO`.
 
 `cmd` is the command line of the innermost command listed in `job.wrap` (just-bash's `origCommand` wrapped in an
 AsyncLocalStorage). It is a **label from the untrusted worker**: it may choose raw bytes vs extracted text and

@@ -5,7 +5,8 @@ import path from 'node:path'
 import { nfcCollisions } from '../src/names'
 import { setFlag, setRule } from '../src/store'
 import { MSG } from '../src/vfs'
-import { setup, textOf, type Env } from './helpers'
+import { CREATES_P, HIDDEN_PROBES, setup, SHELL_MODES, textOf, withShellMode, type Env } from './helpers'
+
 
 let e: Env
 beforeAll(() => { e = setup() })
@@ -25,12 +26,14 @@ describe('kim (not in 경영)', () => {
     for (const hidden of ['경영', '인사', '영업']) expect(r.stdout).not.toContain(hidden)
   })
 
-  test('a hidden path answers exactly like a nonexistent one', async () => {
-    const pairs: [string, string][] = [['/경영/손익.csv', '/does-not-exist.csv'], ['/경영', '/없는폴더'], ['/인사/급여.csv', '/프로젝트/없음.csv']]
-    const cmds = ['cat P', 'ls P', 'ls -l P', 'stat P', 'head -1 P', 'wc -l P', 'cd P', 'test -e P; echo $?', '[ -d P ] && echo dir || echo no',
-      'grep x P', 'grep -r x P', 'rg x P', 'find P', 'du P', 'sha256sum P', 'cat /.rawP', 'echo hi > P/new.md', 'mkdir P/sub', 'cp P /drafts/copy.md']
-    for (const [hidden, missing] of pairs) {
-      for (const c of cmds) {
+  // the same suite in both shell modes: the isolated worker must not open a difference the in-process shell does not have
+  for (const mode of SHELL_MODES) test(`a hidden path answers exactly like a nonexistent one (${mode})`, () => withShellMode(mode, async () => {
+    // creating P answers from P's parent, so those probes only compare pairs whose parents are alike (both not there)
+    const pairs: [string, string, boolean][] = [['/경영/손익.csv', '/does-not-exist.csv', false], ['/경영', '/없는폴더', true], ['/인사/급여.csv', '/프로젝트/없음.csv', false],
+      ['/경영/손익.csv', '/없는폴더/손익.csv', true], ['/인사/급여.csv', '/없는폴더/급여.csv', true]]
+    for (const [hidden, missing, sameParent] of pairs) {
+      for (const c of HIDDEN_PROBES) {
+        if (!sameParent && CREATES_P.includes(c)) continue
         const a = await e.sh('kim', c.replaceAll('P', hidden))
         const b = await e.sh('kim', c.replaceAll('P', missing))
         expect({ c, out: a.stdout.replaceAll(hidden, 'P'), err: a.stderr.replaceAll(hidden, 'P'), code: a.exitCode })
@@ -40,7 +43,7 @@ describe('kim (not in 경영)', () => {
       expect(textOf(ra).replaceAll(hidden, 'P')).toBe(textOf(rb).replaceAll(missing, 'P'))
       expect(ra.isError).toBe(true)
     }
-  })
+  }))
 
   test('cat /경영/손익.csv and cat /does-not-exist.csv: same stderr and exit code', async () => {
     const a = await e.sh('kim', 'cat /경영/손익.csv')

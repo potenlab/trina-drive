@@ -23,8 +23,10 @@ export function setup() {
     return t
   }
   const addToken = (who: Who, person: string, opts: Parameters<typeof createToken>[2] = {}) => { secrets[who] = createToken(db, person, opts).token }
-  const sh = async (who: Who, cmd: string, readdir?: (p: string) => string[]) => {
+  /** `prep` can tamper with the session before the command runs (fault injection). */
+  const sh = async (who: Who, cmd: string, readdir?: (p: string) => string[], prep?: (s: Session) => void) => {
     const s = new Session(ctx, tok(who), readdir)
+    prep?.(s)
     const r = await runShell(s, cmd)
     s.commit('bash', cmd, `exit ${r.exitCode}`)
     return r
@@ -39,3 +41,24 @@ export function setup() {
 }
 export type Env = ReturnType<typeof setup>
 export const textOf = (r: { content: { text: string }[] }) => r.content.map((c) => c.text).join('\n')
+
+export type ShellMode = 'isolated' | 'inprocess'
+export const SHELL_MODES: ShellMode[] = ['isolated', 'inprocess']
+
+/** Runs `fn` with shell commands in the given mode (src/shell.ts reads SHELF_SHELL on every command). */
+export async function withShellMode<T>(mode: ShellMode, fn: () => Promise<T>): Promise<T> {
+  const before = process.env.SHELF_SHELL
+  process.env.SHELF_SHELL = mode
+  try { return await fn() } finally {
+    if (before === undefined) delete process.env.SHELF_SHELL
+    else process.env.SHELF_SHELL = before
+  }
+}
+
+/** Commands that must give a hidden path and a nonexistent one the same answer (P = the path). */
+export const HIDDEN_PROBES = ['cat P', 'ls P', 'ls -l P', 'stat P', 'head -1 P', 'wc -l P', 'cd P', 'test -e P; echo $?', '[ -d P ] && echo dir || echo no',
+  'grep x P', 'grep -r x P', 'rg x P', 'find P', 'du P', 'sha256sum P', 'cat /.rawP', 'echo hi > P/new.md', 'mkdir P/sub', 'cp P /drafts/copy.md',
+  'cp -r P /drafts/dir', 'mv P /drafts/moved.md', 'rm P', 'rm -rf P', 'touch P', 'chmod 644 P', 'ln -s P /drafts/link', 'readlink P', 'realpath P',
+  'echo hi >> P', 'cat P/x', 'ls P/', 'tar cf /drafts/t.tar P', 'diff P /drafts/none', 'file P', 'base64 P', 'od -c P', 'tail -1 P']
+/** Probes that create P (their answer depends on whether P's parent is there). */
+export const CREATES_P = ['touch P', 'echo hi >> P']

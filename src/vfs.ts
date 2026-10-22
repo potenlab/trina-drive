@@ -4,6 +4,9 @@
 //   /drafts/…                this token's draft box (writable), plus other tokens' drafts it may see under @<token>/
 //   /bin /usr /dev /proc     just-bash's command stubs (in memory, not listed at /)
 // Hidden and nonexistent give the same answer everywhere: the policy simply returns nothing for both.
+// Errors: every IFileSystem method throws only FsError. Resolution fails closed (an unexpected error while deciding
+// what a path is makes it "not there", the same answer as a nonexistent path); any other unexpected error becomes EIO
+// with a fixed message (never the error's own text, which may hold real paths). Both are reported server-side.
 import { AsyncLocalStorage } from 'node:async_hooks'
 import path from 'node:path'
 import { Bash, InMemoryFs, type BufferEncoding, type ByteString, type CpOptions, type FileContent, type FsStat, type IFileSystem, type MkdirOptions, type RmOptions } from 'just-bash'
@@ -37,6 +40,27 @@ const enoent = (syscall: string, p: string) => new FsError('ENOENT', `ENOENT: no
 const eisdir = (syscall: string, p: string) => new FsError('EISDIR', `EISDIR: illegal operation on a directory, ${syscall} '${p}'`, p)
 const enotdir = (syscall: string, p: string) => new FsError('ENOTDIR', `ENOTDIR: not a directory, ${syscall} '${p}'`, p)
 const eexist = (syscall: string, p: string) => new FsError('EEXIST', `EEXIST: file already exists, ${syscall} '${p}'`, p)
+const eio = (syscall: string, p: string) => new FsError('EIO', `EIO: input/output error, ${syscall} '${p}'`, p)
+
+/** Where unexpected errors inside the VFS are reported (server log; tests replace it). */
+export let reportInternal = (where: string, p: string, e: unknown) => console.error(`[vfs] ${where} '${p}':`, e)
+export function onInternalError(fn: typeof reportInternal) { reportInternal = fn }
+
+/** Any error as the shell may see it: FsError as is, anything else as EIO (reported, its text never shown). */
+export function asFsError(e: unknown, syscall: string, p: string): FsError {
+  if (e instanceof FsError) return e
+  reportInternal(syscall, p, e)
+  return eio(syscall, p)
+}
+
+/** just-bash's in-memory stubs throw plain Errors with an errno-style message ("ENOENT: …"); give them a code. */
+async function sysCall<T>(p: string, fn: () => Promise<T>): Promise<T> {
+  try { return await fn() } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    const code = /^(E[A-Z]{2,}):/.exec(msg)?.[1]
+    throw code ? new FsError(code, msg, p) : e
+  }
+}
 
 const SYSTEM_DIRS = new Set(['bin', 'usr', 'dev', 'proc'])
 export const RESERVED = new Set([...SYSTEM_DIRS, 'drafts', '.raw', 'tmp', 'home'])
@@ -66,7 +90,15 @@ export class VirtualFs implements IFileSystem {
   constructor(readonly s: Session) {}
 
   // ---------- resolution ----------
+  /** What a virtual path is for this call, or null when it is not there for this token (hidden or nonexistent). */
   resolve(p: string): Hit | null {
+    try { return this.resolveUnguarded(p) } catch (e) {
+      // fail closed: an error while deciding must not answer differently from "not there"
+      reportInternal('resolve', p, e)
+      return null
+    }
+  }
+  private resolveUnguarded(p: string): Hit | null {
     const parts = splitVirtual(p)
     if (!parts.length) return { t: 'root' }
     const top = parts[0]!
@@ -124,7 +156,7 @@ export class VirtualFs implements IFileSystem {
   /** Bytes of a file hit as the current command should see them; records provenance. */
   async bytesOf(h: Hit, p: string): Promise<Uint8Array> {
     const m = currentMode()
-    if (h.t === 'sys') return sys().readFileBuffer(h.p)
+    if (h.t === 'sys') return sysCall(p, () => sys().readFileBuffer(h.p))
     if (h.t === 'draft') { this.s.touchDraft(h.item, !m.weak); return this.s.draftContent(h.item) }
     if (h.t !== 'file') throw eisdir('read', p)
     const f = h.f
@@ -166,7 +198,7 @@ export class VirtualFs implements IFileSystem {
     const h = this.hit(p, 'stat')
     this.touchMeta(h)
     switch (h.t) {
-      case 'sys': return sys().stat(h.p)
+      case 'sys': return sysCall(p, () => sys().stat(h.p))
       case 'file': return fileStat(h.f.size, h.f.mtimeMs)
       case 'draft': return fileStat(this.s.draftContent(h.item).length, h.item.draft?.updated_at ?? Date.now())
       default: return dirStat()
@@ -176,7 +208,7 @@ export class VirtualFs implements IFileSystem {
   async readdir(p: string): Promise<string[]> { return (await this.readdirWithFileTypes(p)).map((d) => d.name) }
   async readdirWithFileTypes(p: string): Promise<DirentEntry[]> {
     const h = this.hit(p, 'scandir')
-    if (h.t === 'sys') return sys().readdirWithFileTypes(h.p)
+    if (h.t === 'sys') return sysCall(p, () => sys().readdirWithFileTypes(h.p))
     if (h.t === 'file' || h.t === 'draft') throw enotdir('scandir', p)
     if (h.t === 'dir') this.s.touchNode(h.node, false)
     return this.children(h).map((c) => ({ name: c.name, isFile: !c.dir, isDirectory: c.dir, isSymbolicLink: false }))
@@ -291,4 +323,21 @@ export class VirtualFs implements IFileSystem {
   }
   async symlink(_t: string, link: string): Promise<void> { this.s.notes.add(MSG.links); throw new FsError('EPERM', MSG.links, link) }
   async link(_e: string, link: string): Promise<void> { this.s.notes.add(MSG.links); throw new FsError('EPERM', MSG.links, link) }
+}
+
+// Every IFileSystem entry point throws FsError only (see the header). The first argument names the path in the error.
+const ENTRY_POINTS: [keyof VirtualFs & string, string][] = [
+  ['readFile', 'open'], ['readFileBytes', 'open'], ['readFileBuffer', 'open'], ['exists', 'access'], ['stat', 'stat'], ['lstat', 'lstat'],
+  ['readdir', 'scandir'], ['readdirWithFileTypes', 'scandir'], ['readlink', 'readlink'], ['realpath', 'realpath'],
+  ['writeFile', 'open'], ['appendFile', 'open'], ['mkdir', 'mkdir'], ['rm', 'rm'], ['cp', 'cp'], ['mv', 'rename'],
+  ['chmod', 'chmod'], ['utimes', 'utime'], ['symlink', 'symlink'], ['link', 'link'],
+]
+for (const [name, syscall] of ENTRY_POINTS) {
+  const inner = VirtualFs.prototype[name] as (this: VirtualFs, ...a: unknown[]) => Promise<unknown>
+  Object.defineProperty(VirtualFs.prototype, name, {
+    configurable: true, writable: true,
+    value: async function (this: VirtualFs, ...a: unknown[]) {
+      try { return await inner.apply(this, a) } catch (e) { throw asFsError(e, syscall, String(a[name === 'symlink' || name === 'link' ? 1 : 0])) }
+    },
+  })
 }

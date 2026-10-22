@@ -5,7 +5,7 @@ import { defineCommand, decodeBytesToUtf8, type Command } from 'just-bash'
 import { LIMITS } from './config'
 import { ExtractError, TOOLS } from './extract'
 import { Closed } from './policy'
-import type { Hit, VirtualFs } from './vfs'
+import { reportInternal, type Hit, type VirtualFs } from './vfs'
 
 type Flavor = 'grep' | 'egrep' | 'fgrep' | 'rg'
 
@@ -332,7 +332,13 @@ async function grepMain(flavor: Flavor, vfs: VirtualFs, args: string[], cwd: str
 
 export function grepCommands(vfs: VirtualFs): Command[] {
   return (['grep', 'egrep', 'fgrep', 'rg'] as const).map((flavor) =>
-    defineCommand(flavor, async (args, ctx) => grepMain(flavor, vfs, args, ctx.cwd, decodeBytesToUtf8(ctx.stdin))))
+    defineCommand(flavor, async (args, ctx) => {
+      try { return await grepMain(flavor, vfs, args, ctx.cwd, decodeBytesToUtf8(ctx.stdin)) } catch (e) {
+        // same rule as the VFS: an unexpected error is reported here and shown as a fixed I/O error, never its own text
+        reportInternal(flavor, args.join(' '), e)
+        return { stdout: '', stderr: `${flavor}: input/output error\n`, exitCode: 2 }
+      }
+    }))
 }
 
 export const _test = { parse, breToEre }

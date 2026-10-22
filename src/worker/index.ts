@@ -4,7 +4,7 @@ import path from 'node:path'
 import { defaultExecutor, type CommandResult, type Executor, type FsBackend, type RunOptions, type RunResult, type ShellHooks } from './pool'
 import type { ShellJob } from './protocol'
 
-export { defaultCodePaths, defaultExecutor, Executor, runIsolated, toolReadPaths } from './pool'
+export { defaultCodePaths, defaultExecutor, Executor, runIsolated, setBackendErrorHandler, toolReadPaths } from './pool'
 export type { BackendDirent, BackendStat, CommandResult, ExecutorConfig, FsBackend, JobLimits, RunOptions, RunResult, RunStats, RunStatus, ShellHooks } from './pool'
 export { PROTOCOL_VERSION } from './protocol'
 export type { ExtractJob, JobSpec, ShellJob } from './protocol'
@@ -31,7 +31,7 @@ export function shellFailure(r: RunResult, name = 'bash'): CommandResult {
 /**
  * Runs one shell command line in an isolated worker against `backend` (the permission-filtered VFS).
  * Returns the shell's result; limit breaches are turned into a shell-like error (see shellFailure).
- * A 'host-error' (the backend threw something that is not an fs error) is rethrown, as the in-process shell would.
+ * A backend call that throws something other than an fs error is answered with EIO (see FsBackend); the job goes on.
  */
 export async function runShellIsolated(
   command: string,
@@ -40,7 +40,6 @@ export async function runShellIsolated(
 ): Promise<CommandResult & { run: RunResult<CommandResult> }> {
   const job: ShellJob = { kind: 'shell', command, ...opts.job }
   const run = await (opts.executor ?? defaultExecutor()).run<CommandResult>(job, { ...opts, backend, hooks: opts.hooks })
-  if (run.status === 'host-error') throw run.error
   const r = run.status === 'ok' && run.value ? run.value : shellFailure(run)
   return { ...r, run }
 }
