@@ -17,7 +17,7 @@ export function Login() {
       e.preventDefault(); setBusy(true); setError(null)
       try {
         const r = await api<{ me: Me; csrf: string }>('POST', '/login', { login, password })
-        setCsrf(r.csrf); setMe(r.me); go('/folders')
+        setCsrf(r.csrf); setMe(r.me); go(r.me.admin ? '/folders' : '/files')
       } catch (err) {
         setError(err instanceof ApiError && err.status === 429 ? t('login_rate') : t('login_bad'))
       } finally { setBusy(false) }
@@ -89,7 +89,7 @@ export function LinkPage({ kind, token }: { kind: 'invite' | 'reset'; token: str
     <form className="card narrow" onSubmit={async (e) => {
       e.preventDefault()
       const r = await a.run(() => api<{ me?: Me; csrf?: string }>('POST', '/links/accept', { kind, token, password }))
-      if (r?.me && r.csrf) { setCsrf(r.csrf); setMe(r.me); go(kind === 'reset' ? '/tokens' : '/folders') }
+      if (r?.me && r.csrf) { setCsrf(r.csrf); setMe(r.me); go(kind === 'reset' ? '/tokens' : r.me.admin ? '/folders' : '/files') }
       else if (r) go('/login')
     }}>
       <h1>{t(kind === 'invite' ? 'link_invite_title' : 'link_reset_title', { name })}</h1>
