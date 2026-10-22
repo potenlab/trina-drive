@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import fs from 'node:fs'
 import path from 'node:path'
-import { registerFolder, setRule } from '../../src/store'
+import { registerFolder, setFlag, setRule } from '../../src/store'
 import { MSG } from '../../src/vfs'
 import { textOf } from '../helpers'
 import { ALL_CASES, ROLES, securitySetup, type Role, type SecEnv } from './fixture'
@@ -330,4 +330,29 @@ describe('NAS system folders (R1 ⑥) on the registered path itself', () => {
       }
     } finally { env.cleanup() }
   })
+})
+
+describe('R0: a personal folder is its owner\'s only, whatever sits inside it', () => {
+  test('rules, breaks and registrations made inside before the folder became personal do not reopen it', async () => {
+    const env = securitySetup()
+    try {
+      const box = env.R('프로젝트/개인함')
+      for (const sub of ['ruled', 'registered', 'broken']) { fs.mkdirSync(path.join(box, sub), { recursive: true }); fs.writeFileSync(path.join(box, sub, 'p.md'), `PERSONAL_${sub}\n`) }
+      fs.writeFileSync(path.join(box, 'top.md'), 'PERSONAL_top\n')
+      // while 개인함 is still an ordinary folder inside 프로젝트 (all allowed there)…
+      setRule(env.db, path.join(box, 'ruled'), 'boss', 'read', { breakInherit: true })
+      registerFolder(env.db, path.join(box, 'registered'), { nasReaders: 'all' })
+      setRule(env.db, path.join(box, 'registered'), '@전체', 'read')
+      setFlag(env.db, path.join(box, 'broken'), 'inherit_break', true)
+      // …then the admin registers it as kim's personal folder
+      registerFolder(env.db, box, { personalOwner: 'kim' })
+      for (const role of ['boss', 'dion', 'lee', 'bossNarrow'] as const) {
+        const r = await env.sh(role, 'grep -r PERSONAL_ /; cat /프로젝트/개인함/ruled/p.md /프로젝트/개인함/registered/p.md; ls /프로젝트')
+        expect({ role, out: r.stdout.includes('PERSONAL_') || r.stdout.includes('개인함') }).toEqual({ role, out: false })
+      }
+      const kim = await env.sh('kim', 'grep -rh PERSONAL_ /프로젝트/개인함 | sort')
+      expect(kim.stdout).toBe('PERSONAL_broken\nPERSONAL_registered\nPERSONAL_ruled\nPERSONAL_top\n')
+    } finally { env.cleanup() }
+  })
+  test.todo('re-registering a personal folder as an ordinary one (or another owner) is refused or notifies the owner (R9) — today registerFolder silently clears personal_owner [owner: admin REST / notifications]', () => {})
 })

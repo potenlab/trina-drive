@@ -49,10 +49,13 @@ function isXSymFile(real: string, size: bigint): boolean {
 
 /** R0: max over the person and their groups of the rules from F up to the nearest break (inclusive). */
 export function effectiveLevel(rows: FolderRow[], personId: number, groups: Set<number>, rules: Map<number, RuleRow[]>): number {
+  // Inside a personal folder only its owner counts, whatever lies below it (R0: no registration, rule or break may sit
+  // inside one — but rows made before the folder became personal, or by another path, must not reopen it).
+  const personal = rows.filter((r) => r.personal_owner != null)
+  if (personal.length) return personal.every((r) => r.personal_owner === personId) ? 2 : 0
   let best = 0
   for (let i = rows.length - 1; i >= 0; i--) {
     const r = rows[i]!
-    if (r.personal_owner != null) return r.personal_owner === personId ? 2 : 0
     for (const rule of rules.get(r.id) ?? []) {
       if ((rule.subject_type === 'person' && rule.subject_id === personId) || (rule.subject_type === 'group' && groups.has(rule.subject_id))) best = Math.max(best, rule.level)
     }
