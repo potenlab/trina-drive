@@ -453,7 +453,37 @@ describe('identity cases that exist on main', () => {
     } finally { env.cleanup() }
   })
 
-  test.todo('a Mac alias file (bookmark data / FinderInfo "alis") is closed like a link (R1 ⑤) [owner: reconciler]', () => {})
+  test('a Mac alias file (bookmark data / FinderInfo "alis") is closed like a link (R1 ⑤), before and after the reconciler sees it', async () => {
+    const env = securitySetup()
+    try {
+      await rec(env)
+      const bookmark = Buffer.concat([Buffer.from('book\0\0\0\0mark\0\0\0\0'), Buffer.from(`ALIAS_BOOK_${env.salt} /Volumes/hr/c.csv\n`)])
+      fs.writeFileSync(env.R('공용/바로가기.md'), bookmark)
+      // plain bytes, but its AppleDouble sidecar (how SMB keeps Mac Finder info) says: alias ('alis', kIsAlias)
+      fs.writeFileSync(env.R('공용/별칭.md'), `ALIAS_FINDER_${env.salt}\n`)
+      const ad = Buffer.alloc(70)
+      ad.writeUInt32BE(0x00051607, 0); ad.writeUInt32BE(0x00020000, 4); ad.writeUInt16BE(1, 24)
+      ad.writeUInt32BE(9, 26); ad.writeUInt32BE(38, 30); ad.writeUInt32BE(32, 34)
+      ad.write('alisMACS', 38, 'latin1'); ad.writeUInt16BE(0x8000, 46)
+      fs.writeFileSync(env.R('공용/._별칭.md'), ad)
+      const probe = async () => {
+        for (const role of ['kim', 'dion', 'boss'] as const) {
+          const x = await env.sh(role, `cat /공용/바로가기.md /공용/별칭.md; cat /.raw/공용/바로가기.md /.raw/공용/별칭.md; grep -r ALIAS_ /; base64 /공용/별칭.md`)
+          expect({ role, leak: (x.stdout + x.stderr).includes('ALIAS_') || x.stdout.includes(Buffer.from('ALIAS_FINDER').toString('base64').slice(0, 12)) }).toEqual({ role, leak: false })
+          expect((await env.tool(role, 'read', { path: '/공용/별칭.md' })).isError).toBe(true)
+        }
+        await expectClosed(env, ['kim'], '/공용/별칭.md')
+        await expectClosed(env, ['kim'], '/공용/바로가기.md')
+      }
+      await probe()
+      expect((await env.sh('kim', 'ls /공용')).stdout).not.toContain('별칭') // the sidecar is in the listing already: hidden at once
+      await rec(env)
+      await probe()
+      const closed = new Map(listEvents(env.db, { kind: 'closed' }).map((x) => { const d = JSON.parse(x.detail); return [d.reason, d.paths] }))
+      expect(closed.get('alias').sort()).toEqual([env.R('공용/바로가기.md'), env.R('공용/별칭.md')].sort())
+      expect((await env.sh('kim', 'ls -a /공용; find /공용')).stdout).not.toMatch(/바로가기|별칭/)
+    } finally { env.cleanup() }
+  })
 
   test.todo('the text mirror is keyed by (dev, ino, size, mtime): a file rewritten in place with the same size and a reset mtime serves its old text; key by content or re-hash on identity reuse [owner: reconciler / file-identity index]', () => {})
 })
