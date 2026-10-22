@@ -3,7 +3,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { TOKEN_PREFIX } from '../../src/config'
 import { serve } from '../../src/mcp'
-import { createToken } from '../../src/store'
+import { verifyAudit } from '../../src/audit'
+import { createToken, sha256 } from '../../src/store'
 import { securitySetup, type SecEnv } from './fixture'
 
 let e: SecEnv
@@ -188,5 +189,18 @@ describe('token format (secret scanners) and storage', () => {
     expect(dump).not.toContain(e.secrets.kim!)
   })
   test.todo('login and MCP rate limits (plan 7.1 "로그인·MCP 속도 제한") [owner: packaging / admin REST]', () => {})
-  test.todo('a token pasted into a bash command is redacted in the audit command line [owner: audit]', () => {})
+  test('a token pasted into a bash command or a tool argument is redacted in the audit command line (hash of the whole kept)', async () => {
+    const other = createToken(e.db, 'boss', { name: 'leaked' }).token
+    const gh = ['ghp_', 'Z9y8'.repeat(9)].join('')
+    const cmd = `echo ${other} ${gh} | wc -c; curl -H "Authorization: Bearer ${e.secrets.kim}" x`
+    expect((await post(call('bash', { command: cmd }), auth())).status).toBe(200)
+    await post(call('read', { path: `/drafts/${other}.md` }), auth())
+    await post(call('history', { path: `/drafts/${gh}.md`, action: 'list' }), auth())
+    const rows = e.db.query<{ command: string; command_sha256: string; files: string }, []>('SELECT command, command_sha256, files FROM audit ORDER BY id DESC LIMIT 3').all()
+    const dump = JSON.stringify(rows)
+    for (const secret of [other, gh, e.secrets.kim!]) expect(dump).not.toContain(secret.slice(-20))
+    expect(dump).toContain('[REDACTED')
+    expect(rows.at(-1)!.command_sha256).toBe(sha256(cmd))
+    expect(verifyAudit(e.db).ok).toBe(true)
+  })
 })

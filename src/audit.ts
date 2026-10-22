@@ -1,6 +1,7 @@
 // Audit log with a hash chain: each row's hash covers its fields and the previous row's hash.
 import type { DB } from './db'
 import { LIMITS } from './config'
+import { redactSecrets } from './redact'
 import { sha256 } from './store'
 
 const GENESIS = '0'.repeat(64)
@@ -21,9 +22,10 @@ export function truncateUtf8(s: string, max: number): string {
 /** Append one entry. Throws if it cannot be written: callers fail the whole call then (closed by default). */
 export function appendAudit(db: DB, e: AuditEntry) {
   const prev = db.query<{ hash: string }, []>('SELECT hash FROM audit ORDER BY id DESC LIMIT 1').get()?.hash ?? GENESIS
-  const files = e.files.length > LIMITS.auditFiles ? [...e.files.slice(0, LIMITS.auditFiles), `… ${e.files.length - LIMITS.auditFiles} more`] : e.files
-  const r = { at: Date.now(), person_id: e.personId, token_id: e.tokenId, tool: e.tool, command: truncateUtf8(e.command, LIMITS.auditCommandBytes),
-    command_sha256: sha256(e.command), files: JSON.stringify(files), outcome: e.outcome }
+  const files = (e.files.length > LIMITS.auditFiles ? [...e.files.slice(0, LIMITS.auditFiles), `… ${e.files.length - LIMITS.auditFiles} more`] : e.files).map(redactSecrets)
+  // secrets pasted into a command are redacted before the cut; the hash still covers the whole original line
+  const r = { at: Date.now(), person_id: e.personId, token_id: e.tokenId, tool: e.tool, command: truncateUtf8(redactSecrets(e.command), LIMITS.auditCommandBytes),
+    command_sha256: sha256(e.command), files: JSON.stringify(files), outcome: redactSecrets(e.outcome) }
   db.query('INSERT INTO audit (at, person_id, token_id, tool, command, command_sha256, files, outcome, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(r.at, r.person_id, r.token_id, r.tool, r.command, r.command_sha256, r.files, r.outcome, prev, rowHash(prev, r))
 }
