@@ -49,3 +49,16 @@ describe('XSym link files (R1 ⑤)', () => {
     } finally { fs.unlinkSync(a); fs.unlinkSync(b) }
   })
 })
+
+describe('snapshot folders beyond the R1 ⑥ list', () => {
+  test('a visible ZFS .zfs/snapshot copy of a hidden folder is closed', async () => {
+    const d = path.join(e.root, '공용/.zfs/snapshot/daily/인사')
+    fs.mkdirSync(d, { recursive: true })
+    fs.writeFileSync(path.join(d, '급여.csv'), 'ZFS_SNAPSHOT_COPY\n')
+    try {
+      const r = await e.sh('kim', 'ls -a /공용; grep -r ZFS_SNAPSHOT_COPY /; cat /공용/.zfs/snapshot/daily/인사/급여.csv')
+      expect(r.stdout).not.toContain('.zfs')
+      expect(r.stdout).not.toContain('ZFS_SNAPSHOT_COPY')
+    } finally { fs.rmSync(path.join(e.root, '공용/.zfs'), { recursive: true }) }
+  })
+})
