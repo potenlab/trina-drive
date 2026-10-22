@@ -5,6 +5,7 @@ import { go, useSession } from '../App'
 import { t } from '../i18n'
 import { ErrorLine, useAction } from '../ui'
 import { RegisterForm } from './RegisterForm'
+import { SecondFactorStep, type SecondFactorChallenge } from './SecondFactor'
 
 export function Login() {
   const { setMe } = useSession()
@@ -12,11 +13,14 @@ export function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [second, setSecond] = useState<SecondFactorChallenge | null>(null)
+  if (second) return <SecondFactorStep challenge={second} />
   return (
     <form className="card narrow" onSubmit={async (e) => {
       e.preventDefault(); setBusy(true); setError(null)
       try {
-        const r = await api<{ me: Me; csrf: string }>('POST', '/login', { login, password })
+        const r = await api<{ me: Me; csrf: string; second_factor?: SecondFactorChallenge }>('POST', '/login', { login, password })
+        if (r.second_factor) { setSecond(r.second_factor); return }
         setCsrf(r.csrf); setMe(r.me); go(r.me.admin ? '/folders' : '/files')
       } catch (err) {
         setError(err instanceof ApiError && err.status === 429 ? t('login_rate') : t('login_bad'))
@@ -81,15 +85,18 @@ export function LinkPage({ kind, token }: { kind: 'invite' | 'reset'; token: str
   const { setMe } = useSession()
   const [name, setName] = useState<string | null | false>(null)
   const [password, setPassword] = useState('')
+  const [second, setSecond] = useState<SecondFactorChallenge | null>(null)
   const a = useAction()
   useEffect(() => { api<{ name: string }>('POST', '/links/check', { kind, token }).then((r) => setName(r.name), () => setName(false)) }, [kind, token])
+  if (second) return <SecondFactorStep challenge={second} />
   if (name === null) return null
   if (name === false) return <div className="card narrow"><p className="error">{t('link_bad')}</p><a href="#/login">{t('login_title')}</a></div>
   return (
     <form className="card narrow" onSubmit={async (e) => {
       e.preventDefault()
-      const r = await a.run(() => api<{ me?: Me; csrf?: string }>('POST', '/links/accept', { kind, token, password }))
-      if (r?.me && r.csrf) { setCsrf(r.csrf); setMe(r.me); go(kind === 'reset' ? '/tokens' : r.me.admin ? '/folders' : '/files') }
+      const r = await a.run(() => api<{ me?: Me; csrf?: string; second_factor?: SecondFactorChallenge }>('POST', '/links/accept', { kind, token, password }))
+      if (r?.second_factor) setSecond(r.second_factor)
+      else if (r?.me && r.csrf) { setCsrf(r.csrf); setMe(r.me); go(kind === 'reset' ? '/tokens' : r.me.admin ? '/folders' : '/files') }
       else if (r) go('/login')
     }}>
       <h1>{t(kind === 'invite' ? 'link_invite_title' : 'link_reset_title', { name })}</h1>
