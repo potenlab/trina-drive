@@ -1,0 +1,4 @@
+
+[test]
+# shell commands run in isolated worker processes; suites with many commands need more than the 5 s default
+timeout = 30000
