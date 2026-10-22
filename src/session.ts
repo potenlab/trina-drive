@@ -10,7 +10,11 @@ import { Access, type FileEntry, type Node } from './policy'
 import { ensureFolder, identityKey, type TokenRow } from './store'
 
 /** `now` is injectable so the provenance simulation can replay a day. */
-export interface Ctx { db: DB; dataDir: string; mirror: Mirror; blobs: Blobs; now: () => number }
+export interface Ctx {
+  db: DB; dataDir: string; mirror: Mirror; blobs: Blobs; now: () => number
+  /** after a call is committed (notify: bulk-read alarm, original-write attempts); errors are logged, never fail the call */
+  onCommit?: (s: Session, tool: string, outcome: string) => void
+}
 
 export function makeCtx(db: DB, dataDir: string): Ctx {
   return { db, dataDir, mirror: new Mirror(db, path.join(dataDir, 'mirror')), blobs: new Blobs(path.join(dataDir, 'blobs')), now: Date.now }
@@ -26,6 +30,8 @@ export class Session {
   readonly files = new Set<string>()
   readonly notes = new Set<string>()
   readonly extracted = new Set<string>()
+  /** files whose content this call output: vpath -> original size, folder identity (bulk-read alarm) */
+  readonly contentFiles = new Map<string, { size: number; folder: string }>()
   /** own draft path -> new content, or null = deleted */
   readonly pending = new Map<string, Uint8Array | null>()
   readonly pendingDirs = new Set<string>()
@@ -43,7 +49,11 @@ export class Session {
     const t = this.folderTouches.get(k)
     if (!t || (strong && !t.strong)) this.folderTouches.set(k, { node, strong: strong || !!t?.strong })
   }
-  touchFile(f: FileEntry, strong: boolean) { this.touchNode(f.parent, strong); this.files.add(f.vpath) }
+  touchFile(f: FileEntry, strong: boolean) {
+    this.touchNode(f.parent, strong)
+    this.files.add(f.vpath)
+    if (strong) this.contentFiles.set(f.vpath, { size: f.size, folder: identityKey(f.parent.dev, f.parent.ino) })
+  }
   /** Reading a draft brings its sources into this token's window. */
   touchDraft(item: DraftItem, strong: boolean) {
     this.files.add('/drafts/' + item.rel)
@@ -116,5 +126,6 @@ export class Session {
       }
       appendAudit(db, { personId: this.token.person_id, tokenId: this.token.id, tool, command, files: [...this.files], outcome })
     })()
+    try { this.ctx.onCommit?.(this, tool, outcome) } catch (e) { console.error('[onCommit] failed:', e) }
   }
 }
