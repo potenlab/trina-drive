@@ -1,0 +1,38 @@
+{
+  "comment": "External tools in a release (scripts/build.ts). Pinned: a download is accepted only with this SHA-256; a Homebrew build only at this version (unless --accept-tool-drift). Update both fields together and note it in the release notes.",
+  "tools": [
+    {
+      "package": "ripgrep",
+      "version": "15.2.0",
+      "license": "MIT OR Unlicense",
+      "binaries": ["rg"],
+      "source": "download",
+      "targets": {
+        "darwin-arm64": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-apple-darwin.tar.gz",
+          "sha256": "3750b2e93f37e0c692657da574d7019a101c0084da05a790c83fd335bad973e4",
+          "dir": "ripgrep-15.2.0-aarch64-apple-darwin",
+          "licenses": ["COPYING", "LICENSE-MIT", "UNLICENSE"]
+        },
+        "darwin-x64": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-apple-darwin.tar.gz",
+          "sha256": "af7825fcc69a2afc7a7aea55fc9af90e26421d8f20fe59df32e233c0b8a231c1",
+          "dir": "ripgrep-15.2.0-x86_64-apple-darwin",
+          "licenses": ["COPYING", "LICENSE-MIT", "UNLICENSE"]
+        }
+      }
+    },
+    {
+      "package": "poppler",
+      "version": "26.04.0",
+      "license": "GPL-2.0-only OR GPL-3.0-only (and the licenses of its libraries, copied to tools/licenses/)",
+      "binaries": ["pdftotext"],
+      "source": "homebrew",
+      "comment": "Poppler publishes no macOS binaries. The build machine's Homebrew bottle is copied with its library closure into tools/lib and relinked to @rpath (install_name_tool), then re-signed. Only a build host of the same CPU type can vendor it.",
+      "targets": {
+        "darwin-arm64": { "brewPrefix": "/opt/homebrew" },
+        "darwin-x64": { "brewPrefix": "/usr/local" }
+      }
+    }
+  ]
+}
