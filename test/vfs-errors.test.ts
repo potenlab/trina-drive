@@ -5,10 +5,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import fs from 'node:fs'
 import path from 'node:path'
 import { onPolicyError } from '../src/policy'
-import type { Session } from '../src/session'
+import { Session } from '../src/session'
 import { setRule } from '../src/store'
 import { onInternalError } from '../src/vfs'
-import { HIDDEN_PROBES, setup, SHELL_MODES, withShellMode, type Env } from './helpers'
+import { HIDDEN_PROBES, setup, SHELL_MODES, textOf, withShellMode, type Env } from './helpers'
 
 let e: Env
 const reported: string[] = []
@@ -77,5 +77,15 @@ describe('an unexpected error after a path was resolved', () => {
     expect(grep!.stdout).toBe('exit=2\n')
     expect(echo!.stdout).toBe('still running\n')
     expect(reported.filter((r) => r.includes('provenance exploded')).length).toBeGreaterThan(0)
+  })
+
+  test('the read tool shows the same fixed I/O error', async () => {
+    const orig = Session.prototype.touchFile
+    Session.prototype.touchFile = () => { throw new Error('provenance exploded at /srv/team/프로젝트/README.md') }
+    try {
+      const r = await e.tool('kim', 'read', { path: '/프로젝트/README.md' })
+      expect(r.isError).toBe(true)
+      expect(textOf(r)).toBe("EIO: input/output error, open '/프로젝트/README.md'")
+    } finally { Session.prototype.touchFile = orig }
   })
 })
