@@ -56,6 +56,9 @@ connections list [--all] | connections revoke <token-id>
 notify contact <person> [--email E] [--slack URL] [--lang en|ko] | notify inbox <person> [--all] [--read]
 notify show | notify set <key> <json> | notify flush
 demo seed | sh --token <pat> -c <command> | serve [--port] [--host] [--allow-origin]
+audit verify | demo seed | sh --token <pat> -c <command> | serve [--port] [--host] [--allow-origin] [--reconcile-every 5m|--no-reconcile]
+share add <path> | share list | reconcile once [--json] | reconcile watch [--every 5m] [--no-watch-hint]
+events list [--kind K] | quarantine list [--all] | quarantine release <id> --by <person> | widened list | widened rejudge
 ```
 
 ## MCP
@@ -200,6 +203,9 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
 - No NAS watcher, no reconciliation of moved/renamed folders (a registered folder whose identity changed is simply
   closed), no file-identity index (so R1 ⑤ "same identity at another path" is covered only by `nlink == 1`), no Mac
   alias/XSym detection, no "widened draft" detection (the notifier takes `widened_draft` events, nothing emits them yet), no `manage` enforcement beyond storing
+- Reconciler (below) is after the fact between passes: a move is closed from the moment an agent walks into it until
+  the next pass judges it, but a brand-new file appears to agents before its first hash/extraction (R6 copy detection
+  runs on the next pass). No notifications (R11; events carry the recipients), no `manage` enforcement beyond storing
   grants, no web UI, no trash/purge of drafts (deleted drafts keep their rows and blobs).
 - grep: BRE/ERE are translated to Rust regex (no backreferences/lookaround — refused with ripgrep's message);
   `sed`/`awk` regexes run in just-bash (it uses re2js, a linear engine, for most of them). Output of `wc` with no flag
@@ -207,6 +213,25 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
 - Timing differences between hidden and nonexistent paths are not equalised. Audit tail truncation after the last anchor is not caught
   (rows removed since then look like rows never written); the anchor covers everything up to it.
 - macOS and Linux only. On APFS two NFC/NFD spellings cannot coexist, so that case is tested with a simulated listing.
+
+## In-place reconciler (plan 2.2, R1 ⑤–⑦, R6, R10, 11-9)
+
+`src/inplace/`. Walks the registered folders (and `share add` roots: the whole share, identity + hash only) with lstat,
+never following links and skipping NAS system folders; diffs against the last walk by identity (dev+ino, birth time).
+
+| finding | what happens |
+|---|---|
+| rename (same identity, same parent), move that does not widen | rules follow the identity; folder paths updated |
+| move whose new readers (R5 target) are wider than the old location's (R5 source) | identity quarantined (`quarantine` kind `moved`) + event for admins and old-location managers |
+| a rule-bearing folder's identity vanished | its last path stays closed for any other identity (`lost`), rules stay on the lost id |
+| symlink, hard link, identity at 2+ paths, XSym file, Mac alias (data or AppleDouble Finder info), NFC collision | closed (`fs_index.closed`) + one `closed` event per reason per pass |
+| new/changed file | sha256 (small first), text mirror filled (queue, 2 at a time), compared with every draft version: same sha256 or ≥ 30% paragraph overlap → `widened` row; if `isWidening(Src(d), folder)` → `pending` (closed to agents) until the admin or a manager of every source confirms; confirmed/tracked copies pass Src(d) on to readers |
+| any outside change | one `outside-change` row in the audit chain (`~$*`, `.~lock.*#`, `~WRL*.tmp`, `.DS_Store`, `._*` filtered) |
+
+Between passes the policy closes anything the index saw at another path (moved since) and asks for a pass; XSym/alias
+bytes are refused at read time. `serve` reconciles on start, every 5 min (`--reconcile-every`) and on fs.watch hints.
+10k small files on a local SSD: first pass ≈ 0.8 s (identity + sha256), ≈ 4 s with the text mirror; unchanged pass ≈ 0.2 s
+(`bun test test/reconcile-bench.test.ts` prints it).
 
 ## Dependencies and licenses (plan ★1)
 

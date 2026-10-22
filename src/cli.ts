@@ -7,9 +7,12 @@ import { openDb } from './db'
 import { seedDemo } from './demo'
 import { TOOLS } from './extract'
 import { serve } from './mcp'
+import { listEvents, listQuarantine, releaseQuarantine } from './inplace/events'
+import { addShareRoot, reconcile, shareRoots, startReconciler, summary } from './inplace/reconcile'
+import { listWidened, rejudgeWidened } from './inplace/widened'
 import { makeCtx, Session } from './session'
 import { runShell } from './shell'
-import { addGroup, addMember, addPerson, createToken, grantManage, LEVELS, parseDuration, registerFolder, setFlag, setRule, StoreError, verifyToken, type LevelName, type NasReaders } from './store'
+import { addGroup, addMember, addPerson, createToken, grantManage, LEVELS, parseDuration, person, registerFolder, revokeToken, setFlag, setRule, StoreError, verifyToken, type LevelName, type NasReaders } from './store'
 import { notifyCommand, NOTIFY_HELP } from './notify/cli'
 import { attachNotify } from './notify'
 
@@ -31,8 +34,16 @@ usage: ${NAME} [--data DIR] <command>
 ${NOTIFY_HELP}
   demo seed                              sample company tree, people, rules and tokens
   sh --token <pat> -c <command>          run one shell command as that token (audited)
-  serve [--port 8787] [--host 127.0.0.1] [--allow-origin URL]
+  serve [--port 8787] [--host 127.0.0.1] [--allow-origin URL] [--reconcile-every 5m | --no-reconcile]
   backup …                 (encrypted backups; see: backup help)
+
+in-place reconciler (outside changes, R1 ⑤–⑦, R6, R10):
+  share add <path> | share list          also index this whole share (identity + hash only), not just registered folders
+  reconcile once [--json]                one pass: walk, diff, quarantine, hash, mirror, widened drafts
+  reconcile watch [--every 5m] [--no-watch-hint]
+  events list [--kind K] [--limit N]
+  quarantine list [--all] | quarantine release <id> --by <person>   (moved/lost: admin; widened: admin or source manager)
+  widened list | widened rejudge         NAS copies of drafts; re-judge after rule / group / NAS-reader changes
 
 data directory: --data, $${NAME.toUpperCase()}_HOME, or ~/.${NAME}`
 
@@ -129,7 +140,45 @@ async function main(argv: string[]) {
       process.exitCode = r.exitCode
       return
     }
+    case 'share add': return console.log(`share root: ${addShareRoot(db, need(rest[0], 'path'))}`)
+    case 'share list': for (const r of shareRoots(db)) console.log(r.path); return
+    case 'reconcile once': {
+      const json = takeBool(rest, '--json')
+      const r = await reconcile(db, { dataDir })
+      return console.log(json ? JSON.stringify(r, null, 2) : summary(r))
+    }
+    case 'reconcile watch': {
+      const every = takeFlag(rest, '--every')
+      const watch = !takeBool(rest, '--no-watch-hint')
+      startReconciler(db, { dataDir, intervalMs: every ? parseDuration(every) : undefined, watch, log: (s) => console.log(`${new Date().toISOString()} ${s}`) })
+      console.log(`reconciling every ${every ?? '5m'}${watch ? ' (+ fs.watch hints)' : ''}; Ctrl-C to stop`)
+      return new Promise(() => {})
+    }
+    case 'events list': {
+      const kind = takeFlag(rest, '--kind'), limit = takeFlag(rest, '--limit')
+      for (const e of listEvents(db, { kind, limit: limit ? Number(limit) : undefined }).reverse()) {
+        console.log(`#${e.id} ${new Date(e.at).toISOString()} ${e.kind} ${e.old_path ? `${e.old_path} -> ` : ''}${e.path ?? ''} ${e.detail !== '{}' ? e.detail : ''}`.trimEnd())
+      }
+      return
+    }
+    case 'quarantine list': {
+      for (const q of listQuarantine(db, { all: takeBool(rest, '--all') })) {
+        console.log(`${q.id}\t${q.kind}\t${q.item}\t${q.path}\t${q.reason}${q.released_at ? `\treleased ${new Date(q.released_at).toISOString()}` : ''}`)
+      }
+      return
+    }
+    case 'quarantine release': {
+      const by = need(takeFlag(rest, '--by'), '--by <person>')
+      releaseQuarantine(db, Number(need(rest[0], 'quarantine id')), person(db, by).id)
+      return console.log(`released ${rest[0]}`)
+    }
+    case 'widened list': {
+      for (const w of listWidened(db)) console.log(`${w.id}\t${w.status}\t${w.widening ? 'widening' : 'not widening'}\tdraft ${w.draft_id} v${w.draft_version}\t${w.match} ${Math.round(w.overlap * 100)}%\t${w.path}`)
+      return
+    }
+    case 'widened rejudge': { const r = rejudgeWidened(db); return console.log(`judged ${r.judged}, now pending: ${r.flipped.length}`) }
     case 'serve': {
+      const every = takeFlag(rest, '--reconcile-every'), noReconcile = takeBool(rest, '--no-reconcile')
       const port = Number(takeFlag(rest, '--port') ?? 8787)
       const host = takeFlag(rest, '--host') ?? '127.0.0.1'
       const origin = takeFlag(rest, '--allow-origin')
@@ -141,6 +190,7 @@ async function main(argv: string[]) {
       const server = serve(ctx, port, host, { allowedOrigins: origin ? [origin] : [], onRequest: notify.onMcpRequest })
       console.log(`${NAME} ${VERSION} MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
       console.log(`tools: rg=${TOOLS.rg} pdftotext=${TOOLS.pdftotext ?? 'missing'}`)
+      if (!noReconcile) startReconciler(db, { dataDir, intervalMs: every ? parseDuration(every) : undefined })
       return new Promise(() => {})
     }
     default:

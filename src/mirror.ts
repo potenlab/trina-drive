@@ -43,6 +43,34 @@ export class Mirror {
     return out
   }
 
+  /**
+   * Fill the mirror for an original the reconciler found (bytes already read without following links and checked
+   * against the identity by the caller). Returns the text, or null if it cannot be extracted. Nothing is served from
+   * here: reads still go through textPath and the policy.
+   */
+  async ingest(f: { name: string; dev: bigint | string; ino: bigint | string; size: number; mtimeNs: bigint | string }, bytes: Uint8Array,
+    extract: (name: string, bytes: Uint8Array) => Promise<string> = extractText): Promise<string | null> {
+    const key = [String(f.dev), String(f.ino), f.size, String(f.mtimeNs)] as const
+    const sha = sha256(bytes)
+    const out = this.file(sha)
+    let status = 'ok', message: string | null = null, text: string | null = null
+    if (fs.existsSync(out)) text = fs.readFileSync(out, 'utf8')
+    else {
+      try {
+        text = isOffice(f.name) ? await extract(f.name, bytes) : new TextDecoder().decode(bytes)
+        fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 })
+        const tmp = `${out}.${process.pid}.${Math.random().toString(36).slice(2)}`
+        fs.writeFileSync(tmp, isOffice(f.name) ? text : bytes, { mode: 0o600 })
+        fs.renameSync(tmp, out)
+      } catch (e) {
+        if (!(e instanceof ExtractError)) throw e
+        status = 'error'; message = e.message; text = null
+      }
+    }
+    this.db.query('INSERT OR REPLACE INTO mirror (dev, ino, size, mtime_ns, sha256, status, message) VALUES (?, ?, ?, ?, ?, ?, ?)').run(...key, sha, status, message)
+    return text
+  }
+
   /** Text of `f` as bytes (office files: extracted; others: original bytes). */
   async text(access: Access, f: FileEntry): Promise<Uint8Array> {
     if (!isOffice(f.name)) return access.readBytes(f, LIMITS.fileBytes)
