@@ -32,15 +32,49 @@ bun run src/cli.ts --data ./.shelf sh --token <boss token> -c 'grep -r 매출 /'
 bun run src/cli.ts --data ./.shelf audit verify
 ```
 
-Connect Claude Code (documentation only; the token goes to your user-scope config, never a project `.mcp.json`):
-
-```sh
-claude mcp add --transport http shelf http://127.0.0.1:8787/mcp --header "Authorization: Bearer shelf_pat_…"
-```
+Connect an AI client on your own computer: `bun run src/cli.ts mcp add claude|codex|cursor --server http://127.0.0.1:8787
+--login kim` (see [Connecting clients](#connecting-clients)).
 
 The demo: people `dion` (admin), `kim` (member, not 경영), `boss` (경영), `lee` (인사), `park` (영업); folders
 `경영`, `프로젝트`, `인사`, `영업`, `공용` and kim's personal folder `개인_kim`, with csv/md plus generated pdf, docx,
 xlsx, hwpx and hwp files. `bun run sim/provenance-day.ts` replays an office day (plan ★8, see below).
+
+## Connecting clients
+
+`mcp add` runs on the person's own computer (it never opens a data directory). It signs in with the person's password
+(`--password-stdin`, `$SHELF_PASSWORD`, or a no-echo prompt), makes a personal token on the server (`POST /api/tokens`:
+default 7 days, all folders the person reads; `--scope 공용,프로젝트`, `--read-only`, `--ttl`; admins must pass `--scope`
+or `--all-folders`, plan 5.1), signs out, and connects the client **in user scope only** — never a repo's `.mcp.json`,
+`.cursor/mcp.json` or `.codex/`. `--token-stdin` takes an existing token instead (a token argument is refused: shell
+history). `--dry-run` prints every command and file it would write, with `<token>` in place of the secret, and contacts
+nothing.
+
+The token is kept in the macOS login Keychain (`security -i` on stdin, so it never appears in a process list; service
+`shelf-mcp`, account `<client>:<name>`), or with `--store file` (default off macOS) in `~/.config/shelf/tokens/<client>-<name>`
+(0600). `--store inline` writes it into the client's file in clear text, with a warning (refused when that file is in a
+git work tree, e.g. a dotfiles `$HOME`). Codex and Cursor read it from an environment variable that
+`~/.config/shelf/env.sh` sets (on macOS each line reads the Keychain; no secret in the file): add
+`. ~/.config/shelf/env.sh` to your shell profile once.
+
+| client (checked 2026-10-23) | how it is written | where | token reference |
+|---|---|---|---|
+| Claude Code 2.1.308 | `claude mcp add-json --scope user shelf '{"type":"http","url":…,"headersHelper":…}'` (run in `$HOME`); without the CLI, `mcpServers.shelf` in `~/.claude.json` (`$CLAUDE_CONFIG_DIR` honoured) | user scope | `headersHelper`: a command Claude runs to get `{"Authorization":"Bearer …"}`, here `printf … "$(security find-generic-password … -w)"` |
+| Codex 0.163.0 | `codex mcp add shelf --url …/mcp --bearer-token-env-var SHELF_TOKEN_CODEX`; without the CLI, `[mcp_servers.shelf]` in `~/.codex/config.toml` (`$CODEX_HOME` honoured) | user config | `bearer_token_env_var`. `--auto-approve` adds `default_tools_approval_mode = "approve"` (otherwise `codex exec`, approval policy "never", refuses every call of this server) |
+| Cursor (cursor-agent 2026.09.18) | no `mcp add` command: `mcpServers.shelf` in `~/.cursor/mcp.json` | user scope | `"Authorization": "Bearer ${env:SHELF_TOKEN_CURSOR}"`; enable it in Settings → MCP or `cursor-agent mcp enable shelf` / `--approve-mcps` |
+
+Before writing, it reads that client's existing entries pointing at the same server (any name, Claude's local-scope
+`projects.*` too) and warns (plan M8) when one holds a broader token (all folders where the new one is narrowed, or
+drafts allowed where the new one is read-only — compared through `GET /api/tokens` by the token hint), when one keeps a
+token in clear text, or when its token cannot be read. An entry with the same name is replaced only with `--force`.
+Plain `http://` to a non-loopback address is warned about (password and token cross the network unencrypted).
+
+Checked live with HOME set to a scratch directory: `claude mcp get shelf` → "✔ Connected" through the headersHelper
+(and "✘ Failed to connect" with a wrong token), `codex mcp get shelf --json` shows the streamable HTTP transport with
+`bearer_token_env_var`, and `cursor-agent mcp list-tools shelf` lists the five tools through `${env:…}`.
+
+Revoke a token on the web (My tokens) when you stop using it; `claude mcp remove shelf -s user`,
+`codex mcp remove shelf`, or delete the entry from `~/.cursor/mcp.json`, and the Keychain item
+(`security delete-generic-password -s shelf-mcp -a <client>:shelf`).
 
 ## Web admin (v0.1)
 
@@ -53,8 +87,9 @@ open http://127.0.0.1:8787/                         # paste the setup token, cre
 
 One Bun server: `/mcp` (Bearer tokens only), `/api` (people's sessions), the app at `/`. Sessions: argon2id
 passwords, cookie `shelf_session` (HttpOnly, SameSite=Strict, `Path=/api`, Secure on https), a CSRF token per session
-on every change, same-origin `Origin` required from browsers, JSON bodies only, sign-in rate limit per name and per
-address. First setup only with the setup token from `init` (loopback is not trusted). Invite and reset links are
+on every change, same-origin `Origin` required from browsers, JSON bodies only, sign-in rate limit per name (5 failures)
+and per address (50 attempts) per 15 minutes, kept in SQLite (`rate_limits`, keys stored as sha256) so a restart does
+not reset them; 429 carries `Retry-After`. First setup only with the setup token from `init` (loopback is not trusted). Invite and reset links are
 one-time and carry their secret in the `#fragment`. Mail is a pluggable `Mailer`; the built-in one appends to
 `<data>/outbox.log`. CSP `default-src 'self'`, `frame-ancestors 'none'`, nosniff, `Referrer-Policy: no-referrer`.
 
@@ -68,7 +103,8 @@ or `src/policy.ts` (drafts, R4 with the session as a full-scope token). What the
 | people (admin changes) | `GET people`, `POST people` (→ invite link), `PATCH people/:id` (admin, active, email → old address told), `POST people/:id/invite`, `POST people/:id/reset` (link mailed to the person only; their tokens and sessions are cut) |
 | groups (admin) | `POST groups`, `DELETE groups/:id`, `PUT/DELETE groups/:id/members/:pid` |
 | folders | `GET folders`, `POST folders` (admin; templates public/team/management/personal/custom, NAS readers all/same-as-ai/chosen/unknown), `GET folders/:id` (the NAS/AI table), `PATCH folders/:id` (no_ai, inherit_break, quarantine, name), `DELETE folders/:id` (admin), `PUT folders/:id/rules`, `PUT folders/:id/nas`, `PUT folders/:id/owner`, `POST folders/:id/subfolders`, `PUT/DELETE folders/:id/managers/:pid` (admin) |
-| tokens (own only) | `GET tokens`, `POST tokens` (shown once), `DELETE tokens/:id` |
+| tokens (own only) | `GET tokens`, `POST tokens` (shown once), `DELETE tokens/:id`, `POST tokens/:id/provenance-reset` ("출처 초기화", below) |
+| fresh login | `POST me/reauth` `{password}`: the password typed again counts as a fresh login for 5 minutes (as does signing in) |
 | drafts (own, R4) | `GET drafts` (+ locked count and dates), `GET drafts/:id/download` |
 | audit | `GET audit?view=mine` · `view=folders` (folders you manage; others' command lines hidden) · `view=summary` (admin: who, which connection, how many; hash-chain check) |
 
@@ -79,7 +115,7 @@ only) go to the folder's managers and the admin on self-grants (rule, group, man
 personal-folder unregister/owner change, and re-registering a former personal folder.
 
 Web tables (created on demand by `src/web/schema.ts`, not in `db.ts`): `accounts`, `web_sessions`, `web_links`,
-`notices`, `folder_history`; keys `web_setup_token` and `everyone_group` in `meta`.
+`notices`, `folder_history`, `web_reauth`; `rate_limits` (src/ratelimit.ts); keys `web_setup_token` and `everyone_group` in `meta`.
 
 ## CLI
 
@@ -96,6 +132,8 @@ notify contact <person> [--email E] [--slack URL] [--lang en|ko] | notify inbox 
 notify show | notify set <key> <json> | notify flush
 demo seed | sh --token <pat> -c <command> | serve [--port] [--host] [--allow-origin]
 audit verify | demo seed | sh --token <pat> -c <command> | serve [--port] [--host] [--allow-origin] [--reconcile-every 5m|--no-reconcile]
+mcp add claude|codex|cursor --server URL [--login N] [--password-stdin|--token-stdin] [--name shelf] [--token-name N]
+        [--ttl 7d] [--scope f1,f2|--all-folders] [--read-only] [--store keychain|file|inline] [--auto-approve] [--force] [--dry-run]
 share add <path> | share list | reconcile once [--json] | reconcile watch [--every 5m] [--no-watch-hint]
 events list [--kind K] | quarantine list [--all] | quarantine release <id> --by <person> | widened list | widened rejudge
 ```
@@ -105,6 +143,13 @@ events list [--kind K] | quarantine list [--all] | quarantine release <id> --by 
 `POST /mcp`, Streamable HTTP in its stateless JSON form (one JSON-RPC message per POST, `application/json` reply, no
 SSE, no session). Protocol versions `2026-07-28` and `2025-11-25`. `Authorization: Bearer shelf_pat_…` only (cookies
 are never read); foreign `Origin` headers are refused (DNS-rebinding guard); listens on 127.0.0.1 by default.
+
+Rate limits (`src/ratelimit.ts`, `MCP_LIMITS`; plan 7.1): per token 120 requests/min and 4 at once, per source address
+600/min and 16 at once, and 30 requests/min with a missing or wrong bearer token per address (after that the address is
+refused, valid token or not, until the minute ends). Over a limit: HTTP 429, `Retry-After` (seconds) and a JSON-RPC
+error `{code: -32029, message: "rate limit: …", data: {retry_after}}` with the request's id when it was readable.
+`serve` and the web server always install a limiter (in memory: a restart ends every request anyway). Addresses are the
+TCP peer: behind a reverse proxy every client shares one address.
 
 | tool | what |
 |---|---|
@@ -145,12 +190,21 @@ and the token's scope is computed inside it.
   the command only looked (non-matching grep targets, `grep -l/-c/-q`, `ls`, `stat`, `wc`, `sha256sum`, `test`).
   A draft's sources = union of the writing token's window at each write; they never shrink; reading a draft brings its
   sources into the reader's window.
+  **Provenance reset** ("출처 초기화", plan 5.1): the person, on the web (My tokens → "Reset provenance") or
+  `POST /api/tokens/:id/provenance-reset` on their own token, after a fresh login (password typed within the last 5
+  minutes: sign-in, `POST /api/me/reauth`, or `password` in the body), empties that token's window (its `touches` rows
+  only — other tokens and every existing draft's sources stay). One audit row on that token; event `provenance_reset`
+  to the admins and the person (kind, count, link; R11).
 - **R4 draft visibility**: same person ∧ the token can read every source folder right now; no sources → only the token
   that wrote it. Other people and admins never see drafts.
 - **R5/R6 widening** (`isWidening(src, target)`): target readers = rule readers ∪ NAS readers ("unknown" = everyone);
   source readers = rule readers (none if no-AI/quarantined) ∪ NAS readers ("unknown" = nobody); widening if some target
   reader is not a reader of some source S ≠ target. Function and tests only; no NAS watcher.
 - **Audit**: every tool call (command line cut at 4 KB + sha256 of the whole, files touched, outcome), hash-chained;
+  secrets in the command line, file names and outcome are redacted before storing (`src/redact.ts`: our tokens keep
+  their 4-character hint, e.g. `shelf_pat_AbCd…[REDACTED:token]`; setup tokens, AWS key ids and secrets, GitHub, GitLab,
+  Slack tokens and webhooks, PEM private keys, `Authorization:`/Bearer/Basic values, JWTs, OpenAI/Stripe/Google keys,
+  URL passwords, `password=`/`token=`-style assignments); the sha256 still covers the whole original line;
   touches, draft writes and the audit row commit in one transaction, so if the audit row cannot be written the call
   fails and nothing it wrote is kept.
 
@@ -171,6 +225,7 @@ Plan §4.1 R9/R11, §5.1 "출처와 기록", §7.1 (token leak, audit forgery). 
 | `password_reset` | admin API: `{kind, subjectPersonId}` | only that person (their own address) |
 | `token_revoked` | `connections revoke`, `token revoke`, auto-suspend | the token owner |
 | `audit_anchor` | anchor timer, `audit anchor` | admins (email carries the signed anchor) |
+| `provenance_reset` | web: `POST /api/tokens/:id/provenance-reset` | admins (detail) and the person (if it was not them, their password is known) |
 
 `manage` is inherited down (none inside personal folders); inactive people never receive anything.
 
@@ -226,6 +281,8 @@ src/extract/       pdf (pdftotext), docx/xlsx/pptx, hwpx, hwp (own CFB reader), 
 src/rights.ts      R5/R7/R9 admin-side decisions            src/web/        REST API, sessions, mail, notices, server
 web/               the admin app (Vite + React, en/ko)
 src/samples.ts     generated sample office files            src/demo.ts     demo seed       src/cli.ts  CLI
+src/redact.ts      secrets out of audit rows                src/ratelimit.ts  sign-in (SQLite) and /mcp limits
+src/client/mcp.ts  `mcp add claude|codex|cursor` (runs on the person's computer)
 src/notify/        events, recipients, messages (R11), notifier (inbox, coalescing, rate limit, digest), channels
                    (Slack, outbox, smtp), bulk-read alarm, connections, audit anchor, its CLI and tables (schema.ts)
 sim/provenance-day.ts   plan ★8 replay                      test/           bun test
