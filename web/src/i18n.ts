@@ -1,0 +1,202 @@
+// Screen text in English and Korean. The browser's language picks the first one; the choice in Settings (or the
+// switch in the header) is kept in this browser. Korean must have every English key (TypeScript checks it).
+import { useSyncExternalStore } from 'react'
+
+const en = {
+  app_tagline: 'Team folders for AI agents',
+  nav_folders: 'Folders', nav_people: 'People', nav_tokens: 'My tokens', nav_drafts: 'My drafts', nav_audit: 'Audit', nav_settings: 'Settings',
+  sign_out: 'Sign out', notices: 'Notices', loading: 'Loading…', save: 'Save', cancel: 'Cancel', close: 'Close', copy: 'Copy', copied: 'Copied',
+  yes: 'Yes', no: 'No', unknown: 'Unknown', remove: 'Remove', add: 'Add', none: 'None', error_generic: 'Something went wrong.',
+  // sign in / setup / links
+  login_title: 'Sign in', login_name: 'Name or mail address', password: 'Password', login_submit: 'Sign in',
+  login_rate: 'Too many attempts. Wait a few minutes.', login_bad: 'Wrong name or password.',
+  setup_title: 'First setup', setup_intro: 'Paste the one-time setup token that `init` printed on the server, then create the admin account.',
+  setup_token: 'Setup token', your_name: 'Your name', person_name: 'Name', email: 'Mail address', new_password: 'New password (10+ characters)',
+  setup_submit: 'Create admin', setup_none: 'This server has no setup pending. Run `init` on the server to print a setup token.',
+  setup_step_folders: 'Register your folders', setup_folders_intro: 'Pick a template for each shared folder. You can change everything later.',
+  setup_done: 'Done — go to folders', setup_registered: 'Registered so far',
+  link_invite_title: 'Welcome, {name}', link_invite_intro: 'Choose a password to finish joining.',
+  link_reset_title: 'New password for {name}', link_reset_intro: 'Your access tokens were cut when the reset started. Make new ones after signing in.',
+  link_bad: 'This link is used, expired or wrong. Ask your admin for a new one.', link_submit: 'Set password',
+  // folders
+  folders_title: 'Folders', folders_empty: 'No folders you can see yet.', register_folder: 'Register a folder',
+  col_folder: 'Folder', col_ai: 'AI reads', col_nas: 'NAS opens', col_manage: 'Manage',
+  badge_personal: 'Personal', badge_no_ai: 'No AI', badge_quarantine: 'Quarantined', badge_missing: 'Missing on disk', badge_widened: 'Widened, waiting',
+  badge_manager: 'You manage', badge_subfolder: 'Subfolder',
+  who_can_see: 'Who can see', table_help: 'Each row: does the person open it on the NAS, and may their AI read it. The AI side is what this server enforces; the NAS side is what you tell it.',
+  inherit_help: 'Folders below inherit these AI readers and can only add more. To narrow, turn on "Start fresh here".',
+  start_fresh: 'Start fresh here', start_fresh_always: 'A registered folder always starts fresh.',
+  groups: 'Groups', people: 'People', via_group: 'via group', from_folder: 'from {folder}', members_n: '{n} members',
+  warn_ai_no_nas: 'AI ✓ · NAS ✗', warn_ai_no_nas_help: 'Their AI can read this, but they cannot open it on the NAS. Drafts made from it may reach places they should not.',
+  nas_some: 'Some', no_ai_label: 'No AI', no_ai_help: 'No agent reads anything in this folder or below, whatever the rules say.',
+  no_ai_off_admin: 'Only an admin can turn "No AI" off.', quarantine_label: 'Quarantine', quarantine_help: 'Closed to agents until an admin releases it.',
+  nas_question: 'Who opens it on the NAS?', nas_all: 'Everyone in the office', nas_same: 'Same as AI readers', nas_chosen: 'Choose people', nas_unknown: "Don't know",
+  nas_unknown_help: '"Don\'t know" is judged the safe way: everyone may be a reader of what lands here, nobody counts as a reader of what comes from here.',
+  nas_admin_only: 'Only the admin changes NAS readers (the owner, for a personal folder).', nas_history: 'NAS readers before',
+  managers: 'Managers', managers_help: 'Managers change AI readers below this folder and can turn "No AI" on. They cannot change NAS readers, turn "No AI" off or give management.',
+  add_manager: 'Add manager', no_managers: 'No managers.', subfolders: 'Subfolders with their own rules', add_subfolder: 'Rules for a subfolder',
+  subfolder_path: 'Path below this folder, e.g. 2026/quotes', open: 'Open', parent: 'Up',
+  unregister: 'Unregister', unregister_confirm: 'Unregister this folder? Agents lose access at once. Rules stay stored.',
+  owner: 'Owner', change_owner: 'Change owner', rename: 'Name', server_path: 'Path on the server',
+  you_ai: 'Your AI', you_nas: 'You on NAS', read_only_table: 'You can see this table but not change it.',
+  // register
+  reg_path: 'Folder path on the server', reg_name: 'Name agents see (optional)', reg_template: 'Template',
+  tpl_public: 'Public', tpl_public_d: 'Everyone opens it; every AI may read it.',
+  tpl_team: 'Team', tpl_team_d: 'One team opens it; that team\'s AI may read it.',
+  tpl_management: 'Management · HR', tpl_management_d: 'A small group. "No AI" is suggested.',
+  tpl_personal: 'Personal', tpl_personal_d: 'One owner. Only the owner\'s AI reads it; the admin cannot change that.',
+  tpl_custom: 'Custom', tpl_custom_d: 'No rules yet; set them on the folder page.',
+  reg_group: 'Team group', reg_owner: 'Owner', reg_no_ai: 'Turn on "No AI"', reg_submit: 'Register',
+  reg_warn_former_personal: 'This folder used to be a personal folder; its former owner was told.',
+  reg_warn_home: 'This looks like someone\'s NAS home folder. If it is, register it as Personal. The person was told.',
+  // people
+  people_title: 'People and groups', add_person: 'Add a person', admin: 'Admin', invite_link: 'Invite link (also mailed; works once, 7 days)',
+  status_invited: 'Invited', status_active: 'Active', status_inactive: 'Inactive', status_no_account: 'No sign-in',
+  reset_password: 'Reset password', reset_confirm: 'Send {name} a one-time reset link by mail? Their tokens and sessions are cut right now, and they are told. You will not see the link.',
+  reset_done: 'Reset link sent to their mail. {n} tokens were cut.', deactivate: 'Deactivate', activate: 'Activate', make_admin: 'Make admin', remove_admin: 'Remove admin',
+  reinvite: 'Invite', change_email: 'Change mail', change_email_prompt: 'New mail address (the old one is told)', group_name: 'Group name', add_group: 'Add group',
+  delete_group: 'Delete group', delete_group_confirm: 'Delete group {name}? Its rules go too.', add_member: 'Add member', in_groups: 'Groups',
+  // tokens
+  tokens_title: 'My tokens', tokens_intro: 'A token lets one AI client (Claude Code, Codex, Cursor) read your folders through this server. Make one per computer and client.',
+  token_name: 'Name (where it is used)', token_expiry: 'Expires in', token_read_only: 'Read-only (no drafts)', token_scope: 'Folders',
+  token_scope_all: 'All folders I can read', token_scope_some: 'Only these', token_create: 'Create token',
+  token_terms: 'Connecting company files with a personal AI plan follows that AI company\'s terms and training policy.',
+  token_once: 'Copy it now — it is shown only once.', token_snippet: 'Claude Code (keeps it in your user settings; never put it in a project .mcp.json):',
+  token_last_used: 'Last used', token_never_used: 'Never used', token_revoke: 'Revoke', token_revoke_confirm: 'Revoke {name}? The client stops at its next request.',
+  token_status_active: 'Active', token_status_revoked: 'Revoked', token_status_expired: 'Expired', created: 'Created', expires: 'Expires', never: 'Never',
+  ttl_8h: '8 hours', ttl_1d: '1 day', ttl_7d: '7 days', ttl_30d: '30 days', ttl_90d: '90 days', all_folders: 'All folders',
+  // drafts
+  drafts_title: 'My drafts', drafts_intro: 'What your agents wrote to /drafts/. You see a draft here while you can still read every folder it came from.',
+  drafts_empty: 'No drafts you can see.', contains_from: 'Contains content from {folders}', looked_at: 'Looked at {folders}', no_sources: 'No folder content',
+  download: 'Download', version: 'v{n}', via_token: 'by {token}',
+  drafts_locked: '{n} more drafts are locked: they hold content from folders you cannot read right now (or only the token that wrote them may see them).',
+  // audit
+  audit_title: 'Audit', audit_mine: 'Mine', audit_folders: 'My folders', audit_summary: 'Summary', audit_empty: 'Nothing yet.',
+  audit_when: 'When', audit_who: 'Who', audit_connection: 'Connection', audit_tool: 'Tool', audit_command: 'Command', audit_files: 'Files', audit_count: 'Calls',
+  audit_hidden_command: '(their command line is not shown)', audit_chain_ok: 'Hash chain intact: {n} rows.', audit_chain_broken: 'Hash chain BROKEN at row {n}.',
+  audit_summary_help: 'Admins see who used which connection how many times — not what they read.',
+  audit_folders_help: 'Calls that touched folders you manage. Only the files in your folders are shown.', load_more: 'Load more',
+  // settings / notices
+  settings_title: 'Settings', language: 'Language', change_password: 'Change password', current_password: 'Current password', password_changed: 'Password changed. Other sessions were signed out.',
+  notices_title: 'Notices', notices_empty: 'No notices.', mark_read: 'Mark all read', about_me: 'Signed in as',
+  kind_self_grant: 'An admin gave themselves access', kind_no_ai_off: '"No AI" was turned off', kind_nas_readers_changed: 'NAS readers changed',
+  kind_rules_changed: 'AI readers changed', kind_manage_changed: 'Management changed', kind_personal_folder_changed: 'Your personal folder changed',
+  kind_former_personal_registered: 'A former personal folder was registered', kind_password_reset: 'Password reset started; tokens cut',
+  kind_email_changed: 'Sign-in address changed', kind_home_registered: 'A folder that may be your NAS home was registered',
+  promise: 'Storage, permission decisions and the record stay on your server. What an agent reads goes to the AI company that runs that agent; mark folders that must not go there "No AI". The person who runs the server can see its disk.',
+}
+
+export type Key = keyof typeof en
+
+const ko: Record<Key, string> = {
+  app_tagline: 'AI 에이전트를 위한 팀 폴더',
+  nav_folders: '폴더', nav_people: '사람', nav_tokens: '내 토큰', nav_drafts: '내 초안', nav_audit: '감사', nav_settings: '설정',
+  sign_out: '로그아웃', notices: '알림', loading: '불러오는 중…', save: '저장', cancel: '취소', close: '닫기', copy: '복사', copied: '복사됨',
+  yes: '예', no: '아니요', unknown: '모름', remove: '빼기', add: '더하기', none: '없음', error_generic: '문제가 생겼습니다.',
+  login_title: '로그인', login_name: '이름 또는 메일 주소', password: '비밀번호', login_submit: '로그인',
+  login_rate: '시도가 너무 많습니다. 몇 분 뒤에 다시 하세요.', login_bad: '이름 또는 비밀번호가 맞지 않습니다.',
+  setup_title: '처음 설정', setup_intro: '서버에서 `init`이 출력한 일회용 설정 토큰을 붙여 넣고 관리자 계정을 만드세요.',
+  setup_token: '설정 토큰', your_name: '이름', person_name: '이름', email: '메일 주소', new_password: '새 비밀번호(10자 이상)',
+  setup_submit: '관리자 만들기', setup_none: '이 서버에는 대기 중인 설정이 없습니다. 서버에서 `init`을 실행해 설정 토큰을 받으세요.',
+  setup_step_folders: '폴더 등록', setup_folders_intro: '공유 폴더마다 틀을 고르세요. 나중에 모두 바꿀 수 있습니다.',
+  setup_done: '끝 — 폴더로 가기', setup_registered: '지금까지 등록한 폴더',
+  link_invite_title: '{name}님, 환영합니다', link_invite_intro: '비밀번호를 정하면 가입이 끝납니다.',
+  link_reset_title: '{name}님의 새 비밀번호', link_reset_intro: '재설정을 시작한 순간 접근 토큰이 모두 끊겼습니다. 로그인한 뒤 새로 만드세요.',
+  link_bad: '이미 썼거나 만료됐거나 잘못된 링크입니다. 관리자에게 새 링크를 요청하세요.', link_submit: '비밀번호 정하기',
+  folders_title: '폴더', folders_empty: '볼 수 있는 폴더가 아직 없습니다.', register_folder: '폴더 등록',
+  col_folder: '폴더', col_ai: 'AI로 읽게 한다', col_nas: 'NAS에서 연다', col_manage: '관리',
+  badge_personal: '개인', badge_no_ai: 'AI 연결 금지', badge_quarantine: '격리', badge_missing: '디스크에 없음', badge_widened: '넓어짐 확인 대기',
+  badge_manager: '내가 관리', badge_subfolder: '하위 폴더',
+  who_can_see: '누가 볼 수 있나', table_help: '행마다: 그 사람이 NAS에서 여는지, 그 사람의 AI가 읽어도 되는지. AI 쪽은 이 서버가 지키고, NAS 쪽은 여러분이 알려 주는 값입니다.',
+  inherit_help: '아래 폴더는 위 폴더의 AI 독자를 물려받고 더할 수만 있습니다. 좁히려면 "여기서부터 새로"를 켜세요.',
+  start_fresh: '여기서부터 새로', start_fresh_always: '등록 폴더는 늘 새로 시작합니다.',
+  groups: '그룹', people: '사람', via_group: '그룹으로', from_folder: '{folder}에서', members_n: '{n}명',
+  warn_ai_no_nas: 'AI ✓ · NAS ✗', warn_ai_no_nas_help: '이 사람의 AI는 읽을 수 있지만 본인은 NAS에서 열 수 없습니다. 여기서 만든 초안이 가면 안 될 곳으로 갈 수 있습니다.',
+  nas_some: '일부', no_ai_label: 'AI 연결 금지', no_ai_help: '규칙과 상관없이 이 폴더와 아래는 어떤 에이전트도 읽지 못합니다.',
+  no_ai_off_admin: '"AI 연결 금지"는 전체 관리자만 끌 수 있습니다.', quarantine_label: '격리', quarantine_help: '관리자가 풀 때까지 에이전트에게 닫힙니다.',
+  nas_question: 'NAS에서 누가 여나요?', nas_all: '사무실 전원', nas_same: 'AI 독자와 같음', nas_chosen: '고르기', nas_unknown: '모름',
+  nas_unknown_help: '"모름"은 안전한 쪽으로 판정합니다: 여기로 들어오는 것은 모두가 볼 수 있다고, 여기서 나가는 것은 아무도 볼 수 없다고 봅니다.',
+  nas_admin_only: 'NAS 독자는 전체 관리자만 바꿉니다(개인 폴더는 소유자).', nas_history: '이전 NAS 독자',
+  managers: '관리자(manage)', managers_help: '폴더 관리자는 이 폴더와 아래의 AI 독자를 바꾸고 "AI 연결 금지"를 켤 수 있습니다. NAS 독자 변경, "AI 연결 금지" 끄기, 관리 권한 주기는 못 합니다.',
+  add_manager: '관리자 더하기', no_managers: '관리자가 없습니다.', subfolders: '자기 규칙이 있는 하위 폴더', add_subfolder: '하위 폴더 규칙',
+  subfolder_path: '이 폴더 아래 경로, 예: 2026/견적', open: '열기', parent: '위로',
+  unregister: '등록 해제', unregister_confirm: '이 폴더의 등록을 해제할까요? 에이전트 접근이 바로 끊깁니다. 규칙은 남습니다.',
+  owner: '소유자', change_owner: '소유자 바꾸기', rename: '이름', server_path: '서버 경로',
+  you_ai: '내 AI', you_nas: '내 NAS', read_only_table: '이 표를 볼 수는 있지만 바꿀 수는 없습니다.',
+  reg_path: '서버의 폴더 경로', reg_name: '에이전트가 보는 이름(선택)', reg_template: '틀',
+  tpl_public: '공용', tpl_public_d: '전원이 열고, 모든 AI가 읽습니다.',
+  tpl_team: '팀', tpl_team_d: '한 팀이 열고, 그 팀의 AI가 읽습니다.',
+  tpl_management: '경영·인사', tpl_management_d: '소수만. "AI 연결 금지"를 권합니다.',
+  tpl_personal: '개인', tpl_personal_d: '소유자 한 명. 소유자의 AI만 읽고, 관리자도 바꿀 수 없습니다.',
+  tpl_custom: '직접', tpl_custom_d: '규칙 없이 등록하고 폴더 화면에서 정합니다.',
+  reg_group: '팀 그룹', reg_owner: '소유자', reg_no_ai: '"AI 연결 금지" 켜기', reg_submit: '등록',
+  reg_warn_former_personal: '예전에 개인 폴더였던 폴더입니다. 이전 소유자에게 알렸습니다.',
+  reg_warn_home: '누군가의 NAS 홈 폴더처럼 보입니다. 맞다면 개인 폴더로 등록하세요. 해당 사람에게 알렸습니다.',
+  people_title: '사람과 그룹', add_person: '사람 더하기', admin: '관리자', invite_link: '초대 링크(메일로도 보냄, 한 번만, 7일)',
+  status_invited: '초대됨', status_active: '활성', status_inactive: '비활성', status_no_account: '로그인 없음',
+  reset_password: '비밀번호 재설정', reset_confirm: '{name}님에게 일회용 재설정 링크를 메일로 보낼까요? 지금 바로 토큰과 세션이 끊기고 본인에게 알립니다. 링크는 관리자에게 보이지 않습니다.',
+  reset_done: '재설정 링크를 본인 메일로 보냈습니다. 토큰 {n}개를 끊었습니다.', deactivate: '비활성화', activate: '활성화', make_admin: '관리자로', remove_admin: '관리자 해제',
+  reinvite: '초대', change_email: '메일 바꾸기', change_email_prompt: '새 메일 주소(이전 주소로 알립니다)', group_name: '그룹 이름', add_group: '그룹 더하기',
+  delete_group: '그룹 지우기', delete_group_confirm: '{name} 그룹을 지울까요? 그 그룹의 규칙도 지워집니다.', add_member: '구성원 더하기', in_groups: '그룹',
+  tokens_title: '내 토큰', tokens_intro: '토큰 하나로 AI 클라이언트 하나(Claude Code, Codex, Cursor)가 이 서버를 거쳐 내 폴더를 읽습니다. 컴퓨터·클라이언트마다 따로 만드세요.',
+  token_name: '이름(쓰는 곳)', token_expiry: '만료', token_read_only: '읽기 전용(초안 못 씀)', token_scope: '폴더',
+  token_scope_all: '내가 읽을 수 있는 모든 폴더', token_scope_some: '이 폴더만', token_create: '토큰 만들기',
+  token_terms: '개인 AI 요금제로 회사 파일을 연결하면 그 AI 회사의 약관·학습 정책을 따릅니다.',
+  token_once: '지금 복사하세요 — 한 번만 보여 줍니다.', token_snippet: 'Claude Code(사용자 설정에 저장됩니다. 프로젝트 .mcp.json에는 넣지 마세요):',
+  token_last_used: '마지막 사용', token_never_used: '쓴 적 없음', token_revoke: '끊기', token_revoke_confirm: '{name} 토큰을 끊을까요? 다음 요청부터 막힙니다.',
+  token_status_active: '사용 중', token_status_revoked: '끊김', token_status_expired: '만료', created: '만든 때', expires: '만료', never: '없음',
+  ttl_8h: '8시간', ttl_1d: '1일', ttl_7d: '7일', ttl_30d: '30일', ttl_90d: '90일', all_folders: '모든 폴더',
+  drafts_title: '내 초안', drafts_intro: '에이전트가 /drafts/에 쓴 것입니다. 초안이 나온 폴더를 지금도 모두 읽을 수 있을 때만 여기에 보입니다.',
+  drafts_empty: '볼 수 있는 초안이 없습니다.', contains_from: '{folders} 내용 포함', looked_at: '{folders} 훑어봄', no_sources: '폴더 내용 없음',
+  download: '내려받기', version: 'v{n}', via_token: '{token}에서',
+  drafts_locked: '초안 {n}개는 잠겨 있습니다: 지금 읽을 수 없는 폴더의 내용이 들어 있습니다(또는 쓴 토큰만 볼 수 있습니다).',
+  audit_title: '감사', audit_mine: '내 기록', audit_folders: '내 폴더', audit_summary: '요약', audit_empty: '아직 없습니다.',
+  audit_when: '때', audit_who: '누가', audit_connection: '연결', audit_tool: '도구', audit_command: '명령', audit_files: '파일', audit_count: '건수',
+  audit_hidden_command: '(다른 사람의 명령 줄은 보이지 않습니다)', audit_chain_ok: '해시 체인 이상 없음: {n}행.', audit_chain_broken: '해시 체인이 {n}행에서 깨졌습니다.',
+  audit_summary_help: '관리자는 누가 어느 연결로 몇 건 썼는지만 봅니다 — 무엇을 읽었는지는 보지 않습니다.',
+  audit_folders_help: '내가 관리하는 폴더에 닿은 호출입니다. 내 폴더의 파일만 보입니다.', load_more: '더 보기',
+  settings_title: '설정', language: '언어', change_password: '비밀번호 바꾸기', current_password: '지금 비밀번호', password_changed: '비밀번호를 바꿨습니다. 다른 세션은 로그아웃됐습니다.',
+  notices_title: '알림', notices_empty: '알림이 없습니다.', mark_read: '모두 읽음', about_me: '로그인',
+  kind_self_grant: '관리자가 자기 자신에게 권한을 줬습니다', kind_no_ai_off: '"AI 연결 금지"가 꺼졌습니다', kind_nas_readers_changed: 'NAS 독자가 바뀌었습니다',
+  kind_rules_changed: 'AI 독자가 바뀌었습니다', kind_manage_changed: '관리 권한이 바뀌었습니다', kind_personal_folder_changed: '내 개인 폴더가 바뀌었습니다',
+  kind_former_personal_registered: '예전 개인 폴더가 일반 폴더로 등록됐습니다', kind_password_reset: '비밀번호 재설정 시작, 토큰 끊김',
+  kind_email_changed: '로그인 메일 주소가 바뀌었습니다', kind_home_registered: '내 NAS 홈 폴더일 수 있는 폴더가 등록됐습니다',
+  promise: '저장, 권한 판단, 기록은 여러분 서버에 있습니다. 에이전트가 읽은 내용은 그 에이전트를 만든 AI 회사로 갑니다. 그러면 안 되는 폴더는 "AI 연결 금지"로 두세요. 서버를 운영하는 사람은 디스크를 볼 수 있습니다.',
+}
+
+export type Locale = 'en' | 'ko'
+export const LOCALES: { id: Locale; label: string }[] = [{ id: 'en', label: 'English' }, { id: 'ko', label: '한국어' }]
+const DICTS: Record<Locale, Record<Key, string>> = { en, ko }
+const STORE_KEY = 'shelf.locale'
+
+function initial(): Locale {
+  try { const v = localStorage.getItem(STORE_KEY); if (v === 'en' || v === 'ko') return v } catch { /* storage blocked */ }
+  return (navigator.languages ?? [navigator.language]).some((l) => l?.toLowerCase().startsWith('ko')) ? 'ko' : 'en'
+}
+
+let current: Locale = initial()
+const listeners = new Set<() => void>()
+document.documentElement.lang = current
+
+export function setLocale(l: Locale) {
+  current = l
+  document.documentElement.lang = l
+  try { localStorage.setItem(STORE_KEY, l) } catch { /* ignore */ }
+  listeners.forEach((f) => f())
+}
+export const getLocale = () => current
+
+export function t(key: Key, params?: Record<string, string | number>): string {
+  const s = DICTS[current][key] ?? en[key]
+  return params ? s.replace(/\{(\w+)\}/g, (all, k: string) => (params[k] !== undefined ? String(params[k]) : all)) : s
+}
+
+/** Re-render on language change. */
+export function useLocale(): Locale {
+  return useSyncExternalStore((f) => { listeners.add(f); return () => { listeners.delete(f) } }, () => current)
+}
+
+export function fmtDate(ms: number | null | undefined): string {
+  if (!ms) return '—'
+  return new Intl.DateTimeFormat(current === 'ko' ? 'ko-KR' : 'en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ms))
+}

@@ -7,8 +7,10 @@
   "license": "UNLICENSED",
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "cli": "bun run src/cli.ts"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
+    "cli": "bun run src/cli.ts",
+    "build:web": "vite build --config web/vite.config.ts",
+    "dev:web": "vite --config web/vite.config.ts"
   },
   "dependencies": {
     "just-bash": "3.6.0"
