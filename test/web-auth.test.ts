@@ -1,7 +1,10 @@
 // Web sign-in: first setup with the one-time token, sessions (fixation, cookie scope), CSRF and Origin, rate limit,
 // invite and reset links (one use, R9), and the rule that /mcp never accepts a session cookie.
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { openDb } from '../src/db'
+import { makeCtx } from '../src/session'
 import { verifyToken } from '../src/store'
+import { handleWeb, makeWebCtx } from '../src/web/server'
 import { createLink, issueSetupToken } from '../src/web/auth'
 import { ORIGIN, PASSWORD, webSetup, type WebEnv } from './web-helpers'
 
@@ -74,6 +77,32 @@ describe('sessions', () => {
     for (let i = 0; i < 5; i++) await b.call('POST', '/api/login', { login: 'lee', password: 'wrong password' })
     expect((await b.call('POST', '/api/login', { login: 'lee', password: PASSWORD })).status).toBe(429)
     expect((await b.call('POST', '/api/login', { login: 'park', password: PASSWORD })).status).toBe(200)
+  })
+
+  test('rate limits survive a restart (kept in SQLite, keys hashed); 429 carries Retry-After; per address too', async () => {
+    const b = new e.Browser()
+    for (let i = 0; i < 5; i++) await b.call('POST', '/api/login', { login: 'lee', password: 'wrong password' })
+    const r = await b.call('POST', '/api/login', { login: 'lee', password: PASSWORD })
+    expect(r.status).toBe(429)
+    const after = Number(r.headers.get('retry-after'))
+    expect(after).toBeGreaterThan(14 * 60)
+    expect(after).toBeLessThanOrEqual(15 * 60)
+    // "restart": a new server context over the same database file
+    const db2 = openDb(e.dir)
+    try {
+      const w2 = makeWebCtx(makeCtx(db2, e.dir), { mailer: e.mailer, webDir: '/nonexistent' })
+      const res = await handleWeb(w2, new Request(ORIGIN + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: JSON.stringify({ login: 'lee', password: PASSWORD }) }), '10.9.9.9')
+      expect(res.status).toBe(429)
+      expect(res.headers.get('retry-after')).toBeTruthy()
+      // the stored keys are hashes, never the typed name (it may be a password typed into the wrong field)
+      expect(JSON.stringify(db2.query('SELECT * FROM rate_limits').all())).not.toMatch(/lee|10\.0\.0\.1/)
+    } finally { db2.close() }
+    // per address: 50 attempts per 15 minutes from one address, whatever the name
+    const a = new e.Browser()
+    let last = 0
+    for (let i = 0; i < 60 && last !== 429; i++) last = (await a.call('POST', '/api/login', { login: `nobody${i}`, password: 'wrong password' })).status
+    expect(last).toBe(429)
+    expect((await a.call('POST', '/api/login', { login: 'park', password: PASSWORD })).status).toBe(429)
   })
 
   test('sign-in by mail address works; inactive people cannot sign in', async () => {

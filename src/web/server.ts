@@ -6,6 +6,7 @@ import path from 'node:path'
 import { handleRequest } from '../mcp'
 import type { Ctx } from '../session'
 import { handleApi } from './api'
+import { McpLimiter } from '../ratelimit'
 import { RateLimiter } from './auth'
 import type { WebCtx, WebOptions } from './http'
 import { OutboxMailer } from './mail'
@@ -29,9 +30,11 @@ export function makeWebCtx(ctx: Ctx, opts: WebOptions = {}): WebCtx {
   return {
     ...ctx, opts,
     mailer: opts.mailer ?? new OutboxMailer(ctx.dataDir),
-    loginByName: new RateLimiter(5, 15 * 60_000),
-    loginByAddr: new RateLimiter(50, 15 * 60_000),
-    linkByAddr: new RateLimiter(30, 15 * 60_000),
+    // in SQLite: a restart does not reset them
+    loginByName: new RateLimiter(5, 15 * 60_000, { db: ctx.db, scope: 'login_name' }),
+    loginByAddr: new RateLimiter(50, 15 * 60_000, { db: ctx.db, scope: 'login_addr' }),
+    linkByAddr: new RateLimiter(30, 15 * 60_000, { db: ctx.db, scope: 'link_addr' }),
+    mcpLimiter: opts.mcpLimiter ?? new McpLimiter(),
   }
 }
 
@@ -58,7 +61,7 @@ function serveStatic(w: WebCtx, req: Request): Response {
 
 export async function handleWeb(w: WebCtx, req: Request, addr?: string): Promise<Response> {
   const { pathname } = new URL(req.url)
-  if (pathname === '/mcp' || pathname === '/health') return withHeaders(await handleRequest(w, req, { allowedOrigins: w.opts.allowedOrigins, onRequest: w.opts.onRequest }, addr))
+  if (pathname === '/mcp' || pathname === '/health') return withHeaders(await handleRequest(w, req, { allowedOrigins: w.opts.allowedOrigins, onRequest: w.opts.onRequest, limiter: w.mcpLimiter }, addr))
   if (pathname === '/api' || pathname.startsWith('/api/')) return withHeaders(await handleApi(w, req, addr))
   return withHeaders(serveStatic(w, req))
 }

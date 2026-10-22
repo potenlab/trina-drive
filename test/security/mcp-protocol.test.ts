@@ -2,9 +2,10 @@
 // protocol versions, cookie/query-string tokens, Origin, token format.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { TOKEN_PREFIX } from '../../src/config'
-import { serve } from '../../src/mcp'
+import { handleRequest, RATE_LIMIT_CODE, serve } from '../../src/mcp'
+import { McpLimiter } from '../../src/ratelimit'
 import { verifyAudit } from '../../src/audit'
-import { createToken, sha256 } from '../../src/store'
+import { createToken, sha256, verifyToken } from '../../src/store'
 import { securitySetup, type SecEnv } from './fixture'
 
 let e: SecEnv
@@ -12,7 +13,8 @@ let server: ReturnType<typeof serve>
 let url: string
 beforeAll(() => {
   e = securitySetup()
-  server = serve(e.ctx, 0)
+  // generous limits here: this file sends many requests with one token; the limits themselves are tested at the end
+  server = serve(e.ctx, 0, '127.0.0.1', { limiter: new McpLimiter({ tokenPerMin: 100_000, ipPerMin: 100_000, badAuthPerMin: 100_000 }) })
   url = `http://127.0.0.1:${server.port}/mcp`
 })
 afterAll(() => { server.stop(true); e.cleanup() })
@@ -188,7 +190,6 @@ describe('token format (secret scanners) and storage', () => {
     const dump = JSON.stringify(e.db.query('SELECT * FROM audit').all())
     expect(dump).not.toContain(e.secrets.kim!)
   })
-  test.todo('login and MCP rate limits (plan 7.1 "로그인·MCP 속도 제한") [owner: packaging / admin REST]', () => {})
   test('a token pasted into a bash command or a tool argument is redacted in the audit command line (hash of the whole kept)', async () => {
     const other = createToken(e.db, 'boss', { name: 'leaked' }).token
     const gh = ['ghp_', 'Z9y8'.repeat(9)].join('')
@@ -202,5 +203,88 @@ describe('token format (secret scanners) and storage', () => {
     expect(dump).toContain('[REDACTED')
     expect(rows.at(-1)!.command_sha256).toBe(sha256(cmd))
     expect(verifyAudit(e.db).ok).toBe(true)
+  })
+})
+
+// plan 7.1 "로그인·MCP 속도 제한" (sign-in limits: test/web-auth.test.ts "rate limits survive a restart")
+describe('MCP rate limits: per token and per address, requests per minute and at once; 429 + Retry-After + JSON-RPC error', () => {
+  const ping = (id: number) => JSON.stringify({ jsonrpc: '2.0', id, method: 'ping' })
+  const req = (body: string, secret?: string) => new Request('http://127.0.0.1/mcp', { method: 'POST',
+    headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) }, body })
+  async function expect429(r: Response, id: unknown) {
+    expect(r.status).toBe(429)
+    const after = Number(r.headers.get('retry-after'))
+    expect(after).toBeGreaterThanOrEqual(1)
+    expect(after).toBeLessThanOrEqual(60)
+    const b = await r.json() as { jsonrpc: string; id: unknown; error: { code: number; message: string; data: { retry_after: number } } }
+    expect(b.jsonrpc).toBe('2.0')
+    expect(b.id).toEqual(id)
+    expect(b.error.code).toBe(RATE_LIMIT_CODE)
+    expect(b.error.data.retry_after).toBe(after)
+  }
+
+  test('requests per minute per token; another token is not affected; the window ends', async () => {
+    let now = 1_000_000
+    const limiter = new McpLimiter({ tokenPerMin: 3 }, () => now)
+    for (let i = 1; i <= 3; i++) expect((await handleRequest(e.ctx, req(ping(i), e.secrets.kim), { limiter }, '10.0.0.5')).status).toBe(200)
+    await expect429(await handleRequest(e.ctx, req(ping(4), e.secrets.kim), { limiter }, '10.0.0.5'), 4)
+    expect((await handleRequest(e.ctx, req(ping(5), e.secrets.boss), { limiter }, '10.0.0.5')).status).toBe(200)
+    now += 60_001
+    expect((await handleRequest(e.ctx, req(ping(6), e.secrets.kim), { limiter }, '10.0.0.5')).status).toBe(200)
+  })
+
+  test('requests per minute per address, whatever the token (and without one)', async () => {
+    const limiter = new McpLimiter({ ipPerMin: 2 })
+    expect((await handleRequest(e.ctx, req(ping(1), e.secrets.kim), { limiter }, '10.0.0.6')).status).toBe(200)
+    expect((await handleRequest(e.ctx, req(ping(2), e.secrets.boss), { limiter }, '10.0.0.6')).status).toBe(200)
+    await expect429(await handleRequest(e.ctx, req(ping(3), e.secrets.lee), { limiter }, '10.0.0.6'), null)
+    await expect429(await handleRequest(e.ctx, req(ping(4)), { limiter }, '10.0.0.6'), null)
+    expect((await handleRequest(e.ctx, req(ping(5), e.secrets.kim), { limiter }, '10.0.0.7')).status).toBe(200)
+  })
+
+  test('wrong bearer tokens from one address: after the limit even a valid token is refused from there', async () => {
+    const limiter = new McpLimiter({ badAuthPerMin: 3 })
+    for (let i = 0; i < 3; i++) expect((await handleRequest(e.ctx, req(ping(i), `${TOKEN_PREFIX}${'x'.repeat(32)}`), { limiter }, '10.0.0.8')).status).toBe(401)
+    await expect429(await handleRequest(e.ctx, req(ping(9), e.secrets.kim), { limiter }, '10.0.0.8'), null)
+    expect((await handleRequest(e.ctx, req(ping(10), e.secrets.kim), { limiter }, '10.0.0.9')).status).toBe(200)
+  })
+
+  test('concurrent requests per token and per address', async () => {
+    const limiter = new McpLimiter({ tokenConcurrent: 1, ipConcurrent: 2 })
+    const kim = verifyToken(e.db, e.secrets.kim!)!.id
+    const busy = limiter.acquire(kim, '10.0.1.1')
+    expect(typeof busy).toBe('function')
+    // kim's one slot is taken (a long command still running): the next request is refused, from any address
+    await expect429(await handleRequest(e.ctx, req(ping(1), e.secrets.kim), { limiter }, '10.0.1.2'), 1)
+    // the address has one slot left: boss gets it while kim's command runs
+    expect((await handleRequest(e.ctx, req(ping(2), e.secrets.boss), { limiter }, '10.0.1.1')).status).toBe(200)
+    const other = limiter.acquire(-1, '10.0.1.1') // fill the address
+    await expect429(await handleRequest(e.ctx, req(ping(3), e.secrets.boss), { limiter }, '10.0.1.1'), 3)
+    ;(busy as () => void)(); (other as () => void)()
+    expect((await handleRequest(e.ctx, req(ping(4), e.secrets.kim), { limiter }, '10.0.1.1')).status).toBe(200)
+  })
+
+  test('a slot is given back when the tool call fails, and real parallel calls over HTTP beyond the limit get 429', async () => {
+    const limiter = new McpLimiter({ tokenConcurrent: 2 })
+    const srv = serve(e.ctx, 0, '127.0.0.1', { limiter })
+    try {
+      const u = `http://127.0.0.1:${srv.port}/mcp`
+      const calls = Array.from({ length: 8 }, (_, i) => post(call('bash', { command: 'grep -r CANARY / | wc -l' }, i), auth(), u))
+      const statuses = (await Promise.all(calls)).map((r) => r.status)
+      expect(statuses.filter((s) => s === 200).length).toBeGreaterThanOrEqual(2)
+      expect(statuses.every((s) => s === 200 || s === 429)).toBe(true)
+      // every slot was released
+      for (let i = 0; i < 3; i++) expect((await post(ping(100 + i), auth(), u)).status).toBe(200)
+    } finally { srv.stop(true) }
+  })
+
+  test('the production entry points always limit: serve() and the web server set a limiter by default', async () => {
+    const srv = serve(e.ctx, 0)
+    try {
+      const u = `http://127.0.0.1:${srv.port}/mcp`
+      let last = 0
+      for (let i = 0; i < 40 && last !== 429; i++) last = (await post(ping(i), { authorization: `Bearer ${TOKEN_PREFIX}${'y'.repeat(32)}` }, u)).status
+      expect(last).toBe(429)
+    } finally { srv.stop(true) }
   })
 })

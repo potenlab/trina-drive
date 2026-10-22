@@ -157,19 +157,5 @@ export function consumeSetupToken(db: DB, presented: unknown): boolean {
 }
 
 // ---------- rate limit ----------
-/** Fixed windows per key; used for sign-in (per name and per address) and for link use. */
-export class RateLimiter {
-  private readonly hits = new Map<string, { n: number; until: number }>()
-  constructor(readonly max: number, readonly windowMs: number) {}
-  /** false when the key is over its limit (the attempt is counted either way). */
-  hit(key: string): boolean {
-    const t = now()
-    const h = this.hits.get(key)
-    if (!h || h.until <= t) { this.hits.set(key, { n: 1, until: t + this.windowMs }); this.gc(t); return true }
-    h.n++
-    return h.n <= this.max
-  }
-  blocked(key: string) { const h = this.hits.get(key); return !!h && h.until > now() && h.n >= this.max }
-  reset(key: string) { this.hits.delete(key) }
-  private gc(t: number) { if (this.hits.size > 10_000) for (const [k, v] of this.hits) if (v.until <= t) this.hits.delete(k) }
-}
+/** Sign-in, link and setup-token limits (src/ratelimit.ts; kept in SQLite when given the database). */
+export { RateLimiter } from '../ratelimit'

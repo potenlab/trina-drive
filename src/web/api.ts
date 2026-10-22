@@ -10,7 +10,7 @@ import {
   accountByLogin, AuthError, checkPasswordRules, consumeLink, consumeSetupToken, createSession, csrfOk, hashPassword, lookupSession,
   peekLink, revokeSession, SESSION_COOKIE, SESSION_MAX_MS, setPassword, setupDone, setupPending, verifyPassword, type WebSession,
 } from './auth'
-import { ApiError, bad, json, notFound, type WebCtx } from './http'
+import { ApiError, bad, json, notFound, rateLimited, type WebCtx } from './http'
 import { markNoticesRead, noticesOf } from './notices'
 import * as ops from './ops'
 import { ensureWebSchema } from './schema'
@@ -77,7 +77,7 @@ const routes: Route[] = [
   // ---------- before sign-in ----------
   R('GET', '/state', false, ({ w }) => ({ name: NAME, version: VERSION, setup_pending: setupPending(w.db), setup_done: setupDone(w.db) })),
   R('POST', '/setup', false, async ({ w, req, body: b, s, addr }) => {
-    if (!w.linkByAddr.hit(`setup:${addr}`)) throw new ApiError(429, 'rate_limited', 'too many attempts; wait a few minutes')
+    if (!w.linkByAddr.hit(`setup:${addr}`)) throw rateLimited(w.linkByAddr.retryAfter(`setup:${addr}`))
     const pw = checkPasswordRules(b.password)
     const hash = await hashPassword(pw)
     const name = typeof b.name === 'string' ? b.name.trim().normalize('NFC') : ''
@@ -102,7 +102,8 @@ const routes: Route[] = [
     const login = typeof b.login === 'string' ? b.login.trim().toLowerCase().slice(0, 254) : ''
     const pw = typeof b.password === 'string' ? b.password : ''
     if (!login || !pw) throw bad('bad_input', 'name or mail address, and password')
-    if (w.loginByName.blocked(login) || !w.loginByAddr.hit(addr)) throw new ApiError(429, 'rate_limited', 'too many attempts; wait a few minutes')
+    if (w.loginByName.blocked(login)) throw rateLimited(w.loginByName.retryAfter(login))
+    if (!w.loginByAddr.hit(addr)) throw rateLimited(w.loginByAddr.retryAfter(addr))
     const acc = accountByLogin(w.db, login)
     const ok = await verifyPassword(pw, acc?.password_hash)
     if (!ok || !acc || !acc.active) {
@@ -118,14 +119,14 @@ const routes: Route[] = [
     return json({ ok: true }, 200, { 'set-cookie': sessionCookie(req, '', 0) })
   }),
   R('POST', '/links/check', false, ({ w, body: b, addr }) => {
-    if (!w.linkByAddr.hit(`link:${addr}`)) throw new ApiError(429, 'rate_limited')
+    if (!w.linkByAddr.hit(`link:${addr}`)) throw rateLimited(w.linkByAddr.retryAfter(`link:${addr}`))
     const kind = b.kind === 'reset' ? 'reset' : 'invite'
     const pid = peekLink(w.db, kind, b.token)
     if (pid == null) throw new ApiError(404, 'bad_link', 'this link is used, expired or wrong')
     return { name: w.db.query<{ name: string }, [number]>('SELECT name FROM people WHERE id = ?').get(pid)?.name }
   }),
   R('POST', '/links/accept', false, async ({ w, req, body: b, s, addr }) => {
-    if (!w.linkByAddr.hit(`link:${addr}`)) throw new ApiError(429, 'rate_limited')
+    if (!w.linkByAddr.hit(`link:${addr}`)) throw rateLimited(w.linkByAddr.retryAfter(`link:${addr}`))
     const kind = b.kind === 'reset' ? 'reset' : 'invite'
     const pw = checkPasswordRules(b.password)
     const pid = consumeLink(w.db, kind, b.token)
@@ -203,7 +204,7 @@ export async function handleApi(w: WebCtx, req: Request, addr = 'unknown'): Prom
     const out = await route.fn(call)
     return out instanceof Response ? out : json(out)
   } catch (e) {
-    if (e instanceof ApiError || e instanceof AuthError) return json({ error: e.code, message: e.message }, e.status)
+    if (e instanceof ApiError || e instanceof AuthError) return json({ error: e.code, message: e.message }, e.status, e instanceof ApiError ? e.headers : undefined)
     if (e instanceof StoreError) return json({ error: 'bad_request', message: e.message }, 400)
     console.error(`[${NAME}] ${req.method} ${url.pathname} failed:`, e)
     return json({ error: 'internal', message: 'internal error' }, 500)
