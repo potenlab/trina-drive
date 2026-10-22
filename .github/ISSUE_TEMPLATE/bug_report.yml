@@ -1,0 +1,63 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Security problems** (anything that lets an agent or a person see, change or hide more
+        than they should) do not belong here: email security@trina.app instead (see SECURITY.md).
+        Please remove tokens (`tdrive_pat_…`, `tdrive_setup_…`), passwords and file names you cannot share.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands, or steps in the web app. `tdrive demo seed` data is ideal.
+      placeholder: |
+        1. tdrive --data ./.trina-drive demo seed
+        2. tdrive --data ./.trina-drive sh --token <kim token> -c '…'
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: First line of `tdrive` (or the commit you built from)
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it runs
+      options:
+        - macOS installer (install-macos.sh)
+        - Docker on Linux
+        - From source (bun run src/cli.ts)
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: AI client (if it matters)
+      options:
+        - not client-specific
+        - Claude Code
+        - Codex
+        - Cursor
+        - claude.ai
+        - ChatGPT
+        - other MCP client
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and output
+      description: Server log lines, `tdrive audit verify`, error text. Redact secrets.
+      render: text

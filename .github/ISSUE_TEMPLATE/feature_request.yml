@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest something Trina Drive should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What your team is trying to do with its AI agents and files, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+      description: How it could work. Commands, screens, or a rough sketch are all welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: permissions
+    attributes:
+      label: Permissions and audit
+      description: |
+        Trina Drive's promise is that agents see only what their person may, never change originals directly, and
+        everything is logged. Does your idea touch who can see or change what? How should it be recorded?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do now instead

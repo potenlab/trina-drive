@@ -1,0 +1,62 @@
+# Typecheck, web build and the whole test suite on Linux and macOS. No secrets are used.
+# Shell commands run in-process (TDRIVE_SHELL=inprocess): the isolated shell executor is exercised by
+# tests/worker.test.ts and by scripts/docker-test.sh. Document extraction stays isolated where the runner allows it
+# (bwrap on Linux, sandbox-exec on macOS). macOS-only tests (installer dry run, vendored pdftotext) skip themselves on
+# Linux with test.skipIf(process.platform !== 'darwin').
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    env:
+      TDRIVE_SHELL: inprocess
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.12
+
+      - name: Tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ripgrep poppler-utils bubblewrap
+          # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor; bwrap needs them.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          if bwrap --unshare-all --die-with-parent --ro-bind / / true; then
+            echo "bwrap works: extraction runs isolated"
+          else
+            echo "::warning::bwrap cannot create a sandbox on this runner; document extraction runs in-process"
+            echo "TDRIVE_EXTRACT=inprocess" >> "$GITHUB_ENV"
+          fi
+
+      - name: Tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ripgrep poppler
+
+      - run: bun install --frozen-lockfile
+      - name: Typecheck (server and web)
+        run: bun run typecheck
+      - name: Build web app
+        run: bun run build:web
+      - name: Tests
+        run: bun test
