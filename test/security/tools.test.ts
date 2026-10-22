@@ -39,3 +39,14 @@ describe('command set (plan 5.1: no real processes, network, ln, python, sqlite3
     expect((await e.sh('kim', 'ls /bin')).stdout.split('\n')).not.toContain('sqlite3')
   })
 })
+
+describe('grep paths typed in NFD (found by the fuzzer)', () => {
+  test('relative output paths are cut on the NFC name, not on the typed code units', async () => {
+    const nfd = '프'.normalize('NFD') + '로젝트'
+    for (const c of [`grep -rl CANARY_proj_ '${nfd}'`, `rg -l CANARY_proj_ '${nfd}'`, `grep -r CANARY_proj_ '${nfd}/'`]) {
+      const r = await e.sh('kim', c)
+      expect(r.stdout.normalize('NFC')).toContain('프로젝트/c.md')
+      expect(r.stdout.normalize('NFC')).not.toMatch(/프로젝트\/\.md/)
+    }
+  })
+})
