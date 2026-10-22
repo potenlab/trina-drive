@@ -166,4 +166,20 @@ describe('timing: hidden vs nonexistent (reported; fails only above 3x)', () => 
     expect(r.missingP50).toBeLessThan(3 * r.hiddenP50)
     expect(r.hiddenP95).toBeLessThan(3 * r.missingP95)
   }, 120_000)
+
+  test('with 2000 known folders under a hidden mount (policy work grows with folder rows)', async () => {
+    const env = securitySetup()
+    try {
+      for (let i = 0; i < 2000; i++) { const d = env.R(`인사/d${i}`); fs.mkdirSync(d); setRule(env.db, d, '@인사', 'read') }
+      const h: number[] = [], m: number[] = []
+      for (let i = 0; i < Math.min(N, 100); i++) {
+        for (const [cmd, xs] of (i % 2 ? [['cat /인사/d1/c.md', h], ['cat /인가/d1/c.md', m]] : [['cat /인가/d1/c.md', m], ['cat /인사/d1/c.md', h]]) as [string, number[]][]) {
+          const t0 = performance.now(); await env.sh('kim', cmd); xs.push(performance.now() - t0)
+        }
+      }
+      const r = { label: '2000 folders under hidden mount', hiddenP50: +pct(h, 0.5).toFixed(2), missingP50: +pct(m, 0.5).toFixed(2), hiddenP95: +pct(h, 0.95).toFixed(2), missingP95: +pct(m, 0.95).toFixed(2) }
+      console.log(`[timing] ${JSON.stringify(r)}`)
+      expect(r.hiddenP50).toBeLessThan(3 * r.missingP50)
+    } finally { env.cleanup() }
+  }, 300_000)
 })
