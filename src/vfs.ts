@@ -124,7 +124,10 @@ export class VirtualFs implements IFileSystem {
   /** Bytes of a file hit as the current command should see them; records provenance. */
   async bytesOf(h: Hit, p: string): Promise<Uint8Array> {
     const m = currentMode()
-    if (h.t === 'sys') return sys().readFileBuffer(h.p)
+    if (h.t === 'sys') {
+      // just-bash's in-memory /bin /proc /dev throw plain Errors; callers (the read tool) expect FsError
+      try { return await sys().readFileBuffer(h.p) } catch (e) { throw String((e as Error)?.message).startsWith('EISDIR') ? eisdir('read', p) : enoent('open', p) }
+    }
     if (h.t === 'draft') { this.s.touchDraft(h.item, !m.weak); return this.s.draftContent(h.item) }
     if (h.t !== 'file') throw eisdir('read', p)
     const f = h.f
