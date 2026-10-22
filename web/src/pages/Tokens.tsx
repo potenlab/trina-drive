@@ -10,6 +10,8 @@ import { Badge, ErrorLine, Loading, Page, Secret, useAction, useLoad } from '../
 interface Token {
   id: number; name: string; hint: string; read_only: boolean; created_at: number; expires_at: number | null; revoked_at: number | null
   last_used_at: number | null; last_client: string | null; status: 'active' | 'revoked' | 'expired'; scope: { id: number; vpath: string | null }[] | null
+  /** 'oauth': approved on the consent page by an app (claude.ai, ChatGPT …); revoking it cuts the app at once */
+  kind?: 'pat' | 'oauth'; client?: { name: string | null; domain: string | null; verified: boolean } | null
 }
 const TTLS = ['8h', '1d', '7d', '30d', '90d'] as const
 
@@ -80,7 +82,8 @@ export function Tokens() {
           {data.tokens.map((x) => (
             <li key={x.id} className={x.status === 'active' ? '' : 'dim'}>
               <div className="row-main">
-                <strong>{x.name}</strong> <code className="small">{x.hint}…</code>{' '}
+                <strong>{x.name}</strong>{' '}
+                {x.kind === 'oauth' ? <Badge kind="accent" title={x.client?.domain ?? ''}>OAuth · {x.client?.domain ?? '?'}</Badge> : <code className="small">{x.hint}…</code>}{' '}
                 <Badge kind={x.status === 'active' ? 'ok' : 'neutral'}>{t(`token_status_${x.status}` as Key)}</Badge>
                 {x.read_only && <> <Badge>{t('token_read_only')}</Badge></>}
                 <div className="muted small">

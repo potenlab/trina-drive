@@ -6,7 +6,8 @@ import { t } from '../i18n'
 import { ErrorLine, useAction } from '../ui'
 import { RegisterForm } from './RegisterForm'
 
-export function Login() {
+/** `onDone`: where to go after signing in (default: the admin's folders or the person's files). */
+export function Login({ onDone }: { onDone?: () => void } = {}) {
   const { setMe } = useSession()
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
@@ -17,7 +18,8 @@ export function Login() {
       e.preventDefault(); setBusy(true); setError(null)
       try {
         const r = await api<{ me: Me; csrf: string }>('POST', '/login', { login, password })
-        setCsrf(r.csrf); setMe(r.me); go(r.me.admin ? '/folders' : '/files')
+        setCsrf(r.csrf); setMe(r.me)
+        if (onDone) onDone(); else go(r.me.admin ? '/folders' : '/files')
       } catch (err) {
         setError(err instanceof ApiError && err.status === 429 ? t('login_rate') : t('login_bad'))
       } finally { setBusy(false) }

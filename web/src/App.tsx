@@ -10,6 +10,7 @@ import { ft } from './pages/files-i18n'
 import { Folder } from './pages/Folder'
 import { Folders } from './pages/Folders'
 import { LinkPage, Login, Setup } from './pages/Auth'
+import { Consent, PublicOnly } from './pages/Consent'
 import { People } from './pages/People'
 import { Settings } from './pages/Settings'
 import { Tokens } from './pages/Tokens'
@@ -31,17 +32,23 @@ export function App() {
   const [me, setMe] = useState<Me | null>(null)
   const [ready, setReady] = useState(false)
   const [setupPending, setSetupPending] = useState(false)
+  // served on the public address (src/web/public.ts): only sign-in and OAuth consent are there
+  const [publicListener, setPublicListener] = useState(false)
 
   const refresh = () => get<{ me: Me; csrf: string }>('/session').then((s) => { setCsrf(s.csrf); setMe(s.me) }, () => setMe(null))
   useEffect(() => {
     whenSignedOut(() => { setMe(null) })
-    Promise.all([get<{ setup_pending: boolean; name: string }>('/state').then((s) => { setSetupPending(s.setup_pending); document.title = s.name }, () => {}), refresh()])
+    Promise.all([get<{ setup_pending: boolean; name: string; public_listener?: boolean }>('/state').then((s) => { setSetupPending(s.setup_pending); setPublicListener(!!s.public_listener); document.title = s.name }, () => {}), refresh()])
       .finally(() => setReady(true))
   }, [])
 
   if (!ready) return <main className="center"><Loading /></main>
   const ctx = { me, setMe, refresh }
 
+  // OAuth consent (#/oauth/<id>): sign in first if needed, then decide; on both addresses
+  const oauthMatch = /^\/oauth\/([A-Za-z0-9_-]{20,64})$/.exec(route)
+  if (oauthMatch) return <SessionCtx.Provider value={ctx}><Bare wide>{me ? <Consent rid={oauthMatch[1]!} /> : <Login onDone={() => {}} />}</Bare></SessionCtx.Provider>
+  if (publicListener) return <SessionCtx.Provider value={ctx}><Bare>{me ? <PublicOnly /> : <><PublicOnly /><Login onDone={() => {}} /></>}</Bare></SessionCtx.Provider>
   const linkMatch = /^\/(invite|reset)\/(.+)$/.exec(route)
   if (linkMatch) return <SessionCtx.Provider value={ctx}><Bare><LinkPage kind={linkMatch[1] as 'invite' | 'reset'} token={linkMatch[2]!} /></Bare></SessionCtx.Provider>
   if (route.startsWith('/setup') && (setupPending || me?.admin)) return <SessionCtx.Provider value={ctx}><Bare wide><Setup pending={setupPending} onDone={() => setSetupPending(false)} /></Bare></SessionCtx.Provider>
