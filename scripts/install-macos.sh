@@ -454,7 +454,7 @@ if [ -n "$BACKUP_DIR" ]; then
 else
   echo "  3. Backups are on but have no target yet. Connect an external disk, then:"
   echo "        sudo mkdir -p /Volumes/<disk>/$NAME-backup && sudo chown $SRV_USER /Volumes/<disk>/$NAME-backup"
-  echo "        sudo -u $SRV_USER $NAME --data \"$BASE\" backup target set /Volumes/<disk>/$NAME-backup"
+  echo "        sudo -H -u $SRV_USER $NAME --data \"$BASE\" backup target set /Volumes/<disk>/$NAME-backup"
 fi
 echo "     NOT backed up by $NAME: the original files in your registered folders (NAS shares). Use the NAS's own"
 echo "     backup (e.g. Synology Hyper Backup / snapshots) for those."
