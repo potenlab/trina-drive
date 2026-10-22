@@ -19,6 +19,7 @@ import { addGroup, addMember, addPerson, createToken, grantManage, LEVELS, parse
 import { notifyCommand, NOTIFY_HELP } from './notify/cli'
 import { MCP_HELP, mcpCommand, ttyPassword } from './client/mcp'
 import { attachNotify } from './notify'
+import { mfaCommand, MFA_HELP, mfaServeNotice } from './web/mfa-cli'
 
 const HELP = `${NAME} ${VERSION} — permission-aware read shell and draft box for AI agents (phase-0 prototype)
 
@@ -35,6 +36,7 @@ usage: ${NAME} [--data DIR] <command>
   token create <person> [--name N] [--scope path1,path2] [--read-only] [--ttl 8h]
   token revoke <id>                      (same as connections revoke)
   audit verify
+${MFA_HELP}
 ${NOTIFY_HELP}
   demo seed                              sample company tree, people, rules and tokens
   sh --token <pat> -c <command>          run one shell command as that token (audited)
@@ -211,10 +213,12 @@ async function main(argv: string[]) {
       const { server } = serveWeb(ctx, port, host, { allowedOrigins: origin ? [origin] : [], publicUrl, onRequest: notify.onMcpRequest, emit: notify.emit })
       console.log(`${NAME} ${VERSION} web: http://${host}:${server.port}/   MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
       console.log(`tools: rg=${TOOLS.rg} pdftotext=${TOOLS.pdftotext ?? 'missing'}`)
+      mfaServeNotice(db, publicUrl)
       if (!noReconcile) startReconciler(db, { dataDir, intervalMs: every ? parseDuration(every) : undefined })
       return new Promise(() => {})
     }
     default:
+      if (mfaCommand(db, `${cmd} ${sub ?? ''}`.trim(), rest)) return
       if (await notifyCommand(db, dataDir, `${cmd} ${sub ?? ''}`.trim(), rest)) return
       console.error(`unknown command: ${args.join(' ')}\n\n${HELP}`)
       process.exitCode = 2

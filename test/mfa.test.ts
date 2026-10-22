@@ -175,3 +175,31 @@ describe('admin 2FA gate', () => {
     expect(allAdminsHave2FA(e.db)).toBe(false) // no admin at all is not "all admins have it"
   })
 })
+
+describe('operator CLI', () => {
+  test('mfa reset removes every factor and ends sessions; folder promote refuses personal folders', async () => {
+    const { mfaCommand } = await import('../src/web/mfa-cli')
+    const { promoteFolderIds } = await import('../src/promote')
+    const { createSession, lookupSession } = await import('../src/web/auth')
+    e = setup()
+    const kim = pid('kim')
+    const { secret } = totpBegin(e.db, kim, 'kim')
+    totpConfirm(e.db, kim, totpAt(secret, Date.now()), Date.now())
+    makeRecoveryCodes(e.db, kim)
+    const s = createSession(e.db, kim)
+    const log = console.log
+    console.log = () => {}
+    try {
+      expect(mfaCommand(e.db, 'mfa reset', ['kim'])).toBe(true)
+      expect(has2FA(e.db, kim)).toBe(false)
+      expect(recoveryRemaining(e.db, kim)).toBe(0)
+      expect(lookupSession(e.db, s.cookie)).toBeNull()
+      expect(mfaCommand(e.db, 'folder promote', [`${e.root}/프로젝트`])).toBe(true)
+      expect(promoteFolderIds(e.db).has(e.folderId('프로젝트'))).toBe(true)
+      expect(() => mfaCommand(e.db, 'folder promote', [`${e.root}/개인_kim`])).toThrow(/personal/)
+      expect(mfaCommand(e.db, 'folder promote', [`${e.root}/프로젝트`, '--off'])).toBe(true)
+      expect(promoteFolderIds(e.db).size).toBe(0)
+      expect(mfaCommand(e.db, 'nope nope', [])).toBe(false)
+    } finally { console.log = log }
+  })
+})
