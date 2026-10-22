@@ -27,7 +27,7 @@ export const COMPANY = {
       '27-8 Obong-ro, Sannae-myeon, Gyeongju-si, Gyeongsangbuk-do, Republic of Korea',
       'Customer service +82-70-8064-3349',
       CONTACT_EMAIL,
-      'Mail-order business registration: pending',
+      'Mail-order business registration (통신판매업 신고): in progress',
     ],
   },
   ko: {
@@ -39,7 +39,7 @@ export const COMPANY = {
       '주소 경상북도 경주시 산내면 오봉로 27-8',
       '고객센터 070-8064-3349',
       CONTACT_EMAIL,
-      '통신판매업신고 (신고 예정)',
+      '통신판매업신고 신고 진행 중',
     ],
   },
 } as const
