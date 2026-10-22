@@ -3,7 +3,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import fs from 'node:fs'
 import path from 'node:path'
-import { registerFolder, setFlag, setRule } from '../../src/store'
+import { LIMITS } from '../../src/config'
+import { grantManage, registerFolder, setFlag, setRule } from '../../src/store'
 import { MSG } from '../../src/vfs'
 import { textOf } from '../helpers'
 import { ALL_CASES, ROLES, securitySetup, type Role, type SecEnv } from './fixture'
@@ -355,4 +356,60 @@ describe('R0: a personal folder is its owner\'s only, whatever sits inside it', 
     } finally { env.cleanup() }
   })
   test.todo('re-registering a personal folder as an ordinary one (or another owner) is refused or notifies the owner (R9) — today registerFolder silently clears personal_owner [owner: admin REST / notifications]', () => {})
+})
+
+describe('more rule computation (review §7 axis 1) and window edges (axis 4)', () => {
+  test('no registration or rule can be placed inside a personal folder', () => {
+    fs.mkdirSync(e.R('개인_kim/in'), { recursive: true })
+    expect(() => registerFolder(e.db, e.R('개인_kim/in'))).toThrow()
+    expect(() => setRule(e.db, e.R('개인_kim/in'), 'boss', 'read')).toThrow()
+  })
+
+  test('a registered folder below a no-AI or quarantined folder stays closed', async () => {
+    const env = securitySetup()
+    try {
+      for (const [parent, flag] of [['공용/잠금', 'no_ai'], ['공용/격리', 'quarantine']] as const) {
+        const d = env.R(`${parent}/등록`)
+        fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'r.md'), `REGISTERED_BELOW_${flag}\n`)
+        registerFolder(env.db, d, { nasReaders: 'all' })
+        setRule(env.db, d, '@전체', 'read')
+      }
+      for (const role of ['kim', 'boss', 'dion'] as const) {
+        const r = await env.sh(role, 'grep -r REGISTERED_BELOW /; ls -a /공용')
+        expect(r.stdout).not.toContain('REGISTERED_BELOW')
+        expect(r.stdout).not.toMatch(/잠금|격리/)
+      }
+    } finally { env.cleanup() }
+  })
+
+  test('manage on a folder is not read access (R7)', async () => {
+    const env = securitySetup()
+    try {
+      grantManage(env.db, env.R('경영'), 'kim')
+      expect((await env.sh('kim', 'cat /경영/c.md')).exitCode).toBe(1)
+      expect((await env.sh('kim', 'grep -r CANARY_mgmt_ /')).stdout).toBe('')
+    } finally { env.cleanup() }
+  })
+
+  test('the 8-hour window: a touch 1 minute inside counts, 1 minute outside does not (R3)', async () => {
+    const env = securitySetup()
+    try {
+      let now = Date.UTC(2026, 9, 22, 9, 0, 0)
+      env.ctx.now = () => now
+      env.addToken('w', 'boss', { name: 'boss-window' })
+      await env.sh('w', 'cat /경영/c.md > /dev/null')
+      now += LIMITS.windowMs - 60_000
+      await env.tool('w', 'write', { path: '/drafts/inside.md', content: 'x' })
+      expect(env.draftSrc('w', 'inside.md').has(env.folderId('경영'))).toBe(true)
+      now += 120_000
+      await env.tool('w', 'write', { path: '/drafts/outside.md', content: 'x' })
+      expect(env.draftSrc('w', 'outside.md').has(env.folderId('경영'))).toBe(false)
+      // an older draft keeps its sources when edited after the window (they never shrink)
+      await env.tool('w', 'edit', { path: '/drafts/inside.md', old_string: 'x', new_string: 'y' })
+      expect(env.draftSrc('w', 'inside.md').has(env.folderId('경영'))).toBe(true)
+    } finally { env.cleanup() }
+  })
+
+  test.todo('"출처 초기화" (provenance reset) needs a fresh login, is audited and notifies the admin (5.1) [owner: admin REST / notifications]', () => {})
+  test.todo('after a widened copy is confirmed, reading it brings Src(d) into the reader\'s window (R6) [owner: reconciler]', () => {})
 })
