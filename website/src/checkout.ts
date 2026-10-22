@@ -162,3 +162,12 @@ export async function startCheckout(planId: PlanId, options: CheckoutOptions): P
     },
   })
 }
+
+/**
+ * Paddle "payment links" (invoices, the dashboard's default payment link) send buyers to this site with
+ * ?_ptxn=txn_…; Paddle.js opens that checkout by itself once initialized. Only then is Paddle.js loaded on page view.
+ */
+export function resumePaymentLink(): void {
+  if (!PADDLE || !/^txn_[a-z0-9]+$/i.test(new URLSearchParams(window.location.search).get('_ptxn') ?? '')) return
+  void loadPaddle(PADDLE).catch(() => { /* blocked: the buyer can still use the emailed link to pay at paddle.net */ })
+}

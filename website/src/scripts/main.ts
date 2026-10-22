@@ -1,6 +1,6 @@
 // Client behaviour for every page: theme toggle, mobile menu, copy button, currency/billing toggles, checkout buttons,
 // and the hero terminal replay. No dependencies; everything degrades to static HTML without JS.
-import { isPlanId, startCheckout, type Billing, type Currency } from '../checkout'
+import { isPlanId, resumePaymentLink, startCheckout, type Billing, type Currency } from '../checkout'
 
 const root = document.documentElement
 const lang = root.lang === 'ko' ? 'ko' : 'en'
@@ -65,6 +65,8 @@ function toggle(attr: 'currency' | 'billing', values: readonly string[]) {
 }
 toggle('currency', ['USD', 'KRW'])
 toggle('billing', ['monthly', 'yearly'])
+
+resumePaymentLink()
 
 document.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((btn) => {
   btn.addEventListener('click', async () => {
