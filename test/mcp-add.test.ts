@@ -226,7 +226,8 @@ describe('refusals and dry run', () => {
       { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, SHELF_HOME: path.join(home, 'nodata') }, encoding: 'utf8' })
     expect(r.status).toBe(0)
     expect(r.stdout).toContain(path.join(home, '.cursor', 'mcp.json'))
-    expect(fs.readdirSync(home).filter((n) => n !== 'Library')).toEqual([])
+    // Bun's own transpiler cache: ~/Library/Caches on macOS, ~/.bun or ~/.cache on Linux
+    expect(fs.readdirSync(home).filter((n) => !['Library', '.bun', '.cache'].includes(n))).toEqual([])
   })
 
   test('wrong password, unknown folder, admin without a narrowed scope: refused, no token made', async () => {
