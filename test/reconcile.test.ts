@@ -59,7 +59,8 @@ describe('renames and moves (R10)', () => {
     expect(r.quarantined).toBe(2)
     expect((await e.sh('kim', 'ls /프로젝트')).stdout).not.toMatch(/면담|급여/)
     expect((await e.sh('kim', 'cat /프로젝트/면담/김민수.md')).exitCode).toBe(1)
-    const q = listQuarantine(e.db)
+    // walk order follows the directory listing (sorted on APFS, hash order on ext4): sort for the comparison
+    const q = listQuarantine(e.db).sort((a, b) => a.item.localeCompare(b.item))
     expect(q.map((x) => [x.kind, x.item, path.basename(x.path)])).toEqual([['moved', 'dir', '면담'], ['moved', 'file', '급여.csv']])
     const ev = listEvents(e.db, { kind: 'quarantined' })
     expect(JSON.parse(ev[0]!.notify).admins).toEqual([id(e, 'dion')])
@@ -177,11 +178,18 @@ describe('links and names (R1 ⑤ ⑥)', () => {
     expect(outside(e).map((a) => a.command.replaceAll(e.root, ''))).toEqual(['deleted: /공용/공지.md'])
   })
 
-  test('two names equal after NFC in one folder: both closed and reported (simulated listing; APFS holds one)', async () => {
+  test('two names equal after NFC in one folder: both closed and reported (simulated listing where the file system holds one)', async () => {
     const e = fresh()
     const dir = p(e, '공용')
-    const ops: FsOps = { ...realFs, readdir: async (d) => d === dir ? [...await fs.promises.readdir(d), '공지.md'.normalize('NFD')] : fs.promises.readdir(d) }
-    await rec(e, ops)
+    // APFS keeps one of two names that differ only in normalization, so the second is simulated in the listing; ext4
+    // and other Linux file systems keep both, so the second file is real there
+    const nfd = '공지.md'.normalize('NFD')
+    const probe = fs.mkdtempSync(path.join(e.dir, 'nfc-probe-'))
+    for (const n of ['공지.md', nfd]) fs.writeFileSync(path.join(probe, n), n)
+    const keepsBoth = fs.readdirSync(probe).length === 2
+    fs.rmSync(probe, { recursive: true })
+    if (keepsBoth) fs.writeFileSync(path.join(dir, nfd), 'same name, other normalization\n')
+    await rec(e, keepsBoth ? undefined : { ...realFs, readdir: async (d) => d === dir ? [...await fs.promises.readdir(d), nfd] : fs.promises.readdir(d) })
     const ev = listEvents(e.db, { kind: 'closed' })
     expect(JSON.parse(ev[0]!.detail)).toMatchObject({ reason: 'nfc_collision', count: 2 })
     expect((await e.sh('kim', 'cat /공용/공지.md')).exitCode).toBe(1) // closed by identity even with a normal listing
