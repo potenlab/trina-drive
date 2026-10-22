@@ -63,7 +63,7 @@ const srcOf = (who: string, draft: string) => db.query<{ folder_id: number; stro
   .all(verifyToken(db, secrets[who]!)!.id, draft)
 
 const seeded = db.query<{ id: number; nas_readers: string }, []>('SELECT id, nas_readers FROM folders WHERE registered = 1').all()
-const withNas = (mode: 'seeded' | 'unknown', f: () => boolean) => {
+const withNas = <T>(mode: 'seeded' | 'unknown', f: () => T): T => {
   if (mode === 'unknown') db.exec(`UPDATE folders SET nas_readers = 'unknown' WHERE registered = 1 AND personal_owner IS NULL`)
   try { return f() } finally { for (const r of seeded) db.query('UPDATE folders SET nas_readers = ? WHERE id = ?').run(r.nas_readers, r.id) }
 }
