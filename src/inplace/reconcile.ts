@@ -275,11 +275,8 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
         idOfPath(prevIdx, path.dirname(m.from)) === idOfPath(cur, path.dirname(m.to))
       const row = rowById.get(idOf(m.c))
       const bearing = !!row && ruleBearing.has(row.id)
-      let widen = false
-      if (!sameParent || opts.quarantineRenames) {
-        widen = !!opts.quarantineRenames && sameParent && bearing
-        if (!sameParent) widen = movesWiden(db, m, prevIdx, cur, rowById, ruleBearing)
-      }
+      // path + identity installs (unstable SMB identities) quarantine every rename too (R10, last sentence)
+      const widen = sameParent ? !!opts.quarantineRenames : movesWiden(db, m, prevIdx, cur, rowById, ruleBearing)
       if (sameParent) rep.renamed++; else rep.moved++
       const oldChain = chain(m.c.kind === 'dir' ? m.from : path.dirname(m.from), prevIdx, rowById)
       if (widen) {
