@@ -19,6 +19,18 @@
           "sha256": "af7825fcc69a2afc7a7aea55fc9af90e26421d8f20fe59df32e233c0b8a231c1",
           "dir": "ripgrep-15.2.0-x86_64-apple-darwin",
           "licenses": ["COPYING", "LICENSE-MIT", "UNLICENSE"]
+        },
+        "linux-arm64": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-musl.tar.gz",
+          "sha256": "800b1e7206afe799dfb5a6901f23147cfaabe0e52210538100f61e86e1740915",
+          "dir": "ripgrep-15.2.0-aarch64-unknown-linux-musl",
+          "licenses": ["COPYING", "LICENSE-MIT", "UNLICENSE"]
+        },
+        "linux-x64": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
+          "sha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+          "dir": "ripgrep-15.2.0-x86_64-unknown-linux-musl",
+          "licenses": ["COPYING", "LICENSE-MIT", "UNLICENSE"]
         }
       }
     },
@@ -28,10 +40,12 @@
       "license": "GPL-2.0-only OR GPL-3.0-only (and the licenses of its libraries, copied to tools/licenses/)",
       "binaries": ["pdftotext"],
       "source": "homebrew",
-      "comment": "Poppler publishes no macOS binaries. The build machine's Homebrew bottle is copied with its library closure into tools/lib and relinked to @rpath (install_name_tool), then re-signed. Only a build host of the same CPU type can vendor it.",
+      "comment": "Poppler publishes no macOS binaries. The build machine's Homebrew bottle is copied with its library closure into tools/lib and relinked to @rpath (install_name_tool), then re-signed. Only a build host of the same CPU type can vendor it. Linux (Docker image, linux-*): Debian's poppler-utils package from the pinned base image's release, current security updates at build time; the image records the exact version (/usr/share/shelf/tools.json, SBOM).",
       "targets": {
         "darwin-arm64": { "brewPrefix": "/opt/homebrew" },
-        "darwin-x64": { "brewPrefix": "/usr/local" }
+        "darwin-x64": { "brewPrefix": "/usr/local" },
+        "linux-arm64": { "apt": "poppler-utils" },
+        "linux-x64": { "apt": "poppler-utils" }
       }
     }
   ]
