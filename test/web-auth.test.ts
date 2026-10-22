@@ -176,12 +176,12 @@ describe('password reset (R9)', () => {
   test('admin starts it: link only in the person\'s mail, tokens and sessions cut at once, person told', async () => {
     const admin = await e.as('dion')
     const kim = await e.as('kim')
-    expect(verifyToken(e.db, e.secrets.kim)).not.toBeNull()
+    expect(verifyToken(e.db, e.secrets.kim!)).not.toBeNull()
     const r = await admin.call('POST', `/api/people/${e.pid('kim')}/reset`, {})
     expect(r.status).toBe(200)
     expect(JSON.stringify(r.data)).not.toMatch(/reset\//) // the admin never gets the link
     expect(r.data.tokens_revoked).toBeGreaterThanOrEqual(1)
-    expect(verifyToken(e.db, e.secrets.kim)).toBeNull()
+    expect(verifyToken(e.db, e.secrets.kim!)).toBeNull()
     expect((await kim.call('GET', '/api/session')).status).toBe(401)
     const mail = e.mailer.read().find((m) => m.to === 'kim@example.com' && m.text.includes('/#/reset/'))!
     expect(mail).toBeDefined()
