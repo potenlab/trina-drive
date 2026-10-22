@@ -14,7 +14,7 @@ import type { Subprocess } from 'bun'
 import { ENV_PREFIX } from '../config'
 import { checkFromWorker, encodeFrame, FrameDecoder, PROTOCOL_VERSION, ProtocolError, type FromWorker, type JobSpec, type ToWorker, type WireDirent, type WireError, type WireStat } from './protocol'
 import { memProbe } from './rss'
-import { detectIsolation, lookupUser, wrapArgv, type Isolation } from './sandbox'
+import { detectIsolation, isolationProblem, lookupUser, wrapArgv, type Isolation } from './sandbox'
 import { Aborted, Busy, FairScheduler, type SchedulerLimits } from './scheduler'
 
 // ---------- what the integrator implements ----------
@@ -499,7 +499,10 @@ export class Executor {
     const want = cfg.isolation ?? 'auto'
     this.isolation = want === 'auto' ? detectIsolation() : want
     let refusal: string | null = null
-    if ((cfg.requireIsolation ?? true) && this.isolation === 'none') refusal = 'no OS isolation is available (sandbox-exec on macOS, bwrap on Linux), and isolation is required'
+    if ((cfg.requireIsolation ?? true) && this.isolation === 'none') {
+      const why = want === 'auto' ? isolationProblem() : null
+      refusal = `no OS isolation is available (sandbox-exec on macOS, bwrap on Linux), and isolation is required${why ? `: ${why}` : ''}`
+    }
 
     let ids: { uid: number; gid: number } | null = null
     let user: string | null = null
@@ -775,6 +778,19 @@ const envBase = (): ExecutorConfig => ({
   requireIsolation: env('REQUIRE_ISOLATION') !== '0',
   runAs: env('WORKER_USER') ?? null,
 })
+
+/**
+ * What the process-wide executors will use, for the server's start-up message (does not start them). `problem` is set
+ * when isolation is required but unavailable: then every shell command and document extraction is refused.
+ */
+export function isolationReport(): { isolation: Isolation; required: boolean; problem: string | null } {
+  const cfg = envBase()
+  const isolation = !cfg.isolation || cfg.isolation === 'auto' ? detectIsolation() : cfg.isolation
+  const required = cfg.requireIsolation !== false
+  if (isolation !== 'none' || !required) return { isolation, required, problem: null }
+  const why = !cfg.isolation || cfg.isolation === 'auto' ? isolationProblem() : `${ENV_PREFIX}_ISOLATION=none`
+  return { isolation, required, problem: `bash commands and document text extraction are refused: no OS isolation for workers. ${why}` }
+}
 
 let shared: Executor | null = null
 /**

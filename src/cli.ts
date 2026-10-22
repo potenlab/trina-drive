@@ -15,6 +15,7 @@ import { serveWeb } from './web/server'
 import { makeCtx, Session } from './session'
 import { runShell } from './shell'
 import { closeDefaultExecutor } from './worker'
+import { isolationReport } from './worker/pool'
 import { addGroup, addMember, addPerson, createToken, grantManage, LEVELS, parseDuration, person, registerFolder, revokeToken, setFlag, setRule, StoreError, verifyToken, type LevelName, type NasReaders } from './store'
 import { notifyCommand, NOTIFY_HELP } from './notify/cli'
 import { MCP_HELP, mcpCommand, ttyPassword } from './client/mcp'
@@ -211,6 +212,9 @@ async function main(argv: string[]) {
       const { server } = serveWeb(ctx, port, host, { allowedOrigins: origin ? [origin] : [], publicUrl, onRequest: notify.onMcpRequest, emit: notify.emit })
       console.log(`${NAME} ${VERSION} web: http://${host}:${server.port}/   MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
       console.log(`tools: rg=${TOOLS.rg} pdftotext=${TOOLS.pdftotext ?? 'missing'}`)
+      const iso = isolationReport()
+      console.log(`worker isolation: ${iso.isolation}${iso.required ? '' : ' (not required)'}`)
+      if (iso.problem) console.error(`ERROR: ${iso.problem}`)
       if (!noReconcile) startReconciler(db, { dataDir, intervalMs: every ? parseDuration(every) : undefined })
       return new Promise(() => {})
     }

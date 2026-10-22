@@ -7,12 +7,17 @@ import path from 'node:path'
 import { defaultCodePaths, Executor, extractIsolated, runShellIsolated, setBackendErrorHandler, type CommandResult, type FsBackend, type RunOptions } from '../src/worker'
 import { FairScheduler } from '../src/worker/scheduler'
 import { encodeFrame, FrameDecoder, ProtocolError } from '../src/worker/protocol'
-import { macProfile } from '../src/worker/sandbox'
+import { bwrapArgs, detectIsolation, macProfile } from '../src/worker/sandbox'
 import { sampleDocx, samplePdf } from '../src/samples'
 
 const FIXTURES = path.join(import.meta.dir, 'fixtures')
 const HOSTILE = path.join(FIXTURES, 'hostile.ts')
-const SANDBOXED = process.platform === 'darwin' && fs.existsSync('/usr/bin/sandbox-exec')
+const MAC_SANDBOX = process.platform === 'darwin' && fs.existsSync('/usr/bin/sandbox-exec')
+const BWRAP = process.platform === 'linux' && detectIsolation() === 'bwrap'
+const SANDBOXED = MAC_SANDBOX || BWRAP
+/** The isolation this machine must report: sandbox-exec on macOS, bwrap where it works; SHELF_EXPECT_ISOLATION
+ *  (set by scripts/docker-test.sh) makes a missing bwrap a failure instead of a skipped suite. */
+const EXPECTED = process.env.SHELF_EXPECT_ISOLATION || (MAC_SANDBOX ? 'sandbox-exec' : BWRAP ? 'bwrap' : undefined)
 
 const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-worker-test-')))
 const tmpRoot = path.join(scratch, 'jobs')
@@ -22,6 +27,10 @@ fs.mkdirSync(outside)
 fs.writeFileSync(path.join(outside, 'secret.txt'), 'top secret payroll')
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
+/** Linux: pids of `/bin/sleep 300` processes (what the spawnAndSpin fixture starts). */
+const sleepers = () => fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).filter((d) => {
+  try { return fs.readFileSync(`/proc/${d}/cmdline`, 'utf8') === '/bin/sleep\x00300\x00' } catch { return false }
+})
 const pct = (xs: number[], p: number) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.ceil(p / 100 * s.length) - 1)]! }
 const fmt = (n: number) => n.toFixed(1)
 
@@ -45,7 +54,7 @@ describe('platform', () => {
   test('reports the isolation in use', () => {
     const info = ex.info()
     console.log(`[worker] isolation=${info.isolation} user=${info.user ?? '(server user)'} memProbe=${info.memProbe} warnings=${JSON.stringify(info.warnings)}`)
-    if (SANDBOXED) expect(info.isolation).toBe('sandbox-exec')
+    if (EXPECTED) expect(info.isolation).toBe(EXPECTED as never)
     expect(info.refusal).toBeNull()
   })
 
@@ -144,10 +153,12 @@ describe('limits', () => {
     const child = Number(/child-pid (\d+)/.exec(r.log)?.[1])
     expect(child).toBeGreaterThan(0)
     expect(alive(r.stats.pid)).toBe(false)
-    // the orphaned child is in the worker's process group, which was SIGKILLed
+    // the orphaned child is in the worker's process group, which was SIGKILLed (under bwrap its pid is the sandbox's
+    // own, so look for the process itself: the pid namespace ends with its init)
+    const gone = BWRAP ? () => !sleepers().length : () => !alive(child)
     const deadline = Date.now() + 2000
-    while (alive(child) && Date.now() < deadline) await Bun.sleep(20)
-    expect(alive(child)).toBe(false)
+    while (!gone() && Date.now() < deadline) await Bun.sleep(20)
+    expect(gone()).toBe(true)
     expect(fs.readdirSync(tmpRoot)).toEqual([])
     await e.close()
   })
@@ -159,7 +170,7 @@ describe('limits', () => {
   })
 })
 
-describe.if(SANDBOXED)('sandbox (macOS sandbox-exec)', () => {
+describe.if(SANDBOXED)(`sandbox (${MAC_SANDBOX ? 'macOS sandbox-exec' : 'Linux bwrap'})`, () => {
   test('network is blocked', async () => {
     const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('hi') })
     const r = await extract('network', String(server.port))
@@ -193,7 +204,12 @@ describe.if(SANDBOXED)('sandbox (macOS sandbox-exec)', () => {
     const secret = path.join(outside, 'secret.txt')
     expect((await extract('readFrom', secret)).text).toContain('READ-BLOCKED')
     expect((await extract('listDir', outside)).text).toContain('LIST-BLOCKED')
-    expect((await extract('listDir', os.homedir())).text).toContain('LIST-BLOCKED')
+    const home = (await extract('listDir', os.homedir())).text!
+    // bwrap: a folder above the worker code or the job dir exists in the sandbox, holding only the next folder on the
+    // way to them (here HOME may be /tmp, which holds the job dirs)
+    const onTheWay = [path.resolve(import.meta.dir, '..'), tmpRoot].map((p) => path.relative(os.homedir(), p)).filter((r) => !r.startsWith('..')).map((r) => r.split(path.sep)[0]!)
+    if (BWRAP && onTheWay.length) expect(home.replace(/^LIST-OK /, '').split(',').every((n) => onTheWay.includes(n))).toBe(true)
+    else expect(home).toContain('LIST-BLOCKED')
     expect((await extract('readFrom', path.join(os.homedir(), '.zshrc'))).text).toContain('READ-BLOCKED')
     // the worker's own code is readable (that is how it runs)
     expect((await extract('readFrom', HOSTILE)).text).toContain('READ-OK')
@@ -206,12 +222,55 @@ describe.if(SANDBOXED)('sandbox (macOS sandbox-exec)', () => {
     expect((await extract('readFrom', secret)).text).toContain('READ-BLOCKED')
   })
 
-  test('signals to other processes are blocked; same-uid process arguments are a known gap', async () => {
+  test.if(MAC_SANDBOX)('signals to other processes are blocked; same-uid process arguments are a known gap', async () => {
     expect((await extract('signal', String(process.pid))).text).toContain('SIGNAL-BLOCKED')
     // KNOWN LIMITATION (docs/worker.md): sandbox-exec does not mediate sysctl KERN_PROCARGS2, so a worker running as
     // the server's uid can read the argv and initial environment of the server. Only a separate worker user stops it.
     const leak = await extract('procargs', String(process.pid))
     console.log(`[worker] same-uid process arguments from inside the sandbox: ${leak.text} (user=${ex.info().user ?? 'server user'})`)
+  })
+
+  test.if(BWRAP)('other processes are invisible (own pid namespace and /proc): no server environment, no signals', async () => {
+    const r = await extract('procScan', 'x')
+    const scan = JSON.parse(r.text!) as { pids: number[]; cmdlines: string[]; environs: string[]; canary: boolean; serverPid: boolean }
+    console.log(`[worker] /proc inside bwrap: pids ${scan.pids.join(',')} | ${scan.cmdlines.map((c) => c.slice(0, 40)).join(' | ')}`)
+    // bwrap's init and the worker itself; never the server (this test process) or anything else in the container
+    expect(scan.pids.length).toBeLessThanOrEqual(3)
+    expect(scan.cmdlines.some((c) => c.includes('bun test') || c.includes('worker.test'))).toBe(false)
+    // the server's environment is not readable from any /proc/<pid>/environ the worker can open (the canary is put into
+    // the test runner's initial environment by scripts/docker-test.sh)
+    expect(scan.canary).toBe(false)
+    if (process.env.SHELF_TEST_CANARY) console.log('[worker] canary set in the server environment: not visible in the worker')
+    // signals reach nothing outside the sandbox: every pid number answers ESRCH except the worker's own threads and
+    // bwrap's init (pid numbers are the namespace's own, so the server's pid number may be one of the worker's threads)
+    expect((await extract('signalScan', '32768', { timeoutMs: 20_000 })).text).toBe('[]')
+  })
+
+  test.if(BWRAP)('no capabilities, no new privileges, a read-only root', async () => {
+    const st = (await extract('selfStatus', 'x')).text!
+    console.log(`[worker] bwrap worker status: ${st}`)
+    expect(st).toMatch(/NoNewPrivs:\s*1/)
+    expect(st).toMatch(/CapEff:\s*0+\b/)
+    expect(st).toMatch(/CapBnd:\s*0+\b/)
+    for (const p of ['/x', '/usr/x', '/tmp/x', path.join(tmpRoot, 'x')]) expect((await extract('writeTo', p)).text).toContain('WRITE-BLOCKED')
+    // nothing but libraries and shared data from the system: no /etc/passwd, /home, /root, /var, no data dir
+    for (const p of ['/etc/passwd', '/etc/hostname', '/etc/shadow', '/proc/1/root/etc/passwd']) expect((await extract('readFrom', p)).text).toContain('READ-BLOCKED')
+    for (const p of ['/var', '/data', '/srv', '/etc/ssl']) expect((await extract('listDir', p)).text).toContain('LIST-BLOCKED')
+    expect((await extract('listDir', '/')).text).toMatch(/^LIST-OK /)
+    const root = (await extract('listDir', '/')).text!.slice(8).split(',').sort()
+    console.log(`[worker] bwrap worker root: ${root.join(' ')}`)
+    for (const n of root) expect(['bin', 'dev', 'etc', 'lib', 'lib32', 'lib64', 'proc', 'tmp', 'usr', 'app', 'opt', 'root', 'home', 'srv', 'private']).toContain(n)
+    expect(root).not.toContain('data')
+  })
+
+  test.if(BWRAP)('bwrap arguments: all namespaces, fresh /proc, read-only root, no binary folders', () => {
+    const a = bwrapArgs({ workDir: '/tmp/w/job', readPaths: ['/code/src'], execPaths: ['/opt/tool/bin/pdftotext'], runtime: '/opt/bun/bin/bun' }, ['/usr/lib'])
+    const s = a.join(' ')
+    expect(s).toContain('--unshare-all --die-with-parent --new-session --cap-drop ALL --proc /proc --dev /dev')
+    expect(s).toContain('--ro-bind /code/src /code/src')
+    expect(s).toContain('--ro-bind /opt/tool/bin/pdftotext /opt/tool/bin/pdftotext')
+    expect(s.endsWith('--bind /tmp/w/job /tmp/w/job --chdir /tmp/w/job --remount-ro /')).toBe(true)
+    expect(bwrapArgs({ workDir: '/w', readPaths: [], execPaths: [], runtime: '/r' }).join(' ')).not.toMatch(/--ro-bind (\/usr)?\/s?bin /)
   })
 
   test('starting other programs is blocked', async () => {
@@ -287,7 +346,7 @@ describe('shell in a worker over a proxied filesystem', () => {
     expect(r.stderr).toBe('')
     expect(r.stdout).toBe('a.txt\nb.txt\nsub\nALPHA\nBETA\n4\n')
     expect(r.exitCode).toBe(0)
-    expect(r.run.isolation).toBe(SANDBOXED ? 'sandbox-exec' : r.run.isolation)
+    expect(r.run.isolation).toBe((EXPECTED ?? r.run.isolation) as never)
   })
 
   test('grep runs in the parent (stub for ripgrep), on files and on a pipe', async () => {
