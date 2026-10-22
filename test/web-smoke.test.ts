@@ -74,3 +74,12 @@ test('sign in, use the API with the session, make a token, use it on /mcp; the c
   const audit = await (await fetch(base + '/api/audit?view=mine', { headers: { cookie } })).json() as { entries: { tool: string; command: string }[] }
   expect(audit.entries.some((x) => x.tool === 'bash' && x.command === 'ls /')).toBe(true)
 })
+
+test('the built My tokens page offers `mcp add` (recommended / --token-stdin), not a `--header "Authorization: Bearer …"` command line', async () => {
+  const html = await (await fetch(base + '/')).text()
+  const js = await (await fetch(base + /src="(\/assets\/[^"]+\.js)"/.exec(html)![1]!)).text()
+  expect(js).toContain('--token-stdin')
+  expect(js).toContain('Manual config (stores the token in plain text)')
+  expect(js).not.toContain('--header "Authorization')
+  expect(js).not.toContain('--transport http')
+})

@@ -45,8 +45,8 @@ xlsx, hwpx and hwp files. `bun run sim/provenance-day.ts` replays an office day 
 (`--password-stdin`, `$SHELF_PASSWORD`, or a no-echo prompt), makes a personal token on the server (`POST /api/tokens`:
 default 7 days, all folders the person reads; `--scope 공용,프로젝트`, `--read-only`, `--ttl`; admins must pass `--scope`
 or `--all-folders`, plan 5.1), signs out, and connects the client **in user scope only** — never a repo's `.mcp.json`,
-`.cursor/mcp.json` or `.codex/`. `--token-stdin` takes an existing token instead (a token argument is refused: shell
-history). `--dry-run` prints every command and file it would write, with `<token>` in place of the secret, and contacts
+`.cursor/mcp.json` or `.codex/`. `--token-stdin` takes an existing token instead, from a pipe or, when standard input is
+a terminal, pasted at a prompt that does not echo it (a token argument is refused: shell history). `--dry-run` prints every command and file it would write, with `<token>` in place of the secret, and contacts
 nothing.
 
 The token is kept in the macOS login Keychain (`security -i` on stdin, so it never appears in a process list; service
@@ -71,6 +71,11 @@ Plain `http://` to a non-loopback address is warned about (password and token cr
 Checked live with HOME set to a scratch directory: `claude mcp get shelf` → "✔ Connected" through the headersHelper
 (and "✘ Failed to connect" with a wrong token), `codex mcp get shelf --json` shows the streamable HTTP transport with
 `bearer_token_env_var`, and `cursor-agent mcp list-tools shelf` lists the five tools through `${env:…}`.
+
+The web's My tokens page shows these commands per client (tabs: Claude Code, Codex, Cursor): the recommended
+`mcp add <client> --server <its address> --login <you>`, and for a token just made there `mcp add <client> --server …
+--token-stdin` (paste it at the hidden prompt). A manual client entry with the token in clear text is offered only
+collapsed and labelled as such; the page never builds a command line that holds a token.
 
 Revoke a token on the web (My tokens) when you stop using it; `claude mcp remove shelf -s user`,
 `codex mcp remove shelf`, or delete the entry from `~/.cursor/mcp.json`, and the Keychain item

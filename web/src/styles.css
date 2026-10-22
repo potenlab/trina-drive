@@ -124,6 +124,10 @@ ul.rows > li:last-child { border-bottom: 0; }
 .tabs button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .secret { display: flex; gap: .5rem; align-items: center; background: var(--bg); border: 1px dashed var(--accent); border-radius: 8px; padding: .5rem .6rem; margin: .4rem 0; }
 .secret code { flex: 1; overflow-wrap: anywhere; user-select: all; }
+.connect .tabs { margin-bottom: .6rem; }
+details.manual { margin-top: .8rem; }
+details.manual summary { cursor: pointer; color: var(--muted); }
+details.manual .secret code { white-space: pre-wrap; }
 .register { gap: 1rem; }
 .promise { margin-top: 2rem; }
 

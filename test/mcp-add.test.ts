@@ -248,6 +248,15 @@ describe('refusals and dry run', () => {
     expect(err.at(-1)).toContain('--token-stdin')
   })
 
+  test('--token-stdin on a terminal asks for the token without echo (the web page\'s command: nothing in shell history)', async () => {
+    const asked: string[] = []
+    const i: McpIO = { ...io('not read: stdin is a terminal'), stdinIsTTY: true, promptPassword: async (q) => { asked.push(q); return e.secrets.kim! + '\n' } }
+    expect(await mcpCommand(['add', 'claude', '--server', SERVER, '--token-stdin'], i)).toBe(0)
+    expect(asked).toEqual(['paste the token (it is not shown): '])
+    expect(lastToken()).toBe(e.secrets.kim!)
+    expect(out.join('\n')).not.toContain(e.secrets.kim!)
+  })
+
   test('a config inside a git repository (dotfiles HOME): a clear-text token is refused, otherwise a warning', async () => {
     fs.mkdirSync(path.join(home, '.git'))
     expect(await add(['cursor', '--login', 'kim', '--store', 'inline'])).toBe(1)

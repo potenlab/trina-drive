@@ -1,7 +1,7 @@
 // What the web shows. Folder visibility and editing rights come from rights.ts; drafts from policy.ts + drafts.ts
 // (R4, with the person's session judged as a token whose scope is everything); audit filtered per R7/R9.
 import { verifyAudit } from '../audit'
-import { canSeeDraft, liveDrafts, type Draft } from '../drafts'
+import { canSeeDraft, liveDrafts, sourcesFor, type Draft } from '../drafts'
 import { Access } from '../policy'
 import { Rights, type Actor } from '../rights'
 import type { FolderRow, TokenRow } from '../store'
@@ -112,22 +112,24 @@ export function folderView(op: Op, id: unknown) {
 function sessionToken(a: Actor): TokenRow {
   return { id: -1, person_id: a.personId, name: 'web', hint: '', scope: null, read_only: 1, created_at: 0, expires_at: null, revoked_at: null, last_used_at: null }
 }
-function visibleDrafts(w: WebCtx, a: Actor): { shown: Draft[]; locked: Draft[] } {
+function visibleDrafts(w: WebCtx, a: Actor): { shown: Draft[]; locked: Draft[]; access: Access } {
   const access = new Access(w.db, { personId: a.personId })
   const t = sessionToken(a)
   const all = liveDrafts(w.db, a.personId)
-  return { shown: all.filter((d) => canSeeDraft(access, t, d)), locked: all.filter((d) => !canSeeDraft(access, t, d)) }
+  return { shown: all.filter((d) => canSeeDraft(access, t, d)), locked: all.filter((d) => !canSeeDraft(access, t, d)), access }
 }
 
 export function draftsView(w: WebCtx, a: Actor) {
-  const r = new Rights(w.db)
-  const { shown, locked } = visibleDrafts(w, a)
-  const srcName = (id: number) => { const f = r.folders.get(id); return f ? (r.vpath(f) ?? '(unregistered folder)') : '(unknown folder)' }
+  const { shown, locked, access } = visibleDrafts(w, a)
   return {
-    drafts: shown.map((d) => ({
-      id: d.id, path: d.path, token: d.token_name, version: d.version, size: d.size, updated_at: d.updated_at, sha256: d.sha256,
-      sources: [...d.src].map(([fid, strong]) => ({ folder: srcName(fid), strong })).sort((x, y) => x.folder.localeCompare(y.folder)),
-    })),
+    drafts: shown.map((d) => {
+      // 원칙 2: only folders this person can read now are named (R4 lists no other draft today; this keeps it so)
+      const src = sourcesFor(access, d.src)
+      return {
+        id: d.id, path: d.path, token: d.token_name, version: d.version, size: d.size, updated_at: d.updated_at, sha256: d.sha256,
+        sources: src.shown, hidden_sources: src.hidden,
+      }
+    }),
     // R4: locked drafts appear on your own web only as a count and dates
     locked: { count: locked.length, dates: locked.map((d) => d.updated_at).sort((x, y) => y - x) },
   }
