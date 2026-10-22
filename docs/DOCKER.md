@@ -246,6 +246,9 @@ docker run --rm --entrypoint sh shelf:dev -c 'cd /app && sha256sum -c --quiet SH
   `/usr/share/doc/<package>/copyright`), `/app/SHA256SUMS` (every file of `/app`, same format and code as the macOS
   release manifest, scripts/build.ts `writeChecksums`). There is no single compiled binary: workers start
   `bun src/worker/entry.ts` inside bwrap, so the image ships the sources.
+- **SBOM** (`scripts/docker/sbom.sh`, syft 1.54.1): 157 Debian packages, 77 npm packages and the Bun binary for the
+  arm64 image. syft does not recognise the static ripgrep binary (a Rust build without embedded dependency data);
+  its origin and hashes are in `/usr/share/shelf/tools.json`.
 - **Labels:** `org.opencontainers.image.version`, `.revision` (git commit, `--build-arg REVISION=…`), `.created`,
   `.source`, `.licenses` (`NOASSERTION` until the license is decided; AGPL-3.0 planned), `.base.name`.
 - **Not yet:** a published image, image signatures (cosign) and provenance attestations; they come with the first
@@ -280,5 +283,6 @@ bwrap sandbox tests (`/proc` scan, signal scan, privileges, arguments) skip on m
   hide the server's environment and file descriptors (the macOS "same-uid procargs" gap does not exist here).
 - Executables under `/usr/lib` (e.g. helper programs of Debian packages) can be started by a worker; there is no shell
   and no network in the sandbox, and `/tmp` is `noexec`, so it cannot run a program it wrote.
-- amd64: the image builds (buildx, emulated) but its tests were run on arm64 only.
+- amd64: the image builds (`docker buildx build --platform linux/amd64`, 1 min 53 s under QEMU on an M1; 129 MB) and
+  Bun, ripgrep and bwrap start in it, but the smoke and the test suite ran on arm64 only.
 - NAS-internal Docker: not supported (section intro). SELinux and rootless hosts: not tested.
