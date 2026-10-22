@@ -1,24 +1,39 @@
 ---
-// Placeholder legal page. TODO(payments): replace the notice with the final Terms / Privacy / Refund text before
-// paid plans go on sale (Korean e-commerce law needs the Korean versions under /ko/). Remove `noindex` then.
+// Terms / Privacy / Refund. The text lives in src/legal/<page>.<lang>.md (copied from
+// research/trina-drive/payments/legal/ with the placeholders filled) and is rendered to HTML at build time.
+// Draft — lawyer review pending. Edit the Markdown, not this file, to change the wording.
 import type { Copy } from '../content/en'
 import Base from '../layouts/Base.astro'
-import { CONTACT_EMAIL } from '../site'
 import Footer from './Footer.astro'
 import Nav from './Nav.astro'
+import * as termsEn from '../legal/terms.en.md'
+import * as termsKo from '../legal/terms.ko.md'
+import * as privacyEn from '../legal/privacy.en.md'
+import * as privacyKo from '../legal/privacy.ko.md'
+import * as refundEn from '../legal/refund.en.md'
+import * as refundKo from '../legal/refund.ko.md'
+
+const LEGAL_UPDATED = '2026-10-23'
 
 interface Props { t: Copy; page: 'terms' | 'privacy' | 'refund' }
 const { t, page } = Astro.props
+const docs = {
+  en: { terms: termsEn, privacy: privacyEn, refund: refundEn },
+  ko: { terms: termsKo, privacy: privacyKo, refund: refundKo },
+}
+const { Content } = docs[t.lang][page]
 const home = t.lang === 'ko' ? '/ko' : '/'
 const title = t.legal[page].title
 const other = t.lang === 'ko' ? `/${page}` : `/ko/${page}`
 ---
-<Base t={t} title={`${title} — Trina Drive`} noindex>
+<Base t={t} title={`${title} — Trina Drive`} description={t.legal[page].description} alternates={{ en: `/${page}`, ko: `/ko/${page}` }}>
   <Nav t={t} home={home} langHref={other} />
   <main id="main" class="container legal">
     <h1>{title}</h1>
-    <p class="notice">{t.legal.draft} {t.legal.contact} <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a></p>
-    <!-- TODO(payments): final {page} text goes here. -->
+    <p class="legal-updated">{t.legal.updated} <time datetime={LEGAL_UPDATED}>{LEGAL_UPDATED}</time></p>
+    <article class="prose">
+      <Content />
+    </article>
     <a class="back" href={home}>← {t.legal.back}</a>
   </main>
   <Footer t={t} home={home} />

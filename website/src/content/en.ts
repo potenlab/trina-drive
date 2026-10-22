@@ -309,11 +309,10 @@ const en = {
   },
   legal: {
     back: 'Back to home',
-    draft: 'This page is a placeholder. The final text will be published before paid plans go on sale.',
-    contact: 'Questions in the meantime:',
-    terms: { title: 'Terms of Service' },
-    privacy: { title: 'Privacy Policy' },
-    refund: { title: 'Refund Policy' },
+    updated: 'Last updated:',
+    terms: { title: 'Terms of Service', description: 'Terms for Trina Drive managed plans and setup services, provided by Trina Inc.' },
+    privacy: { title: 'Privacy Policy', description: 'What personal information Trina Inc. collects for Trina Drive, why, and your rights.' },
+    refund: { title: 'Refund Policy', description: 'Trina Drive refunds: 14-day window, annual plans, setup services and how to ask.' },
   },
   notFound: { title: 'Page not found', body: 'That page does not exist — or you are not allowed to see it.', back: 'Go home' },
 }

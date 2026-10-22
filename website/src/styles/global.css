@@ -503,7 +503,7 @@ html[lang="ko"] .cta-box h2 { line-height: 1.3; }
 .copyright { margin-top: 8px; font-size: 12.5px; color: var(--fg-faint); }
 @media (max-width: 760px) { .footer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .footer-brand { grid-column: 1 / -1; } }
 
-/* legal placeholder pages */
+/* legal pages (Markdown rendered into .prose) and /thanks */
 .legal { padding: 72px 0 96px; max-width: 760px; }
 .legal h1 { font-size: clamp(30px, 4vw, 40px); }
 .legal .notice {
@@ -512,3 +512,25 @@ html[lang="ko"] .cta-box h2 { line-height: 1.3; }
 }
 .legal .notice a { color: var(--accent); }
 .legal .back { display: inline-block; margin-top: 32px; color: var(--accent); font-weight: 600; text-decoration: none; }
+.legal-updated { margin-top: 10px; font-size: 13px; color: var(--fg-faint); }
+.prose { margin-top: 32px; font-size: 15.5px; line-height: 1.75; color: var(--fg-muted); overflow-wrap: anywhere; }
+.prose > * + * { margin-top: 14px; }
+.prose h2 { margin-top: 40px; font-size: 20px; line-height: 1.3; color: var(--fg); }
+.prose h3 { margin-top: 28px; font-size: 16.5px; color: var(--fg); }
+.prose strong { color: var(--fg); font-weight: 620; }
+.prose a { color: var(--accent); text-underline-offset: 2px; }
+.prose ul, .prose ol { padding-left: 1.3em; display: grid; gap: 6px; }
+.prose ul { list-style: disc; }
+.prose ol { list-style: decimal; }
+.prose li::marker { color: var(--fg-faint); }
+.prose table {
+  display: block; width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 13.5px; line-height: 1.55;
+  margin-top: 18px;
+}
+.prose th, .prose td { padding: 9px 12px; border: 1px solid var(--border); text-align: left; vertical-align: top; min-width: 110px; }
+.prose th { background: var(--bg-soft); color: var(--fg); font-weight: 600; }
+.prose th:empty { display: none; }
+.prose hr { border: 0; border-top: 1px solid var(--border); margin: 32px 0; }
+.thanks-steps { margin-top: 24px; display: grid; gap: 10px; color: var(--fg-muted); }
+.thanks-steps li { position: relative; padding-left: 24px; }
+.thanks-steps li svg { position: absolute; left: 0; top: 4px; width: 16px; height: 16px; color: var(--accent); }

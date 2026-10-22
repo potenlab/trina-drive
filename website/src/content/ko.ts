@@ -305,11 +305,10 @@ const ko: Copy = {
   },
   legal: {
     back: '처음으로',
-    draft: '아직 준비 중인 페이지예요. 유료 요금제 판매 전에 최종 문구를 올릴게요.',
-    contact: '그 전에 궁금한 점은',
-    terms: { title: '이용약관' },
-    privacy: { title: '개인정보처리방침' },
-    refund: { title: '환불 정책' },
+    updated: '최종 수정일:',
+    terms: { title: '이용약관', description: '주식회사 트리나가 제공하는 Trina Drive 관리형 요금제와 설치 서비스 이용약관' },
+    privacy: { title: '개인정보처리방침', description: 'Trina Drive 서비스에서 주식회사 트리나가 처리하는 개인정보와 정보주체의 권리' },
+    refund: { title: '환불 정책', description: 'Trina Drive 환불 기준: 14일 환불, 연 결제, 설치 대행, 요청 방법' },
   },
   notFound: { title: '페이지를 찾을 수 없어요', body: '없는 페이지이거나, 볼 수 없는 페이지예요.', back: '처음으로' },
 }
