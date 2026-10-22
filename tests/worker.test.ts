@@ -99,6 +99,25 @@ describe('limits', () => {
     expect(alive(r.run.stats.pid)).toBe(false)
   })
 
+  test('the parent runs only the commands the job offered', async () => {
+    const asked: string[] = []
+    const run = await ex.run({ kind: 'extract', module: HOSTILE, fn: 'forge', name: 'cmd' }, {
+      token: 't', person: 'p', timeoutMs: 5000,
+      hooks: { runCommand: async (name) => { asked.push(name); return { stdout: '', stderr: '', exitCode: 0 } } },
+    })
+    expect(run.status).toBe('crashed')
+    expect(run.log).toContain('command not offered: rm')
+    expect(asked).toEqual([])
+  })
+
+  test('requests after done never reach the backend', async () => {
+    const backend = new TestBackend()
+    const run = await ex.run({ kind: 'extract', module: HOSTILE, fn: 'forge', name: 'late' }, { token: 't', person: 'p', timeoutMs: 5000, backend })
+    expect(run.status).toBe('ok')
+    await Bun.sleep(50)
+    expect(await backend.mem.exists('/drafts/late.txt')).toBe(false)
+  })
+
   test('a timeout leaves no process and no job dir behind (child processes included)', async () => {
     const e = new Executor({ warm: 0, tmpRoot, codePaths: [...defaultCodePaths(), FIXTURES], execPaths: ['/bin/sleep'] })
     const r = await e.run({ kind: 'extract', module: HOSTILE, fn: 'spawnAndSpin', name: 'x' }, { token: 't', person: 'p', timeoutMs: 1500 })

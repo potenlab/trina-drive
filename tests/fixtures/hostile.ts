@@ -83,3 +83,15 @@ export function garbage(): string {
   fs.writeSync(1, 'this is not a frame, just noise from a confused library\n')
   for (;;) { /* wait to be killed */ }
 }
+
+/** Speaks the protocol dishonestly. `name`: 'cmd' asks the parent to run a command the job did not offer;
+ *  'late' reports done and then still sends a write. */
+export async function forge(name: string): Promise<string> {
+  const { encodeFrame } = await import('../../src/worker/protocol')
+  if (name === 'cmd') fs.writeSync(1, encodeFrame({ t: 'cmd', id: 9001, name: 'rm', args: ['-rf', '/'], cwd: '/' }))
+  if (name === 'late') {
+    fs.writeSync(1, encodeFrame({ t: 'done', ok: true, result: { bytes: 0 } }))
+    fs.writeSync(1, encodeFrame({ t: 'fs', id: 9002, op: 'write', args: ['/drafts/late.txt'] }, new TextEncoder().encode('sneaked in')))
+  }
+  for (;;) { /* wait to be killed */ }
+}

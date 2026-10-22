@@ -189,6 +189,11 @@ class Worker {
   private onDone: ((m: Extract<FromWorker, { t: 'done' }>, body?: Uint8Array) => void) | null = null
   private backend: FsBackend | null = null
   private hooks: ShellHooks = {}
+  /** commands the job allows the worker to ask the parent to run */
+  private parentCommands = new Set<string>()
+  /** false once the job is over: late requests are not served (they could land after the caller commits) */
+  private serving = true
+  private readonly inFlightCalls = new Set<Promise<unknown>>()
   limits: JobLimits = DEFAULT_LIMITS
   private disposed = false
   private readonly decoder = new FrameDecoder<FromWorker>(1 << 20, DEFAULT_LIMITS.maxFrameBytes)
@@ -221,6 +226,7 @@ class Worker {
   run(job: JobSpec, body: Uint8Array | undefined, backend: FsBackend | null, hooks: ShellHooks) {
     this.backend = backend
     this.hooks = hooks
+    this.parentCommands = new Set(job.kind === 'shell' ? job.parentCommands ?? [] : [])
     const done = new Promise<{ m: Extract<FromWorker, { t: 'done' }>; body?: Uint8Array } | null>((resolve) => {
       this.onDone = (m, b) => resolve({ m, body: b })
       // the last frames may still be in the pipe when the exit is seen
@@ -230,7 +236,14 @@ class Worker {
     return done
   }
 
+  /** Stop serving requests and wait for the ones already running to finish. */
+  async stopServing() {
+    this.serving = false
+    while (this.inFlightCalls.size) await Promise.allSettled([...this.inFlightCalls])
+  }
+
   kill(reason: KillReason) {
+    this.serving = false
     if (!this.killReason) this.killReason = reason
     killTree(this.pid)
   }
@@ -283,20 +296,27 @@ class Worker {
         this.markReady()
         return
       case 'done': {
+        // anything after `done` (even in the same chunk) is ignored
+        this.serving = false
         const cb = this.onDone
         this.onDone = null
         cb?.(h, body)
         return
       }
       case 'fs':
-      case 'cmd':
+      case 'cmd': {
+        if (!this.serving) return
         if (!this.backend && h.t === 'fs') return this.reply(h.id, { code: 'ENOSYS', message: 'no filesystem for this job' })
+        if (h.t === 'cmd' && !this.parentCommands.has(h.name)) { this.log += `\n[protocol] command not offered: ${h.name.slice(0, 40)}\n`; this.kill('crashed'); return }
         if (++this.inFlight > 256) { this.log += '\n[protocol] too many requests in flight\n'; this.kill('crashed'); return }
-        void this.serve(h, body).finally(() => this.inFlight--)
+        const p = this.serve(h, body).finally(() => { this.inFlight--; this.inFlightCalls.delete(p) })
+        this.inFlightCalls.add(p)
+      }
     }
   }
 
   private reply(id: number, error: WireError | null, value?: unknown, body?: Uint8Array) {
+    if (!this.serving) return
     this.send(error ? { t: 'reply', id, ok: false, error } : { t: 'reply', id, ok: true, value }, body)
   }
 
@@ -490,6 +510,8 @@ export class Executor {
       const worker = w
       timer = setTimeout(() => worker.kill('timeout'), limits.timeoutMs)
       const done = await w.run(job, opts.body, opts.backend ?? null, opts.hooks ?? {})
+      // nothing reaches the backend after this point
+      await w.stopServing()
       stats.runMs = performance.now() - t2
       stats.peakRssBytes = w.peakRss
       stats.fsCalls = w.fsCalls
