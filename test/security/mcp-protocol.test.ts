@@ -82,6 +82,23 @@ describe('batches and notifications', () => {
   })
 })
 
+describe('body size', () => {
+  test('an unauthenticated huge body is refused without being read as JSON', async () => {
+    const r = await post(new Uint8Array(30 * 1024 * 1024), {})
+    expect([401, 413]).toContain(r.status)
+  })
+  test('an authenticated body larger than any tool needs is refused (413)', async () => {
+    const r = await post(call('write', { path: '/drafts/huge.md', content: 'a'.repeat(40 * 1024 * 1024) }), auth())
+    expect(r.status).toBe(413)
+    expect(e.db.query("SELECT count(*) AS n FROM drafts WHERE path = 'huge.md'").get()).toEqual({ n: 0 })
+  })
+  test('a large command line is cut by the shell limit, not the process', async () => {
+    const r = await post(call('bash', { command: 'echo ' + 'a'.repeat(9 * 1024 * 1024) + ' | wc -c' }), auth())
+    expect(r.status).toBe(200)
+  })
+})
+
+
 describe('protocol versions', () => {
   test.each([['1999-01-01'], ['2025-06-18'], ['2025-03-26'], [''], ['2026-07-28,2025-11-25']])('MCP-Protocol-Version %p is refused or ignored, never crashes', async (v) => {
     const r = await post(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }), { ...auth(), 'mcp-protocol-version': v })

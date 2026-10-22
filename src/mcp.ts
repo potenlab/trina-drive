@@ -1,6 +1,6 @@
 // Remote MCP over Streamable HTTP, the minimal stateless form: POST /mcp with one JSON-RPC message, answered with
 // application/json (no SSE stream, no session). Bearer personal access tokens only; cookies are never read here.
-import { LATEST_PROTOCOL_VERSION, NAME, SUPPORTED_PROTOCOL_VERSIONS, VERSION } from './config'
+import { LATEST_PROTOCOL_VERSION, LIMITS, NAME, SUPPORTED_PROTOCOL_VERSIONS, VERSION } from './config'
 import type { Ctx } from './session'
 import { verifyToken, type TokenRow } from './store'
 import { AuditFailure, callTool, TOOL_DEFS } from './tools'
@@ -32,6 +32,8 @@ export async function handleRequest(ctx: Ctx, req: Request, opts: ServerOptions 
   const m = /^Bearer\s+(\S+)$/i.exec(auth)
   const token: TokenRow | null = m ? verifyToken(ctx.db, m[1]!, req.headers.get('user-agent') ?? undefined) : null
   if (!token) return json({ error: 'invalid_token', error_description: 'a valid personal access token is required' }, 401, { 'www-authenticate': `Bearer realm="${NAME}", error="invalid_token"` })
+
+  if (Number(req.headers.get('content-length') ?? 0) > LIMITS.requestBytes) return json({ error: `request body is larger than ${LIMITS.requestBytes} bytes` }, 413)
 
   const pv = req.headers.get('mcp-protocol-version')
   if (pv && !(SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(pv)) return rpcError(null, -32600, `unsupported MCP-Protocol-Version ${pv}`, 400)
@@ -78,6 +80,8 @@ export function serve(ctx: Ctx, port: number, hostname = '127.0.0.1', opts: Serv
     port, hostname,
     // never Bun's development error page (it shows source and stack traces to the caller)
     development: false,
+    // bodies without a Content-Length are cut here too
+    maxRequestBodySize: LIMITS.requestBytes,
     fetch: async (req) => {
       try { return await handleRequest(ctx, req, opts) } catch (e) {
         console.error(`[${NAME}] request failed:`, e)
