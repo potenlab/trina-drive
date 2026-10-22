@@ -5,6 +5,7 @@ import { type Ctx, Session } from './session'
 import { runShell } from './shell'
 import { folderById, sha256, type TokenRow } from './store'
 import { asFsError, MSG, VirtualFs, type Hit } from './vfs'
+import { discardKept } from './worker'
 
 export interface ToolResult { content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean }
 export class AuditFailure extends Error {}
@@ -159,6 +160,8 @@ export async function callTool(ctx: Ctx, token: TokenRow, name: string, args: Re
     outcome = 'refused'
   }
   try { s.commit(name, audit, outcome) } catch (e) {
+    // nothing of this call is recorded (touches included), so no worker that saw it may serve this token again
+    await discardKept(String(token.id), String(token.person_id))
     throw new AuditFailure(`The call could not be recorded in the audit log, so it was not completed (${(e as Error).message}).`)
   }
   if (wrote !== null) {

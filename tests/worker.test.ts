@@ -25,10 +25,10 @@ const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch
 const pct = (xs: number[], p: number) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.ceil(p / 100 * s.length) - 1)]! }
 const fmt = (n: number) => n.toFixed(1)
 
-/** The executor most tests use: sandboxed, cold (each test checks its own dir clean-up), fixtures readable. */
+/** The executor most tests use: sandboxed, cold, one job per process (tests check that tmpRoot is empty), fixtures readable. */
 let ex: Executor
 beforeAll(() => {
-  ex = new Executor({ warm: 0, tmpRoot, codePaths: [...defaultCodePaths(), FIXTURES], defaults: { timeoutMs: 10_000 } })
+  ex = new Executor({ warm: 0, reuse: false, tmpRoot, codePaths: [...defaultCodePaths(), FIXTURES], defaults: { timeoutMs: 10_000 } })
 })
 afterAll(async () => {
   await ex.close()
@@ -414,6 +414,75 @@ describe('fairness and latency', () => {
     await pool.close()
     expect(fs.readdirSync(tmpRoot)).toEqual([])
   }, 30_000)
+})
+
+describe('a worker kept for the same token', () => {
+  const backend = new TestBackend()
+  const opts = (pool: Executor, token: string, person = 'kim') => ({ executor: pool, token, person, job: { parentCommands: ['grep'] }, hooks: { runCommand: parentGrep(backend, []) } })
+  const keptPool = (reuse?: { idleMs?: number; maxJobs?: number; maxIdle?: number }) =>
+    new Executor({ warm: 0, tmpRoot, codePaths: [...defaultCodePaths(), FIXTURES], reuse: reuse ?? {} })
+
+  test('serves that token\'s next shell command, never another token\'s or person\'s', async () => {
+    const pool = keptPool()
+    try {
+      const a1 = await runShellIsolated('ls /docs | wc -l', backend, opts(pool, 'A'))
+      const a2 = await runShellIsolated('cat /docs/a.txt | grep beta', backend, opts(pool, 'A'))
+      expect(a2.stdout).toBe('beta\n')
+      expect(a2.run.stats.pid).toBe(a1.run.stats.pid)
+      expect(a2.run.stats.reused).toBe(true)
+      expect(a2.run.stats.startMs).toBeLessThan(20)
+      // another token (same person), and the same token name under another person: fresh processes
+      const b = await runShellIsolated('ls /docs | wc -l', backend, opts(pool, 'B'))
+      const c = await runShellIsolated('ls /docs | wc -l', backend, opts(pool, 'A', 'lee'))
+      for (const r of [b, c]) { expect(r.run.stats.reused).toBe(false); expect(r.run.stats.pid).not.toBe(a1.run.stats.pid) }
+      expect(alive(a1.run.stats.pid)).toBe(true)
+      // per-job state starts from zero
+      expect(a2.run.stats.fsCalls).toBeGreaterThan(0)
+      expect(a2.run.stats.fsCalls).toBeLessThan(a1.run.stats.fsCalls + a2.run.stats.fsCalls)
+    } finally { await pool.close() }
+    expect(fs.readdirSync(tmpRoot)).toEqual([])
+  })
+
+  test('not after a failure or a limit, not for extraction, not past maxJobs, not past idleMs; close() kills kept workers', async () => {
+    const pool = keptPool({ idleMs: 300, maxJobs: 2 })
+    try {
+      const t = await runShellIsolated('while true; do :; done', backend, {
+        ...opts(pool, 'A'), timeoutMs: 500, job: { bash: { executionLimits: { maxLoopIterations: 1e12, maxCommandCount: 1e12 } } } })
+      expect(t.run.status).toBe('timeout')
+      expect(alive(t.run.stats.pid)).toBe(false)
+      const x = await pool.run({ kind: 'extract', module: HOSTILE, fn: 'upper', name: 'a' }, { token: 'A', person: 'kim', body: new TextEncoder().encode('x') })
+      expect(x.status).toBe('ok')
+      expect(alive(x.stats.pid)).toBe(false)
+      // maxJobs 2: the second job is the last one in that process
+      const r1 = await runShellIsolated('echo 1', backend, opts(pool, 'A'))
+      const r2 = await runShellIsolated('echo 2', backend, opts(pool, 'A'))
+      const r3 = await runShellIsolated('echo 3', backend, opts(pool, 'A'))
+      expect([r2.run.stats.reused, r3.run.stats.reused]).toEqual([true, false])
+      expect(r2.run.stats.pid).toBe(r1.run.stats.pid)
+      expect(alive(r1.run.stats.pid)).toBe(false)
+      // idle: killed after idleMs
+      expect(alive(r3.run.stats.pid)).toBe(true)
+      const deadline = Date.now() + 3000
+      while (alive(r3.run.stats.pid) && Date.now() < deadline) await Bun.sleep(25)
+      expect(alive(r3.run.stats.pid)).toBe(false)
+      const r4 = await runShellIsolated('echo 4', backend, opts(pool, 'A'))
+      expect(r4.run.stats.reused).toBe(false)
+      expect(pool.info().kept).toBe(1)
+    } finally { await pool.close() }
+    expect(pool.info().kept).toBe(0)
+    expect(fs.readdirSync(tmpRoot)).toEqual([])
+  })
+
+  test('discardKept() drops a token\'s kept workers', async () => {
+    const pool = keptPool()
+    try {
+      const a = await runShellIsolated('echo a', backend, opts(pool, 'A'))
+      const b = await runShellIsolated('echo b', backend, opts(pool, 'B'))
+      await pool.discardKept('A', 'kim')
+      expect(alive(a.run.stats.pid)).toBe(false)
+      expect(alive(b.run.stats.pid)).toBe(true)
+    } finally { await pool.close() }
+  })
 })
 
 describe('scheduler', () => {

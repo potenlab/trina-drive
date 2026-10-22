@@ -7,7 +7,7 @@ team files at all; it asks the server for every file operation, and the server a
 VFS (plan 4.1 R1, 5.1 "권한 걸린 가상 셸", 6, 7.1).
 
 ```
- server process                                              worker process (one job, then exit)
+ server process                                              worker process (one token; jobs one at a time)
  ┌──────────────────────────────────────────┐   stdin       ┌───────────────────────────────────────────┐
  │ Executor.run(job, {token, person, ...})  │──frames──────▶│ entry.ts                                  │
  │  FairScheduler (token/person/global)     │               │  just-bash  ── ProxyFs ──┐                │
@@ -100,7 +100,7 @@ The body carries bytes (file contents, stdin of a parent-run command, extracted 
 | direction | message | notes |
 |---|---|---|
 | W → S | `{t:'ready', v}` | after boot; the server checks `v` |
-| S → W | `{t:'job', v, job}` (+ body) | exactly one per process; `job.kind` = `shell` or `extract` |
+| S → W | `{t:'job', v, job}` (+ body) | one at a time; another only after `done`, only of the same token; `job.kind` = `shell` or `extract` |
 | W → S | `{t:'fs', id, op, args, cmd?}` (+ body for write/append) | `op` ∈ stat lstat exists readdir read write append mkdir rm cp mv chmod utimes symlink link readlink realpath |
 | W → S | `{t:'cmd', id, name, args, cwd, cmd?}` (+ body = stdin) | only names in `job.parentCommands` |
 | S → W | `{t:'reply', id, ok, value \| error}` (+ body for `read`) | errors are `{code, message, path}` |
@@ -122,10 +122,18 @@ The worker answers `/bin`, `/usr`, `/dev`, `/proc` itself from just-bash's stub 
 
 ## Process lifecycle and limits (`pool.ts`)
 
-- **One job per process.** A warm pool (default 2) keeps processes that have booted and loaded code — including a
+- **One token per process.** A warm pool (default 2) keeps processes that have booted and loaded code — including a
   warm-up run of common commands on a throwaway in-memory filesystem, because just-bash loads each command on first
-  use (~35 ms) — but have never seen a job. Each is used once, then killed; its job dir is deleted. Nothing is reused
-  between jobs or tokens. If the pool is empty the job starts a fresh worker (cold).
+  use (~35 ms) — but have never seen a job. If the pool is empty the job starts a fresh worker (cold).
+- **Kept for the same token** (`reuse`, default on; `SHELF_WORKER_REUSE=0` turns it off). After a *clean* shell job
+  (`done` received, no limit breach, no abort, RSS below half the cap) the process waits up to `idleMs` (5 s) for the
+  same token's next shell command, at most `maxJobs` (32) jobs, at most `perToken` kept per token and `maxIdle` (4)
+  overall. It is keyed by token **and** person and never given to anyone else; extraction jobs and jobs with read
+  grants are never kept. Why this is safe: whatever a job could leave behind in the process (even after an exploit),
+  the same token saw in that job's output anyway, and its touches are already in the token's provenance window (R3)
+  when the next call commits. If a call's audit row cannot be written (so its touches are not recorded), the token's
+  kept workers are killed (`discardKept`). Everything else is killed after its job and its job dir deleted.
+  Without it every command pays a process start (~80–120 ms); with it a token's command sequence costs ~2–5 ms each.
 - **Warm reserve.** The last warm worker (default 1) goes only to a token with nothing else running; a token that is
   already busy starts cold. A flood cannot drain the pool and slow everyone else's next command.
 - **Deadline** (`timeoutMs`, default 20 s, from job start, not counting the queue) → SIGKILL.
@@ -137,7 +145,7 @@ The worker answers `/bin`, `/usr`, `/dev`, `/proc` itself from just-bash's stub 
 - **Kill** = SIGKILL to the process group (workers start with `setsid`) **and** to every descendant found by the probe
   (in case one left the group), at the breach and again after exit. Tests check that no worker or child survives.
 - **Job dir**: `mkdtemp` under `$TMPDIR/shelf-work-<uid>/` (0700; 0711 with a worker user), the worker's cwd, HOME
-  and TMPDIR, the only writable place; removed after the job.
+  and TMPDIR, the only writable place; removed when the process is killed (after its job, or its last job when kept).
 - **Environment**: the worker gets only `PATH HOME TMPDIR LANG NO_COLOR TZ` (+ `WORKER_PREWARM`), never the server's.
   `BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`: a shared transpiler cache would be state shared between jobs.
 - **Server death**: a worker exits when its stdin closes; bwrap also uses `--die-with-parent`.
@@ -194,6 +202,7 @@ in a world-readable place (not under a 0700 home). This is what closes the gap b
 | memory bomb, 268 MB cap | killed 50–75 ms after start; peak 272–358 MB (20 ms polling overshoot) |
 | token B `ls \| wc -l` during token A's 50 × 400 ms CPU jobs (global 4, per-token 2) | p50 10–20 ms, p99 165–300 ms over 10 runs (assert < 500) |
 | main's VirtualFs, 28 commands back to back (pool drained) | median 117 ms |
+| 30 commands of one token back to back, `cat f \| wc -l` over the server VFS | one job per process: 2.4 s (≈ 80 ms each, the warm pool cannot refill fast enough); kept worker: 0.28 s (≈ 2 ms each) |
 
 A pre-built single-file bundle of the worker did not start faster (4.5 MB to parse), so workers run the sources.
 
@@ -220,17 +229,20 @@ A pre-built single-file bundle of the worker did not start faster (4.5 MB to par
 ## Configuration
 
 `new Executor(config)` or `defaultExecutor()` (env: `SHELF_ISOLATION=auto|sandbox-exec|bwrap|none`,
-`SHELF_REQUIRE_ISOLATION=0`, `SHELF_WORKER_USER=_shelfwork`, `SHELF_WORKERS_WARM=2`). Config fields: `isolation`,
-`requireIsolation`, `runAs`, `requireRunAs`, `tmpRoot`, `warm`, `warmReserve`, `limits` (scheduler), `defaults`
-(job limits), `codePaths`, `execPaths`, `runtime`, `entry`, `pollMs`, `bootTimeoutMs`. Per run: `token`, `person`,
+`SHELF_REQUIRE_ISOLATION=0`, `SHELF_WORKER_USER=_shelfwork`, `SHELF_WORKERS_WARM=2`, `SHELF_WORKER_REUSE=0`). Config
+fields: `isolation`, `requireIsolation`, `runAs`, `requireRunAs`, `tmpRoot`, `warm`, `warmReserve`, `reuse`
+(`false` or `{idleMs, maxJobs, maxIdle}`), `limits` (scheduler), `defaults` (job limits), `codePaths`, `execPaths`,
+`runtime`, `entry`, `pollMs`, `bootTimeoutMs`. `closeDefaultExecutor()` stops the process-wide executor (a one-shot
+process such as `cli sh` calls it so the warm pool does not keep it alive). Per run: `token`, `person`,
 any `JobLimits` field, `backend`, `hooks`, `body`, `readPaths`, `signal`.
 
 ## Tests
 
-`bun test tests/worker.test.ts` (31 tests, ~12 s; the macOS sandbox tests are skipped elsewhere). Hostile fixtures in
+`bun test tests/worker.test.ts` (35 tests, ~12 s; the macOS sandbox tests are skipped elsewhere). Hostile fixtures in
 `tests/fixtures/hostile.ts` run inside workers: infinite loop, memory bomb, stderr flood, junk on the channel, forged
 protocol frames (un-offered command, requests after `done`), child-process spawn + spin (no survivors, job dir gone),
 network/write/read/list/exec/signal attempts, and the procargs probe. Plus: just-bash over a proxied in-memory backend
 (ls, cat, pipes, globs, `/drafts` writes, backend errors, wrapped-command labels, grep/rg run in the parent),
 extraction through `src/extract` (docx from bytes; pdf via `pdftotext` from a granted path), latency, fairness under a
-flood, the scheduler and frame decoding.
+flood, the scheduler and frame decoding, a backend bug answered with EIO, and kept workers (same token only; not
+after a failure, an extraction, `maxJobs` or `idleMs`; `discardKept`, `close`).

@@ -1,6 +1,8 @@
 // Isolated executor (plan 5.1 "격리 실행기", 6, 7.1): untrusted work runs in a separate, sandboxed, short-lived process.
-//   - one job per process; a small pool of pre-started ("warm") processes hides the start-up cost. A warm process has
-//     loaded code only, no job data, and is used once, so nothing carries over between jobs or tokens.
+//   - a process serves one token only. A small pool of pre-started ("warm") processes hides the start-up cost; a warm
+//     process has loaded code only, no job data. After a clean shell job the process may be kept a few seconds for the
+//     same token's next shell command (that token saw the job's output anyway); it never goes to another token or
+//     person, and never after a failure, a limit breach, an extraction or a job with extra read grants.
 //   - per job: private temp dir (the only writable place, removed afterwards), wall-clock deadline, memory watchdog,
 //     caps on what the worker may send; on any breach the whole process group is SIGKILLed.
 //   - admission: limits per token, per person and overall with a fair queue (scheduler.ts).
@@ -99,6 +101,11 @@ export interface ExecutorConfig {
   entry?: string
   /** memory watchdog interval */
   pollMs?: number
+  /**
+   * Keep a worker after a clean shell job for the same token's next shell job (default on). false = one job per process.
+   * idleMs: how long it waits (default 5 s); maxJobs: jobs per process (default 32); maxIdle: kept workers overall (default 4).
+   */
+  reuse?: false | { idleMs?: number; maxJobs?: number; maxIdle?: number }
   /** worker start-up deadline */
   bootTimeoutMs?: number
 }
@@ -126,6 +133,8 @@ export type RunStatus =
   | 'refused'     // isolation required but not available
 
 export interface RunStats { queuedMs: number; startMs: number; runMs: number; totalMs: number; warm: boolean; peakRssBytes: number; fsCalls: number; pid: number
+  /** the worker had already run a job for this token */
+  reused: boolean
   /** backend calls (fs or parent-run command) that threw something other than an fs error; answered with EIO */
   backendErrors: number }
 
@@ -183,6 +192,9 @@ class Worker {
   peakRss = 0
   fsCalls = 0
   log = ''
+  /** jobs sent to this process, and the token they belong to (set by the first job; a process never changes token) */
+  jobs = 0
+  owner: string | null = null
   private logBytes = 0
   private channelBytes = 0
   private inFlight = 0
@@ -226,6 +238,10 @@ class Worker {
 
   /** Sends the job; resolves with the worker's `done` message, or null if it died first. */
   run(job: JobSpec, body: Uint8Array | undefined, backend: FsBackend | null, hooks: ShellHooks) {
+    this.jobs++
+    // per-job state (a kept worker starts its next job from zero)
+    this.log = ''; this.logBytes = 0; this.channelBytes = 0; this.peakRss = 0; this.fsCalls = 0; this.backendErrors = 0
+    this.serving = true
     this.backend = backend
     this.hooks = hooks
     this.parentCommands = new Set(job.kind === 'shell' ? job.parentCommands ?? [] : [])
@@ -424,6 +440,9 @@ export class Executor {
   private readonly pollMs: number
   private readonly bootTimeoutMs: number
   private idle: Worker[] = []
+  /** workers kept after a clean shell job, for the same token's next one (oldest first) */
+  private kept: { w: Worker; timer: ReturnType<typeof setTimeout> }[] = []
+  private readonly reuse: { idleMs: number; maxJobs: number; maxIdle: number } | null
   private booting = 0
   private live = new Set<Worker>()
   private active = new Set<Worker>()
@@ -470,17 +489,18 @@ export class Executor {
     this.warmReserve = Math.min(this.warmTarget, cfg.warmReserve ?? 1)
     this.pollMs = cfg.pollMs ?? 20
     this.bootTimeoutMs = cfg.bootTimeoutMs ?? 10_000
+    this.reuse = cfg.reuse === false ? null : { idleMs: 5000, maxJobs: 32, maxIdle: 4, ...cfg.reuse }
     this.refill()
   }
 
   info() {
-    return { isolation: this.isolation, user: this.user, refusal: this.refusal, warnings: this.warnings, memProbe: memProbe()?.kind ?? null, warm: this.idle.length, ...this.scheduler.stats }
+    return { isolation: this.isolation, user: this.user, refusal: this.refusal, warnings: this.warnings, memProbe: memProbe()?.kind ?? null, warm: this.idle.length, kept: this.kept.length, ...this.scheduler.stats }
   }
 
   /** Runs one job in an isolated worker. Never throws for job failures: see RunResult.status. */
   async run<T = unknown>(job: JobSpec, opts: RunOptions): Promise<RunResult<T>> {
     const t0 = performance.now()
-    const stats: RunStats = { queuedMs: 0, startMs: 0, runMs: 0, totalMs: 0, warm: false, peakRssBytes: 0, fsCalls: 0, pid: 0, backendErrors: 0 }
+    const stats: RunStats = { queuedMs: 0, startMs: 0, runMs: 0, totalMs: 0, warm: false, reused: false, peakRssBytes: 0, fsCalls: 0, pid: 0, backendErrors: 0 }
     const result = (status: RunStatus, extra: Partial<RunResult<T>> = {}): RunResult<T> => {
       stats.totalMs = performance.now() - t0
       return { status, isolation: this.isolation, user: this.user, stats, log: '', ...extra }
@@ -502,16 +522,27 @@ export class Executor {
     }
     let w: Worker | null = null
     let timer: ReturnType<typeof setTimeout> | null = null
+    let keep = false
+    const owner = JSON.stringify([opts.token, opts.person])
+    // only plain shell jobs share a process (with the same token): extraction parses hostile documents, and grants
+    // would carry over
+    const reusable = !!this.reuse && job.kind === 'shell' && !opts.readPaths?.length
     const onAbort = () => w?.kill('aborted')
     try {
       const t1 = performance.now()
       // the last `warmReserve` warm workers go to tokens with nothing else running: a token already busy with other
       // jobs starts cold (~100 ms more), so a flood cannot drain the pool and slow down everyone else's first command
       const busy = this.scheduler.runningFor(opts.token) > 1
-      const got = await this.take(opts.readPaths ?? [], limits, busy)
+      const kept = reusable ? this.unpark(owner) : null
+      const got = kept ? { w: kept, warm: true } : await this.take(opts.readPaths ?? [], limits, busy)
       if (!got) return result('crashed', { error: new Error(`worker failed to start${this.lastBootLog ? ': ' + this.lastBootLog : ''}`) })
       w = got.w
+      if (kept) w.setLimits(limits)
+      w.owner ??= owner
+      // defence in depth (unpark is keyed by owner): a process never serves a second token
+      if (w.owner !== owner) { w.kill('crashed'); return result('crashed', { error: new Error('worker belongs to another token') }) }
       stats.warm = got.warm
+      stats.reused = !!kept
       stats.pid = w.pid
       stats.startMs = performance.now() - t1
       if (opts.signal?.aborted) return result('aborted')
@@ -539,13 +570,18 @@ export class Executor {
         await w.dispose()
         return result('crashed', { error: new Error(`worker exited (${w.proc.exitCode ?? w.proc.signalCode})`), log: w.log })
       }
+      keep = reusable && done.m.ok && !opts.signal?.aborted && w.jobs < this.reuse!.maxJobs && w.peakRss < limits.maxRssBytes / 2
       return done.m.ok
         ? result('ok', { value: done.m.result as T, body: done.body, log: w.log })
         : result('error', { error: done.m.error, log: w.log })
     } finally {
       if (timer) clearTimeout(timer)
       opts.signal?.removeEventListener('abort', onAbort)
-      if (w) { this.active.delete(w); await w.dispose() }
+      if (w) {
+        this.active.delete(w)
+        if (keep && !w.killReason && w.proc.exitCode === null && !this.closed) this.park(owner, w)
+        else await w.dispose()
+      }
       release()
     }
   }
@@ -553,7 +589,46 @@ export class Executor {
   async close() {
     this.closed = true
     if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null }
+    for (const k of this.kept) clearTimeout(k.timer)
+    this.kept = []
     await Promise.all([...this.live].map((w) => w.dispose()))
+  }
+
+  /** Kills the workers kept for this token (e.g. when its call could not be recorded). */
+  async discardKept(token: string, person: string) {
+    const owner = JSON.stringify([token, person])
+    const drop = this.kept.filter((k) => k.w.owner === owner)
+    this.kept = this.kept.filter((k) => k.w.owner !== owner)
+    for (const k of drop) clearTimeout(k.timer)
+    await Promise.all(drop.map((k) => k.w.dispose()))
+  }
+
+  /** A kept worker of this token, most recently used first. */
+  private unpark(owner: string): Worker | null {
+    for (let i = this.kept.length - 1; i >= 0; i--) {
+      const k = this.kept[i]!
+      if (k.w.owner !== owner) continue
+      this.kept.splice(i, 1)
+      clearTimeout(k.timer)
+      if (k.w.proc.exitCode !== null || k.w.killReason) { void k.w.dispose(); continue }
+      return k.w
+    }
+    return null
+  }
+
+  private park(owner: string, w: Worker) {
+    const r = this.reuse!
+    // at most perToken workers per token, maxIdle overall: the oldest go first
+    const mine = this.kept.filter((k) => k.w.owner === owner)
+    const drop = [...(mine.length >= this.scheduler.limits.perToken ? [mine[0]!] : [])]
+    const others = this.kept.filter((k) => !drop.includes(k))
+    if (others.length >= r.maxIdle) drop.push(...others.slice(0, others.length - r.maxIdle + 1))
+    for (const k of drop) { clearTimeout(k.timer); void k.w.dispose() }
+    this.kept = this.kept.filter((k) => !drop.includes(k))
+    if (r.maxIdle < 1) return void w.dispose()
+    const timer = setTimeout(() => { this.kept = this.kept.filter((k) => k.w !== w); void w.dispose() }, r.idleMs)
+    timer.unref?.()
+    this.kept.push({ w, timer })
   }
 
   /** A ready worker: a warm one if the job needs no extra grants, else a fresh one. */
@@ -590,7 +665,11 @@ export class Executor {
     }
     if (prewarm) env.WORKER_PREWARM = '1'
     try {
-      const w = new Worker(argv, dir, env, this.ids, (gone) => { this.live.delete(gone); this.idle = this.idle.filter((x) => x !== gone) })
+      const w = new Worker(argv, dir, env, this.ids, (gone) => {
+        this.live.delete(gone)
+        this.idle = this.idle.filter((x) => x !== gone)
+        this.kept = this.kept.filter((k) => { if (k.w !== gone) return true; clearTimeout(k.timer); return false })
+      })
       this.live.add(w)
       return w
     } catch (e) {
@@ -646,6 +725,7 @@ export function defaultExecutor(): Executor {
       requireIsolation: env('REQUIRE_ISOLATION') !== '0',
       runAs: env('WORKER_USER') ?? null,
       warm: env('WORKERS_WARM') ? Number(env('WORKERS_WARM')) : undefined,
+      reuse: env('WORKER_REUSE') === '0' ? false : undefined,
     })
   }
   return shared
@@ -659,6 +739,11 @@ export async function closeDefaultExecutor() {
   const ex = shared
   shared = null
   await ex?.close()
+}
+
+/** Kills the workers the process-wide executor keeps for this token (no-op when it was never started). */
+export async function discardKept(token: string, person: string) {
+  await shared?.discardKept(token, person)
 }
 
 export function runIsolated<T = unknown>(job: JobSpec, opts: RunOptions & { executor?: Executor }): Promise<RunResult<T>> {
