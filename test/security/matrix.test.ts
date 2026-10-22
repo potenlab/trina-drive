@@ -176,6 +176,26 @@ describe('R3 provenance: every way of looking puts the folder into the next draf
     }
   })
 
+  test.each([['ls /drafts/@boss-name-src'], ['echo /drafts/@boss-name-src/*'], ['find /drafts -name "*감원*"'], ['ls -R /drafts'], ['ls /drafts/@boss-name-src/sub']])('seeing only the name of another token\'s draft (%s) brings its sources (weak)', async (cmd) => {
+    if (!e.secrets.provNameSrc) {
+      e.addToken('provNameSrc', 'boss', { name: 'boss-name-src' })
+      await e.sh('provNameSrc', 'cat /경영/c.md > /dev/null; echo x > /drafts/김철수_감원대상.md; mkdir -p /drafts/sub; echo y > /drafts/sub/명단.md')
+    }
+    const who = 'provName' + cmd.length + cmd.charCodeAt(1)
+    e.addToken(who, 'boss', { name: `boss-${who}` })
+    const r = await e.sh(who, cmd)
+    expect(r.stdout).toMatch(/감원대상|명단/)
+    await e.tool(who, 'write', { path: '/drafts/note.md', content: 'x' })
+    expect(e.draftSrc(who, 'note.md').get(e.folderId('경영'))).toBe(false)
+  })
+
+  test('listing /drafts itself shows only token names: it does not pull in every draft\'s sources', async () => {
+    e.addToken('provRootLs', 'boss', { name: 'boss-root-ls' })
+    expect((await e.sh('provRootLs', 'ls /drafts')).stdout).toContain('@boss-')
+    await e.tool('provRootLs', 'write', { path: '/drafts/n.md', content: 'x' })
+    expect(e.draftSrc('provRootLs', 'n.md').size).toBe(0)
+  })
+
   test('a folder seen only as a bare path is not a source; its readable child is', async () => {
     e.addToken('kimProv', 'kim', { name: 'kim-prov' })
     await e.sh('kimProv', 'ls /경영; cat /경영/공개/c.md')

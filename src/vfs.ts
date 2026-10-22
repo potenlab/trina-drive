@@ -195,7 +195,20 @@ export class VirtualFs implements IFileSystem {
     if (h.t === 'sys') return sysCall(() => sys().readdirWithFileTypes(h.p), 'scandir', p)
     if (h.t === 'file' || h.t === 'draft') throw enotdir('scandir', p)
     if (h.t === 'dir') this.s.touchNode(h.node, false)
+    if (h.t === 'ddir') this.touchListedDrafts(h.rel)
     return this.children(h).map((c) => ({ name: c.name, isFile: !c.dir, isDirectory: c.dir, isSymbolicLink: false }))
+  }
+  /**
+   * R3: a listing shows draft names (and folder names taken from draft paths): every draft whose name it reveals is a
+   * weak touch. At /drafts itself, `@<token>` entries show only a token name, not the drafts inside.
+   */
+  private touchListedDrafts(rel: string) {
+    const prefix = rel ? rel + '/' : ''
+    for (const [k, item] of this.s.draftItems()) {
+      if (!k.startsWith(prefix)) continue
+      if (rel === '' && k.startsWith('@')) continue
+      this.s.touchDraft(item, false)
+    }
   }
   async readlink(p: string): Promise<string> {
     this.hit(p, 'readlink')
