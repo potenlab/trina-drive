@@ -9,10 +9,11 @@ import { Mirror } from './mirror'
 import { Access, type FileEntry, type Node } from './policy'
 import { ensureFolder, identityKey, type TokenRow } from './store'
 
-export interface Ctx { db: DB; dataDir: string; mirror: Mirror; blobs: Blobs }
+/** `now` is injectable so the provenance simulation can replay a day. */
+export interface Ctx { db: DB; dataDir: string; mirror: Mirror; blobs: Blobs; now: () => number }
 
 export function makeCtx(db: DB, dataDir: string): Ctx {
-  return { db, dataDir, mirror: new Mirror(db, path.join(dataDir, 'mirror')), blobs: new Blobs(path.join(dataDir, 'blobs')) }
+  return { db, dataDir, mirror: new Mirror(db, path.join(dataDir, 'mirror')), blobs: new Blobs(path.join(dataDir, 'blobs')), now: Date.now }
 }
 
 /** A draft as this call sees it: a stored one (maybe with pending new content) or a new pending one. */
@@ -67,7 +68,7 @@ export class Session {
   }
 
   /** The token's window now: stored touches in the last 8 hours plus this call's. */
-  window(now = Date.now()): Map<number, boolean> {
+  window(now = this.ctx.now()): Map<number, boolean> {
     const cutoff = now - LIMITS.windowMs
     const out = new Map<number, boolean>()
     for (const r of this.ctx.db.query<{ folder_id: number; strong_at: number | null; weak_at: number | null }, [number, number, number]>(
@@ -83,7 +84,7 @@ export class Session {
     const shas = new Map<string, string>()
     for (const [rel, c] of this.pending) if (c) shas.set(rel, this.ctx.blobs.put(c))
     db.transaction(() => {
-      const now = Date.now()
+      const now = this.ctx.now()
       const touched = new Map(this.srcTouches)
       for (const { node, strong } of this.folderTouches.values()) {
         const id = ensureFolder(db, node.real, node.dev, node.ino)
