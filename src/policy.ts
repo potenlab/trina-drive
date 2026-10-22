@@ -31,6 +31,10 @@ export class Closed extends Error {}
 let recheckFailed: ((real: string) => void) | null = null
 export function onRecheckFailure(fn: ((real: string) => void) | null) { recheckFailed = fn }
 
+/** Called when deciding about a path failed unexpectedly (the path is then closed). Default: the server log. */
+let policyError: ((real: string, e: unknown) => void) | null = (real, e) => console.error(`[policy] closed after an error at ${real}:`, e)
+export function onPolicyError(fn: ((real: string, e: unknown) => void) | null) { policyError = fn }
+
 type Readdir = (real: string) => string[]
 
 const FLAGGED = (r: FolderRow) => r.no_ai || r.quarantine || r.widened_pending
@@ -144,8 +148,17 @@ export class Access {
     return v
   }
 
-  /** One step down by an original name from the listing. Closed (null): system names, NFC collisions, links of any kind, non-regular files. */
+  /**
+   * One step down by an original name from the listing. Closed (null): system names, NFC collisions, links of any kind,
+   * non-regular files, and anything that fails while deciding (fail closed: the same answer as a name that is not there).
+   */
   child(parent: Node, name: string): Entry | null {
+    try { return this.childUnguarded(parent, name) } catch (e) {
+      policyError?.(path.join(parent.real, name), e)
+      return null
+    }
+  }
+  private childUnguarded(parent: Node, name: string): Entry | null {
     if (isSystemName(name)) return null
     const l = this.listing(parent.real)
     if (!l || !l.names.includes(name) || l.collide.has(name)) return null

@@ -1,5 +1,6 @@
-// Worker process: runs exactly one untrusted job and exits. Started by pool.ts, usually inside sandbox-exec or bwrap.
-// It boots (loads just-bash), says `ready`, waits for one `job`, runs it, says `done`, exits. It never reads team files by
+// Worker process: runs untrusted jobs, one at a time, for one token. Started by pool.ts, usually inside sandbox-exec or
+// bwrap. It boots (loads just-bash), says `ready`, waits for a `job`, runs it, says `done`, and waits for the next job
+// until the server kills it (the server decides whether a process is used again; see pool.ts). It never reads team files by
 // itself: shell jobs see the parent's VFS through ProxyFs; extraction jobs get bytes in the frame body (or a path the
 // sandbox explicitly grants).
 import { encodeFrame, FrameDecoder, PROTOCOL_VERSION, type ExtractJob, type Frame, type FromWorker, type FsOp, type ShellJob, type ToWorker, type WireError } from './protocol'
@@ -124,10 +125,11 @@ async function runExtract(job: ExtractJob, body?: Uint8Array): Promise<Uint8Arra
   return new TextEncoder().encode(text)
 }
 
-onJob = (f) => {
-  onJob = null // one job per process
+// One job at a time. After `done` the server either kills this process or sends the next job of the same token.
+const handleJob = (f: Frame<ToWorker>) => {
+  onJob = null
   const h = f.h as Extract<ToWorker, { t: 'job' }>
-  const finish = async (msg: FromWorker, body?: Uint8Array) => { await send(msg, body); process.exit(0) }
+  const finish = async (msg: FromWorker, body?: Uint8Array) => { await send(msg, body); onJob = handleJob }
   if (h.v !== PROTOCOL_VERSION) { void finish({ t: 'done', ok: false, error: { code: 'EPROTO', message: `protocol ${h.v} not supported (worker speaks ${PROTOCOL_VERSION})` } }); return }
   const job = h.job
   const run = job.kind === 'shell'
@@ -137,6 +139,7 @@ onJob = (f) => {
       : Promise.reject(new Error(`unknown job kind`))
   run.catch((e) => finish({ t: 'done', ok: false, error: errOut(e) }))
 }
+onJob = handleJob
 
 void readLoop()
 await send({ t: 'ready', v: PROTOCOL_VERSION })

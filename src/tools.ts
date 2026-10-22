@@ -4,7 +4,8 @@ import { draftVersions } from './drafts'
 import { type Ctx, Session } from './session'
 import { runShell } from './shell'
 import { folderById, sha256, type TokenRow } from './store'
-import { FsError, MSG, VirtualFs, type Hit } from './vfs'
+import { asFsError, MSG, VirtualFs, type Hit } from './vfs'
+import { discardKept } from './worker'
 
 export interface ToolResult { content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean }
 export class AuditFailure extends Error {}
@@ -27,9 +28,10 @@ const text = (t: string, extra?: Partial<ToolResult>): ToolResult => ({ content:
 const fail = (t: string) => text(t, { isError: true })
 class Refuse extends Error {}
 
+/** The error a tool shows: an FsError's text, anything else a fixed I/O error (reported server-side; see vfs.ts). */
 function fsMessage(e: unknown, p: string): string {
-  if (e instanceof FsError) return e.code === 'ENOENT' ? `No such file or directory: ${p}` : e.code === 'EISDIR' ? `Is a directory: ${p}` : e.message
-  throw e
+  const f = asFsError(e, 'open', p)
+  return f.code === 'ENOENT' ? `No such file or directory: ${p}` : f.code === 'EISDIR' ? `Is a directory: ${p}` : f.message
 }
 
 /** "경영/sub" style label of a folder for showing a draft's sources. */
@@ -158,6 +160,8 @@ export async function callTool(ctx: Ctx, token: TokenRow, name: string, args: Re
     outcome = 'refused'
   }
   try { s.commit(name, audit, outcome) } catch (e) {
+    // nothing of this call is recorded (touches included), so no worker that saw it may serve this token again
+    await discardKept(String(token.id), String(token.person_id))
     throw new AuditFailure(`The call could not be recorded in the audit log, so it was not completed (${(e as Error).message}).`)
   }
   if (wrote !== null) {
