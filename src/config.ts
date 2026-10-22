@@ -33,6 +33,8 @@ export const LIMITS = {
   /** document extraction in an isolated worker (src/extract/run.ts): deadline and memory of one document */
   extractMs: 20_000,
   extractRssBytes: 512 * 1024 * 1024,
+  /** content one call may read (shell, read tool): each file at most fileBytes, all files together at most this */
+  callReadBytes: 128 * 1024 * 1024,
 }
 
 export const SUPPORTED_PROTOCOL_VERSIONS = ['2026-07-28', '2025-11-25'] as const

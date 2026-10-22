@@ -347,6 +347,25 @@ class Worker {
     return this.send(error ? { t: 'reply', id, ok: false, error } : { t: 'reply', id, ok: true, value }, body)
   }
 
+  /**
+   * File contents for the worker are held in this process from the backend read until the pipe has taken them. At most
+   * READS_IN_FLIGHT reads per worker run at once, and each holds its slot until its reply has left: a worker that asks for
+   * many large files, or stops reading its stdin, cannot make the server buffer them (its own RSS cap is what bounds it).
+   */
+  private readSlots = READS_IN_FLIGHT
+  private readWaiters: (() => void)[] = []
+  private async readSlot(): Promise<() => void> {
+    if (this.readSlots > 0) this.readSlots--
+    else await new Promise<void>((r) => this.readWaiters.push(r))
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const next = this.readWaiters.shift()
+      if (next) next()
+      else this.readSlots++
+    }
+  }
 
   private async serve(h: Extract<FromWorker, { t: 'fs' | 'cmd' }>, body?: Uint8Array) {
     const withCmd = <T>(fn: () => Promise<T>) => this.hooks.withCommand ? this.hooks.withCommand(h.cmd, fn) : fn()
@@ -357,6 +376,15 @@ class Worker {
         return this.reply(h.id, null, { stdout: String(r.stdout), stderr: String(r.stderr), exitCode: Number(r.exitCode) | 0 })
       }
       this.fsCalls++
+      if (h.op === 'read') {
+        const release = await this.readSlot()
+        try {
+          if (!this.serving) return
+          const r = await withCmd(() => fsCall(this.backend!, h.op, h.args, body)) as Uint8Array
+          await this.reply(h.id, null, undefined, r)
+        } finally { release() }
+        return
+      }
       const r = await withCmd(() => fsCall(this.backend!, h.op, h.args, body))
       if (r instanceof Uint8Array) this.reply(h.id, null, undefined, r)
       else this.reply(h.id, null, r)
@@ -381,6 +409,9 @@ class Worker {
 }
 
 class ArgError extends Error {}
+
+/** File reads served to one worker at the same time (see Worker.readSlot). */
+const READS_IN_FLIGHT = 2
 
 /** Where backend bugs are reported (server log by default). */
 let onBackendError = (what: string, e: unknown) => console.error(`[worker] backend error in ${what}:`, e)

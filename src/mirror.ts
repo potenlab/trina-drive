@@ -76,10 +76,16 @@ export class Mirror {
     return text
   }
 
-  /** Text of `f` as bytes (office files: extracted; others: original bytes). */
-  async text(access: Access, f: FileEntry, who?: ExtractWho): Promise<Uint8Array> {
-    if (!isOffice(f.name)) return access.readBytes(f, LIMITS.fileBytes)
+  /**
+   * Text of `f` as bytes (office files: extracted; others: original bytes). `charge` is told the size before anything
+   * is read into memory and may refuse by throwing (the caller's read budget).
+   */
+  async text(access: Access, f: FileEntry, who?: ExtractWho, charge: (bytes: number) => void = () => {}): Promise<Uint8Array> {
+    if (!isOffice(f.name)) { charge(f.size); return access.readBytes(f, LIMITS.fileBytes) }
     const p = await this.textPath(access, f, who)
+    let size: number
+    try { size = fs.statSync(p).size } catch { throw new Closed() }
+    charge(size)
     try { return fs.readFileSync(p) } catch { throw new Closed() }
   }
 }

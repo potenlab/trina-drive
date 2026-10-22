@@ -3,6 +3,7 @@
 // part in-process; they pass since commands run in the isolated executor (plan 5.1 "격리 실행기"). HEAVY lists why each
 // one would block the server without it.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import fs from 'node:fs'
 import { LIMITS } from '../../src/config'
 import { securitySetup, type SecEnv } from './fixture'
 
@@ -146,5 +147,56 @@ describe('another token\'s ls keeps p99 < 200 ms during the attack', () => {
 describe('limits that are not built yet', () => {
   test.todo('per-token draft quota (count and bytes): today a token can store unlimited 8 MB drafts [owner: drafts]', () => {})
   test.todo('per-token / per-person / global concurrent command limits (plan 5.1) [owner: worker sandbox]', () => {})
-  test.todo('memory cap per command: `cat` of many 64 MB originals is read whole into the server process [owner: worker sandbox]', () => {})
+})
+
+describe('memory cap per command: what one call may read into the server (scaled down: 9 MB per file, 20 MB per call)', () => {
+  const saved = { file: LIMITS.fileBytes, call: LIMITS.callReadBytes }
+  const big = [1, 2, 3, 4, 5].map((i) => `/공용/big${i}.txt`)
+  const SIZE = 6 << 20
+  beforeAll(() => {
+    LIMITS.fileBytes = 9 << 20
+    LIMITS.callReadBytes = 20 << 20
+    for (const p of big) fs.writeFileSync(e.R(p.slice(1)), 'x\n'.repeat(SIZE / 2))
+    fs.writeFileSync(e.R('공용/huge.txt'), 'y\n'.repeat(5 << 20))
+  })
+  afterAll(() => { LIMITS.fileBytes = saved.file; LIMITS.callReadBytes = saved.call })
+
+  test('a command over many large originals stops at the per-call cap with a clear reason', async () => {
+    const r = await e.sh('attacker', `wc -l ${big.join(' ')}`)
+    // three files fit in 20 MB; the 4th and 5th are refused before anything is read
+    for (const p of big.slice(0, 3)) expect(r.stdout).toContain(`${SIZE / 2} ${p}`)
+    for (const p of big.slice(3)) expect(r.stdout).not.toContain(p)
+    expect(r.exitCode).not.toBe(0)
+    expect(r.stderr).toContain(`${big[3]}: not read: one command may read at most 20 MB of files (this one had read 18 MB)`)
+    // the next call starts from zero
+    expect((await e.sh('attacker', `wc -l < ${big[4]}`)).stdout.trim()).toBe(String(SIZE / 2))
+  })
+
+  test('a file above the per-file cap is refused, not read', async () => {
+    const r = await e.sh('attacker', 'wc -l /공용/huge.txt; sha256sum /.raw/공용/huge.txt')
+    expect(r.stdout).not.toMatch(/[0-9a-f]{64}|^\d+ /m) // neither a count nor a hash: nothing was read
+    expect(r.stderr).toContain('/공용/huge.txt: file too large to read (one file may be at most 9 MB)')
+    expect(r.stderr).toContain('/.raw/공용/huge.txt: file too large to read')
+    const t = await e.tool('attacker', 'read', { path: '/공용/huge.txt' })
+    expect(t.isError).toBe(true)
+    expect(t.content[0]!.text).toMatch(/^EFBIG: file too large to read/)
+  })
+
+  test('drafts count too', async () => {
+    const r = await e.sh('attacker', 'wc -l /drafts/big.txt /drafts/big.txt /drafts/big.txt')
+    expect(r.stdout).toContain('1000000 /drafts/big.txt')
+    expect(r.stderr).toContain('/drafts/big.txt: not read: one command may read at most 20 MB of files (this one had read 15 MB)')
+  })
+
+  test('with the budget spent, a hidden path and a missing one still answer the same', async () => {
+    const spend = `wc -l ${big.slice(0, 3).join(' ')} > /dev/null; `
+    const norm = (x: { stdout: string; stderr: string; exitCode: number }, p: string) => JSON.stringify(x).replaceAll(p, 'P')
+    for (const [hidden, missing] of [['/경영/c.md', '/경영/nope.md'], ['/인사/c.csv', '/인사/nope.csv'], ['/경영/c.md', '/nowhere/c.md']] as const) {
+      for (const probe of ['cat P', 'head -1 P', 'wc -c P', 'sha256sum P', 'cp P /drafts/x.md', 'grep x P', 'cat /.rawP']) {
+        const a = await e.sh('attacker', spend + probe.replaceAll('P', hidden))
+        const b = await e.sh('attacker', spend + probe.replaceAll('P', missing))
+        expect(norm(a, hidden)).toBe(norm(b, missing))
+      }
+    }
+  })
 })

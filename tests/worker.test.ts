@@ -118,6 +118,25 @@ describe('limits', () => {
     expect(await backend.mem.exists('/drafts/late.txt')).toBe(false)
   })
 
+  test('a worker that asks for many large files and stops reading cannot make the server buffer them', async () => {
+    const backend = new TestBackend()
+    let held = 0, maxHeld = 0
+    backend.readFileBuffer = async (p: string) => {
+      backend.reads.push({ path: p })
+      held++; maxHeld = Math.max(maxHeld, held)
+      setTimeout(() => held--, 0) // a read is "held" until the next turn; what matters is how many are started
+      return new Uint8Array(16 << 20)
+    }
+    const rss0 = process.memoryUsage().rss
+    const run = await ex.run({ kind: 'extract', module: HOSTILE, fn: 'readFlood', name: '64' }, { token: 't', person: 'p', timeoutMs: 1500, backend })
+    const grew = process.memoryUsage().rss - rss0
+    console.log(`[worker] read flood: ${backend.reads.length} of 64 reads of 16 MB served before the kill; server RSS +${(grew / 1048576).toFixed(0)} MB`)
+    expect(run.status).toBe('timeout')
+    // the replies wait in the pipe, two at a time; without back-pressure all 64 (1 GB) would be read into the server
+    expect(backend.reads.length).toBeLessThanOrEqual(2)
+    expect(maxHeld).toBeLessThanOrEqual(2)
+  })
+
   test('a timeout leaves no process and no job dir behind (child processes included)', async () => {
     const e = new Executor({ warm: 0, tmpRoot, codePaths: [...defaultCodePaths(), FIXTURES], execPaths: ['/bin/sleep'] })
     const r = await e.run({ kind: 'extract', module: HOSTILE, fn: 'spawnAndSpin', name: 'x' }, { token: 't', person: 'p', timeoutMs: 1500 })
