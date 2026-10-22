@@ -567,7 +567,9 @@ export class Executor {
       w = this.spawn(grants)
       if (!w) return null
       w.setLimits(limits)
-      const ok = await Promise.race([w.ready.then(() => true, () => false), Bun.sleep(this.bootTimeoutMs).then(() => false)])
+      let bootTimer: ReturnType<typeof setTimeout> | undefined
+      const ok = await Promise.race([w.ready.then(() => true, () => false), new Promise<boolean>((res) => { bootTimer = setTimeout(() => res(false), this.bootTimeoutMs) })])
+      clearTimeout(bootTimer)
       if (!ok) { this.spawnFailures++; await w.dispose(); this.lastBootLog = w.log.trim().slice(0, 1000); return null }
       this.spawnFailures = 0
     } else w.setLimits(limits)
@@ -647,6 +649,16 @@ export function defaultExecutor(): Executor {
     })
   }
   return shared
+}
+
+/**
+ * Closes the process-wide executor if one was started (its warm workers are killed and their job dirs removed), so a
+ * one-shot process such as `cli sh` can exit. The next defaultExecutor() call starts a new one.
+ */
+export async function closeDefaultExecutor() {
+  const ex = shared
+  shared = null
+  await ex?.close()
 }
 
 export function runIsolated<T = unknown>(job: JobSpec, opts: RunOptions & { executor?: Executor }): Promise<RunResult<T>> {

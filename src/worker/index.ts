@@ -4,7 +4,7 @@ import path from 'node:path'
 import { defaultExecutor, type CommandResult, type Executor, type FsBackend, type RunOptions, type RunResult, type ShellHooks } from './pool'
 import type { ShellJob } from './protocol'
 
-export { defaultCodePaths, defaultExecutor, Executor, runIsolated, setBackendErrorHandler, toolReadPaths } from './pool'
+export { closeDefaultExecutor, defaultCodePaths, defaultExecutor, Executor, runIsolated, setBackendErrorHandler, toolReadPaths } from './pool'
 export type { BackendDirent, BackendStat, CommandResult, ExecutorConfig, FsBackend, JobLimits, RunOptions, RunResult, RunStats, RunStatus, ShellHooks } from './pool'
 export { PROTOCOL_VERSION } from './protocol'
 export type { ExtractJob, JobSpec, ShellJob } from './protocol'

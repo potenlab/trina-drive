@@ -14,6 +14,7 @@ import { issueSetupToken } from './web/auth'
 import { serveWeb } from './web/server'
 import { makeCtx, Session } from './session'
 import { runShell } from './shell'
+import { closeDefaultExecutor } from './worker'
 import { addGroup, addMember, addPerson, createToken, grantManage, LEVELS, parseDuration, person, registerFolder, revokeToken, setFlag, setRule, StoreError, verifyToken, type LevelName, type NasReaders } from './store'
 import { notifyCommand, NOTIFY_HELP } from './notify/cli'
 import { attachNotify } from './notify'
@@ -143,7 +144,8 @@ async function main(argv: string[]) {
       const notify = attachNotify(ctx)
       notify.connections.seen(token, { clientName: `${NAME} cli`, clientVersion: VERSION, userAgent: `${NAME}-cli/${VERSION}`, ip: 'local' })
       const s = new Session(ctx, token)
-      const r = await runShell(s, c)
+      // one command, then exit: the isolated executor's warm workers must not keep this process alive
+      const r = await runShell(s, c).finally(closeDefaultExecutor)
       s.commit('bash', c, `exit ${r.exitCode}`)
       await notify.flush()
       process.stdout.write(r.stdout)
