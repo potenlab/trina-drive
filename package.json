@@ -1,0 +1,24 @@
+{
+  "name": "shelf",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Permission-aware read shell and draft box for AI agents over existing team folders (phase-0 prototype)",
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "cli": "bun run src/cli.ts"
+  },
+  "dependencies": {
+    "just-bash": "3.6.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@types/bun": "1.4.3",
+    "typescript": "7.0.2"
+  },
+  "bin": {
+    "shelf": "src/cli.ts"
+  }
+}

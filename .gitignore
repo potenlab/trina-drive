@@ -1,0 +1,5 @@
+node_modules/
+.shelf/
+*.db
+*.db-wal
+*.db-shm
