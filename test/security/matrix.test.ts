@@ -485,7 +485,27 @@ describe('identity cases that exist on main', () => {
     } finally { env.cleanup() }
   })
 
-  test.todo('the text mirror is keyed by (dev, ino, size, mtime): a file rewritten in place with the same size and a reset mtime serves its old text; key by content or re-hash on identity reuse [owner: reconciler / file-identity index]', () => {})
+  test('the text mirror follows content, not (dev, ino, size, mtime): a file rewritten in place with the same size and a reset mtime serves its new text', async () => {
+    const env = securitySetup()
+    try {
+      const f = env.R('공용/c.md')
+      const old = fs.readFileSync(f, 'utf8')
+      const t = new Date('2026-01-02T03:04:05Z')
+      fs.utimesSync(f, t, t)
+      await rec(env)
+      expect((await env.sh('kim', 'grep -c CANARY_pub_ /공용/c.md')).stdout).toBe('1\n') // grep reads the mirror
+      const ino = fs.statSync(f).ino
+      const fresh = old.replace(/CANARY_pub_\w+/, (m) => 'REWRITE_'.padEnd(m.length, 'x'))
+      fs.writeFileSync(f, fresh) // same inode, same size
+      fs.utimesSync(f, t, t) // mtime put back (rsync --inplace, a restore tool, a careful hand)
+      expect([fs.statSync(f).ino, fs.statSync(f).size, fs.statSync(f).mtimeMs]).toEqual([ino, Buffer.byteLength(old), t.getTime()])
+      const g = await env.sh('kim', 'grep -h -e CANARY_pub_ -e REWRITE_ /공용/c.md; grep -rl CANARY_pub_ /')
+      expect(g.stdout).toBe(fresh.split('\n')[0] + '\n')
+      // the reconciler's index re-hashes it too (its hash key is not (dev, ino, size, mtime) either)
+      await rec(env)
+      expect(env.db.query<{ sha256: string }, [string]>('SELECT sha256 FROM fs_index WHERE path = ?').get(f)!.sha256).toBe(sha256(fresh))
+    } finally { env.cleanup() }
+  })
 })
 
 describe('NAS system folders (R1 ⑥) on the registered path itself', () => {

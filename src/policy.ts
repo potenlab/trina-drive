@@ -21,7 +21,11 @@ export interface Node {
   rows: FolderRow[]
   parent: Node | null
 }
-export interface FileEntry { kind: 'file'; parent: Node; name: string; real: string; vpath: string; dev: bigint; ino: bigint; size: number; mtimeMs: number; mtimeNs: bigint }
+export interface FileEntry {
+  kind: 'file'; parent: Node; name: string; real: string; vpath: string; dev: bigint; ino: bigint; size: number; mtimeMs: number; mtimeNs: bigint
+  /** change time: moves whenever the content (or metadata) is written, and cannot be set back like mtime */
+  ctimeNs: bigint
+}
 export interface DirEntry { kind: 'dir'; node: Node }
 export type Entry = FileEntry | DirEntry
 
@@ -223,7 +227,7 @@ export class Access {
     }
     if (!st.isFile() || st.nlink !== 1n || isXSymFile(real, st.size)) return null
     if (l.sidecars.has(name) && sidecarSaysLink(parent.real, name)) return null // a Mac alias by its Finder info
-    return { kind: 'file', parent, name, real, vpath, dev: st.dev, ino: st.ino, size: Number(st.size), mtimeMs: Number(st.mtimeMs), mtimeNs: st.mtimeNs }
+    return { kind: 'file', parent, name, real, vpath, dev: st.dev, ino: st.ino, size: Number(st.size), mtimeMs: Number(st.mtimeMs), mtimeNs: st.mtimeNs, ctimeNs: st.ctimeNs }
   }
 
   /** Resolve virtual path parts under the mounts. Hidden and nonexistent are the same: null. */
