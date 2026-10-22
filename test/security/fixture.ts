@@ -78,7 +78,7 @@ export function securitySetup() {
     canary.set(key, c)
     const p = R(vpath.slice(1))
     fs.mkdirSync(path.dirname(p), { recursive: true })
-    fs.writeFileSync(p, vpath.endsWith('.docx') ? sampleDocx(['보고서', c]) : `secret line ${c}\n매출 ${key}\n`)
+    fs.writeFileSync(p, vpath.endsWith('.docx') ? sampleDocx(['보고서', c]) : `secret line ${c}\n매출 1000\n`)
   }
   for (const f of FILES) if (f.key !== 'projHardlink') put(f.vpath, f.key)
   // the hard link shares 평가.csv's bytes and canary
