@@ -26,7 +26,9 @@ const SANDBOX_EXEC = '/usr/bin/sandbox-exec'
 
 /** System locations a runtime needs to start (dynamic libraries, ICU, time zones). They hold no team data. */
 const MAC_SYSTEM_READ = ['/usr/lib', '/usr/share', '/System/Library', '/System/Volumes/Preboot/Cryptexes', '/private/var/db/dyld', '/private/var/db/timezone', '/Library/Preferences/Logging']
-const MAC_SYSTEM_READ_LITERAL = ['/', '/dev/null', '/dev/zero', '/dev/random', '/dev/urandom', '/private/etc/localtime']
+const MAC_SYSTEM_READ_LITERAL = ['/', '/dev/null', '/dev/zero', '/dev/random', '/dev/urandom', '/private/etc/localtime',
+  // the /etc, /var, /tmp symlinks and their targets' parents, so /etc/localtime resolves (local time in ls -l, date)
+  '/etc', '/var', '/tmp', '/private', '/private/etc', '/private/var', '/private/var/db']
 
 const q = (s: string) => '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
 

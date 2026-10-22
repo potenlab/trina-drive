@@ -92,6 +92,13 @@ describe('limits', () => {
     expect(r.run.log.length).toBeLessThanOrEqual(4096)
   })
 
+  test('junk on the protocol channel ends the job', async () => {
+    const r = await extract('garbage', 'x', { timeoutMs: 5000 })
+    expect(['crashed', 'output']).toContain(r.status)
+    expect(r.run.stats.runMs).toBeLessThan(2000)
+    expect(alive(r.run.stats.pid)).toBe(false)
+  })
+
   test('a timeout leaves no process and no job dir behind (child processes included)', async () => {
     const e = new Executor({ warm: 0, tmpRoot, codePaths: [...defaultCodePaths(), FIXTURES], execPaths: ['/bin/sleep'] })
     const r = await e.run({ kind: 'extract', module: HOSTILE, fn: 'spawnAndSpin', name: 'x' }, { token: 't', person: 'p', timeoutMs: 1500 })
@@ -344,6 +351,7 @@ describe('fairness and latency', () => {
       const t = performance.now()
       const r = await runShellIsolated('ls /docs | wc -l', backend, { executor: pool, token: 'B', person: 'bob' })
       lat.push(performance.now() - t)
+      if (performance.now() - t > 250) console.log(`[worker]   slow B job: ${fmt(performance.now() - t)} ms ${JSON.stringify(r.run.stats)}`)
       expect(r.stdout).toBe('3\n')
       await Bun.sleep(40)
     }

@@ -77,3 +77,9 @@ export function flood(): string {
 export function upper(name: string, bytes: Uint8Array): string {
   return `${name}: ${new TextDecoder().decode(bytes).toUpperCase()}`
 }
+
+/** Writes junk onto the protocol channel (stdout), then waits. */
+export function garbage(): string {
+  fs.writeSync(1, 'this is not a frame, just noise from a confused library\n')
+  for (;;) { /* wait to be killed */ }
+}

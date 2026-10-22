@@ -31,6 +31,9 @@ export class FairScheduler {
     return { running: this.running, queued }
   }
 
+  /** Jobs this token is running now. */
+  runningFor(token: string) { return this.byToken.get(token) ?? 0 }
+
   /** Resolves with a release function once the job may run. Throws Busy when the token's queue is full. */
   acquire(token: string, person: string, signal?: AbortSignal): Promise<() => void> {
     if (signal?.aborted) return Promise.reject(new Aborted('aborted'))

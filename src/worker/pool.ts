@@ -86,6 +86,8 @@ export interface ExecutorConfig {
   tmpRoot?: string
   /** pre-started workers kept ready (0 = always cold) */
   warm?: number
+  /** warm workers kept for tokens with no other job running (default 1) */
+  warmReserve?: number
   limits?: Partial<SchedulerLimits>
   defaults?: Partial<JobLimits>
   /** read-only grants for every worker: worker code, node_modules, extractor modules */
@@ -387,6 +389,7 @@ export class Executor {
   private readonly runtime: string
   private readonly entry: string
   private readonly warmTarget: number
+  private readonly warmReserve: number
   private readonly pollMs: number
   private readonly bootTimeoutMs: number
   private idle: Worker[] = []
@@ -396,6 +399,8 @@ export class Executor {
   private watchdog: ReturnType<typeof setInterval> | null = null
   private spawnFailures = 0
   private lastBootLog = ''
+  /** the server's time zone, so `ls -l` and `date` in a worker match the server */
+  private readonly tz = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   private closed = false
 
   constructor(cfg: ExecutorConfig = {}) {
@@ -429,6 +434,7 @@ export class Executor {
     this.runtime = realOrNull(cfg.runtime ?? process.execPath) ?? process.execPath
     this.entry = cfg.entry ?? path.join(HERE, 'entry.ts')
     this.warmTarget = this.refusal ? 0 : Math.max(0, cfg.warm ?? 2)
+    this.warmReserve = Math.min(this.warmTarget, cfg.warmReserve ?? 1)
     this.pollMs = cfg.pollMs ?? 20
     this.bootTimeoutMs = cfg.bootTimeoutMs ?? 10_000
     this.refill()
@@ -466,7 +472,10 @@ export class Executor {
     const onAbort = () => w?.kill('aborted')
     try {
       const t1 = performance.now()
-      const got = await this.take(opts.readPaths ?? [], limits)
+      // the last `warmReserve` warm workers go to tokens with nothing else running: a token already busy with other
+      // jobs starts cold (~100 ms more), so a flood cannot drain the pool and slow down everyone else's first command
+      const busy = this.scheduler.runningFor(opts.token) > 1
+      const got = await this.take(opts.readPaths ?? [], limits, busy)
       if (!got) return result('crashed', { error: new Error(`worker failed to start${this.lastBootLog ? ': ' + this.lastBootLog : ''}`) })
       w = got.w
       stats.warm = got.warm
@@ -512,9 +521,10 @@ export class Executor {
   }
 
   /** A ready worker: a warm one if the job needs no extra grants, else a fresh one. */
-  private async take(readPaths: string[], limits: JobLimits): Promise<{ w: Worker; warm: boolean } | null> {
+  private async take(readPaths: string[], limits: JobLimits, busyToken: boolean): Promise<{ w: Worker; warm: boolean } | null> {
     const grants = readPaths.map((p) => realOrNull(p)).filter((p): p is string => !!p)
-    let w: Worker | null | undefined = !grants.length ? this.idle.shift() : undefined
+    const mayUseWarm = !grants.length && (!busyToken || this.idle.length > this.warmReserve)
+    let w: Worker | null | undefined = mayUseWarm ? this.idle.shift() : undefined
     const warm = !!w
     this.refill()
     if (!w) {
@@ -536,7 +546,7 @@ export class Executor {
     const listPaths = [...new Set(this.codePaths.map((p) => path.dirname(p)))]
     const argv = wrapArgv(this.isolation, { workDir: dir, readPaths: [...this.codePaths, ...toolReads, ...grants], listPaths, execPaths: this.execPaths, runtime: this.runtime }, [this.runtime, this.entry])
     const env: Record<string, string> = {
-      PATH: '/usr/bin:/bin', HOME: dir, TMPDIR: dir, LANG: 'C.UTF-8', NO_COLOR: '1',
+      PATH: '/usr/bin:/bin', HOME: dir, TMPDIR: dir, LANG: 'C.UTF-8', NO_COLOR: '1', TZ: this.tz,
       // the transpiler cache would be shared state between jobs (and lives outside the job dir)
       BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
     }
