@@ -55,8 +55,8 @@ export const isOAuthPath = (p: string) => p.startsWith('/oauth/') || p.startsWit
 function page(status: number, title: string, text: string): Response {
   const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
   return new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${esc(title)}</title>` +
-    `<body style="font:16px system-ui,sans-serif;max-width:36rem;margin:3rem auto;padding:0 1rem"><h1 style="font-size:1.3rem">${esc(title)}</h1><p>${esc(text)}</p>` +
-    `<p style="color:#666">연결을 시작한 AI 앱으로 돌아가 다시 시도하거나 관리자에게 문의하세요. Go back to the AI app that started this and try again, or ask your admin.</p></body>`,
+    `<body><h1>${esc(title)}</h1><p>${esc(text)}</p>` +
+    `<p>연결을 시작한 AI 앱으로 돌아가 다시 시도하거나 관리자에게 문의하세요. Go back to the AI app that started this and try again, or ask your admin.</p></body>`,
   { status, headers: { 'content-type': 'text/html; charset=utf-8', ...NO_STORE } })
 }
 

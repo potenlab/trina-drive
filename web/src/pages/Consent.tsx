@@ -48,6 +48,7 @@ export function Consent({ rid }: { rid: string }) {
       <p className="small">{ct('answer_to')}: <code>{c.redirect_host}</code></p>
       {(c.loopback || c.loopback_only) && <p className="warn small">{ct('loopback_warn')}</p>}
       <p className="muted small">{ct('signed_in_as', { name: me?.name ?? '' })}</p>
+      <p className="small">{ct('only_if_you')}</p>
 
       <h2>{ct('what_it_gets')}</h2>
       <fieldset>

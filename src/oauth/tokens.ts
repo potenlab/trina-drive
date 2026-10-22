@@ -33,6 +33,7 @@ export interface Approval {
 
 export function issueCode(rt: OAuthRuntime, db: DB, a: Approval): string {
   const code = secret(CODE_PREFIX), t = rt.now()
+  db.query('DELETE FROM oauth_codes WHERE expires_at < ?').run(t - 86400_000)
   db.query(`INSERT INTO oauth_codes (code_hash, client_id, redirect_uri, code_challenge, resource, person_id, scope_folders, read_only, granted_scope, grant_ttl_ms, created_at, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(sha256(code), a.client.client_id, a.redirectUri, a.codeChallenge, a.resource, a.personId,
     a.scopeFolders ? JSON.stringify(a.scopeFolders) : null, a.readOnly ? 1 : 0, a.grantedScope, a.grantTtlMs, t, t + CODE_TTL_MS)
@@ -45,6 +46,8 @@ function mint(rt: OAuthRuntime, db: DB, grantId: number, resource: string, grant
   const t = rt.now()
   const access = secret(ACCESS_PREFIX), refresh = secret(REFRESH_PREFIX)
   const accessExp = Math.min(t + rt.accessTtlMs, grantExpires ?? Infinity)
+  // expired access tokens are of no use to anyone (refresh tokens stay: a spent one must still be recognised as reuse)
+  db.query(`DELETE FROM oauth_tokens WHERE kind = 'access' AND expires_at < ?`).run(t - 86400_000)
   const ins = db.query('INSERT INTO oauth_tokens (hash, grant_id, kind, resource, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
   ins.run(sha256(access), grantId, 'access', resource, t, accessExp)
   ins.run(sha256(refresh), grantId, 'refresh', resource, t, grantExpires ?? t + 365 * 86400_000)
