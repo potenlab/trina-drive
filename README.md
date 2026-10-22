@@ -222,7 +222,7 @@ src/names.ts       NFC, system names, office extensions     src/grep.ts     grep
 src/mirror.ts      text mirror keyed by content sha256      src/shell.ts    Bash instance, read modes, caps
 src/drafts.ts      draft box, versions, R4                  src/tools.ts    the five MCP tools
 src/audit.ts       hash-chained audit log                   src/mcp.ts      POST /mcp endpoint
-src/extract/       pdf (pdftotext), docx/xlsx/pptx, hwpx, hwp (own CFB reader), zip
+src/extract/       pdf (pdftotext), docx/xlsx/pptx, hwpx, hwp (own CFB reader), zip; run.ts = always in an isolated worker
 src/rights.ts      R5/R7/R9 admin-side decisions            src/web/        REST API, sessions, mail, notices, server
 web/               the admin app (Vite + React, en/ko)
 src/samples.ts     generated sample office files            src/demo.ts     demo seed       src/cli.ts  CLI
@@ -233,9 +233,11 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
 
 ## Known limits
 
-- Shell commands run in the isolated executor (sandboxed worker processes, one token per process; see
-  [docs/worker.md](docs/worker.md)); `SHELF_SHELL=inprocess` runs just-bash in the server process (development only).
-  ripgrep and pdftotext are child processes of the server with timeouts and output caps but no sandbox.
+- Shell commands and document text extraction (on demand and in the reconciler's queue) run in the isolated executor
+  (sandboxed worker processes; see [docs/worker.md](docs/worker.md)); without OS isolation both are refused.
+  `SHELF_SHELL=inprocess` / `SHELF_EXTRACT=inprocess` run just-bash / the parsers in the server process (development
+  and tests only). pdftotext runs inside a PDF's extraction worker; ripgrep is a child process of the server with a
+  timeout and output caps but no sandbox.
 - just-bash lets some redirect failures (`echo x > /경영/a`) escape `exec()`; the server reports them like bash does
   (`bash: <path>: …`) but the rest of that command line does not run.
 - `mkdir` inside `/drafts/` lasts only for the call (drafts are files; folders come from their paths). `/tmp` does not

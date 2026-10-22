@@ -30,6 +30,9 @@ export const LIMITS = {
   /** one MCP request body (a draft as JSON, with room for escapes) */
   requestBytes: 24 * 1024 * 1024,
   draftVersionsKept: 20,
+  /** document extraction in an isolated worker (src/extract/run.ts): deadline and memory of one document */
+  extractMs: 20_000,
+  extractRssBytes: 512 * 1024 * 1024,
 }
 
 export const SUPPORTED_PROTOCOL_VERSIONS = ['2026-07-28', '2025-11-25'] as const

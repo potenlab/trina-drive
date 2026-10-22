@@ -94,6 +94,7 @@ const encOf = (o?: WriteFileOptions | ReadFileOptions | BufferEncoding | null) =
 export class VirtualFs implements IFileSystem {
   constructor(readonly s: Session) {}
 
+
   // ---------- resolution ----------
   /** What a virtual path is for this call, or null when it is not there for this token (hidden or nonexistent). */
   resolve(p: string): Hit | null {
@@ -171,12 +172,19 @@ export class VirtualFs implements IFileSystem {
     try {
       let bytes: Uint8Array
       if (h.raw || m.raw || !isOffice(f.name)) bytes = this.s.access.readBytes(f, LIMITS.fileBytes)
-      else { bytes = await this.s.ctx.mirror.text(this.s.access, f); this.s.extracted.add(f.vpath) }
+      else {
+        bytes = await this.s.ctx.mirror.text(this.s.access, f, { token: String(this.s.token.id), person: String(this.s.token.person_id) })
+        this.s.extracted.add(f.vpath)
+      }
       this.s.touchFile(f, !m.weak)
       return bytes
     } catch (e) {
       if (e instanceof Closed) throw enoent('open', p)
-      if (e instanceof ExtractError) { this.s.touchFile(f, false); throw new FsError('EIO', e.message, p) }
+      if (e instanceof ExtractError) {
+        this.s.touchFile(f, false)
+        this.s.notes.add(`${f.vpath}: ${e.message} (original bytes: /.raw${f.vpath})`)
+        throw new FsError('EIO', e.message, p)
+      }
       throw e
     }
   }
