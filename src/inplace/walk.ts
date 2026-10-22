@@ -38,12 +38,13 @@ const BATCH = 64
  * Folders that cannot be listed are returned in `unreadable` so the caller does not take their children as deleted.
  */
 export async function walkRoot(root: string, ops: FsOps = realFs, dirConcurrency = 8):
-  Promise<{ entries: Seen[]; unreadable: string[] } | null> {
+  Promise<{ entries: Seen[]; unreadable: string[]; sidecars: Set<string> } | null> {
   let st: fs.BigIntStats
   try { st = await ops.lstat(root) } catch { return null }
   if (!st.isDirectory() || st.isSymbolicLink()) return null
   const entries: Seen[] = [seenFrom(root, root, st)]
   const unreadable: string[] = []
+  const sidecars = new Set<string>() // files that have an AppleDouble `._name` next to them
   const stack: string[] = [root]
   let active = 0
   await new Promise<void>((resolve, reject) => {
@@ -59,6 +60,7 @@ export async function walkRoot(root: string, ops: FsOps = realFs, dirConcurrency
       let names: string[]
       try { names = await ops.readdir(dir) } catch { unreadable.push(dir); return }
       const collide = nfcCollisions(names)
+      for (const n of names) if (n.startsWith('._') && n.length > 2) sidecars.add(path.join(dir, n.slice(2)))
       const keep = names.filter((n) => !isSystemName(n))
       for (let i = 0; i < keep.length; i += BATCH) {
         const part = keep.slice(i, i + BATCH)
@@ -75,5 +77,5 @@ export async function walkRoot(root: string, ops: FsOps = realFs, dirConcurrency
     }
     pump()
   })
-  return { entries, unreadable }
+  return { entries, unreadable, sidecars }
 }

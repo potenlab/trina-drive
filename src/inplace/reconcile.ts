@@ -164,11 +164,13 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
   // ---- 2. walk
   const cur = new Map<string, Cur>()
   const unreadable: string[] = []
+  const sidecars = new Set<string>()
   for (const w of walked) {
     const res = await walkRoot(w.path, ops)
     if (!res) { skipped.add(w.oldPath); continue }
     for (const e of res.entries) cur.set(e.path, { ...e, sha256: null, hashedKey: null, sniff: null, closed: null })
     unreadable.push(...res.unreadable)
+    res.sidecars.forEach((x) => sidecars.add(x))
   }
   const walkedOld = new Set(walked.filter((w) => !skipped.has(w.oldPath)).flatMap((w) => [w.path, w.oldPath]))
   // rows under a folder we could not list are kept as they were
@@ -342,18 +344,25 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
   const budget = opts.hashBudgetBytes ?? Infinity
   const fresh: { c: Cur; texty: boolean; bytes: Uint8Array | null }[] = []
   const upd = db.query('UPDATE fs_index SET sha256 = ?, hashed_key = ?, sniff = ?, closed = coalesce(closed, ?) WHERE path = ? AND dev = ? AND ino = ?')
-  let sinceYield = 0
+  // hashes are written in batches (one transaction per batch), yielding to the event loop between batches
+  let batch: Cur[] = []
+  let batchBytes = 0
+  const flush = () => {
+    db.transaction(() => { for (const c of batch) upd.run(c.sha256, c.hashedKey, c.sniff, c.sniff, c.path, c.dev, c.ino) })()
+    batch = []; batchBytes = 0
+  }
   for (const c of todo) {
     if (rep.hashedBytes + c.size > budget && rep.hashed > 0) { rep.hashPending++; continue }
     const h = hashFile(c)
     if (!h) continue
     rep.hashed++; rep.hashedBytes += c.size
-    c.sha256 = h.sha; c.hashedKey = hashKey(c); c.sniff = h.sniff ?? appleDoubleSniff(c.path)
+    c.sha256 = h.sha; c.hashedKey = hashKey(c); c.sniff = h.sniff ?? (sidecars.has(c.path) ? appleDoubleSniff(c.path) : null)
     if (c.sniff && !c.closed) { c.closed = c.sniff; noteClosed(closedEvents, c.sniff, c.path) }
-    upd.run(c.sha256, c.hashedKey, c.sniff, c.sniff, c.path, c.dev, c.ino)
+    batch.push(c)
     if (!c.closed) fresh.push({ c, texty: isOffice(c.path) || !h.binary, bytes: h.bytes })
-    if ((sinceYield += c.size) > 32 * 1024 * 1024) { sinceYield = 0; await new Promise((r) => setImmediate(r)) }
+    if (batch.length >= 500 || (batchBytes += c.size) > 32 * 1024 * 1024) { flush(); await new Promise((r) => setImmediate(r)) }
   }
+  flush()
   db.transaction(() => flushClosed(db, closedEvents, admins, now(), rep))()
   const t3 = performance.now()
   rep.ms.hash = t3 - t2

@@ -268,3 +268,21 @@ describe('widened drafts (R6)', () => {
     expect(JSON.parse(listEvents(e.db, { kind: 'widened' })[0]!.detail).rejudged).toBe(true)
   })
 })
+
+describe('the loop', () => {
+  test('watch mode: an fs.watch hint triggers a pass soon after a local change', async () => {
+    const e = fresh()
+    const { startReconciler } = await import('../src/inplace/reconcile')
+    const logs: string[] = []
+    const r = startReconciler(e.db, { dataDir: e.dir, intervalMs: 3600_000, debounceMs: 50, log: (s) => logs.push(s) })
+    try {
+      await r.idle()
+      fs.renameSync(p(e, '인사/급여.csv'), p(e, '공용/급여.csv'))
+      const t0 = Date.now()
+      while (!listQuarantine(e.db).length && Date.now() - t0 < 5000) await new Promise((res) => setTimeout(res, 50))
+      expect(listQuarantine(e.db).map((q) => path.basename(q.path))).toEqual(['급여.csv'])
+      await r.idle()
+      expect(logs.some((l) => l.includes('1 quarantined'))).toBe(true)
+    } finally { r.stop() }
+  })
+})
