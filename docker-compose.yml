@@ -1,0 +1,53 @@
+# shelf on a Linux box (docs/DOCKER.md). Before the first `docker compose up`:
+#   1. AppArmor hosts (Ubuntu, Debian, SUSE): load the worker profile once, as root:
+#        sudo apparmor_parser -r docker/apparmor-shelf-bwrap
+#      (no AppArmor, e.g. Fedora/RHEL: delete the apparmor= line below; see docs/DOCKER.md for SELinux)
+#   2. docker compose run --rm shelf init       # prints the one-time web setup token
+#   3. docker compose up -d && docker compose ps   # "healthy"; the log says "worker isolation: bwrap"
+name: shelf
+
+services:
+  shelf:
+    build: .
+    image: shelf:dev
+    restart: unless-stopped
+    # LAN or VPN only (plan 6, 7.1): publish on this machine's LAN or Tailscale address, never on a public one.
+    # 127.0.0.1 here = reachable only from the Docker host itself; replace it with e.g. 192.168.0.10 or 100.x.y.z.
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      TZ: Asia/Seoul
+    volumes:
+      # database, drafts, text mirror, backup staging, logs (the installed layout, src/layout.ts)
+      - shelf-data:/data
+      # registered folders: read-only, one bind per NAS share, then `shelf folder register /data/shares/<name>`
+      # - /srv/share:/data/shares/share:ro
+      # backup target (an external disk or another machine's mount), then `shelf backup target set /backup`
+      # - /mnt/backup/shelf:/backup
+    # ---- hardening: nothing below is needed by the server itself except what bwrap needs (marked)
+    read_only: true
+    tmpfs:
+      # worker job dirs live here; noexec also covers them inside the sandbox
+      - /tmp:size=256m,mode=1777,nosuid,nodev,noexec
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      # bwrap: Docker's default seccomp profile + clone/unshare only with CLONE_NEWUSER, mount/umount2/pivot_root
+      - seccomp=./docker/seccomp-bwrap.json
+      # bwrap: docker-default AppArmor rules + userns, mount, pivot_root (load the profile first, step 1)
+      - apparmor=shelf-bwrap
+      # bwrap: the kernel lets a user namespace mount a fresh /proc only if the container's /proc is not partly
+      # masked; workers get their own /proc showing only their sandbox (docs/DOCKER.md, trade-offs)
+      - systempaths=unconfined
+    pids_limit: 512
+    mem_limit: 4g
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/bun", "-e", "fetch('http://127.0.0.1:8787/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  shelf-data:
