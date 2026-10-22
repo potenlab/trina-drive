@@ -3,6 +3,7 @@
 // process with a deadline and an RSS cap; other tokens' commands keep running. The worker gets the bytes the server read
 // with its own no-follow checks (R1 ⑤ ⑦), so it has no file access at all; a PDF's worker may also run pdftotext.
 // <PREFIX>_EXTRACT=inprocess runs the parsers in this process instead (development and tests only).
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { ENV_PREFIX, LIMITS } from '../config'
 import { ext } from '../names'
 import { extractExecutor, extractIsolated, type Executor } from '../worker'
@@ -20,13 +21,24 @@ export function extractMode(): 'isolated' | 'inprocess' {
   return process.env[`${ENV_PREFIX}_EXTRACT`] === 'inprocess' ? 'inprocess' : 'isolated'
 }
 
+/**
+ * The context this module was loaded in (server start-up, outside any command). The in-process shell (development)
+ * runs commands inside just-bash's defence-in-depth context, which blocks process.env and timers with strings; the
+ * extraction dispatch is server code, so it runs in the host context, never in the command's.
+ */
+const hostContext = AsyncLocalStorage.snapshot()
+
 const prefix = (m: string) => m.startsWith('cannot extract text') ? m : `cannot extract text: ${m}`
 
 /**
  * Text of one document. Throws ExtractError when the document cannot be turned into text (the mirror records that), or
  * ExtractUnavailable when extraction cannot run now (refused without isolation, too many waiting, worker did not start).
  */
-export async function extractDocument(name: string, bytes: Uint8Array, who: ExtractWho, opts: { executor?: Executor } = {}): Promise<string> {
+export function extractDocument(name: string, bytes: Uint8Array, who: ExtractWho, opts: { executor?: Executor } = {}): Promise<string> {
+  return hostContext(() => dispatch(name, bytes, who, opts))
+}
+
+async function dispatch(name: string, bytes: Uint8Array, who: ExtractWho, opts: { executor?: Executor }): Promise<string> {
   if (!opts.executor && extractMode() === 'inprocess') return extractText(name, bytes)
   const kind = ext(name) || 'txt'
   const pdftotext = kind === 'pdf' ? TOOLS.pdftotext : null
