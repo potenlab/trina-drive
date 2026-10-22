@@ -108,6 +108,8 @@ export interface ExecutorConfig {
   reuse?: false | { idleMs?: number; maxJobs?: number; maxIdle?: number }
   /** worker start-up deadline */
   bootTimeoutMs?: number
+  /** load the shell engine at boot (default true); false for an executor that only extracts (faster cold start) */
+  preloadShell?: boolean
 }
 
 export interface RunOptions extends Partial<JobLimits> {
@@ -120,6 +122,8 @@ export interface RunOptions extends Partial<JobLimits> {
   body?: Uint8Array
   /** extra read-only paths for this job (forces a fresh worker with its own sandbox profile) */
   readPaths?: string[]
+  /** extra executables this job may start, e.g. pdftotext for one PDF (forces a fresh worker with its own profile) */
+  execPaths?: string[]
   signal?: AbortSignal
 }
 
@@ -277,8 +281,13 @@ class Worker {
     this.onGone(this)
   }
 
-  private send(h: ToWorker, body?: Uint8Array) {
-    try { this.proc.stdin.write(encodeFrame(h, body)); void this.proc.stdin.flush() } catch { /* worker gone; exit handling reports it */ }
+  /** Resolves once the frame has left this process (a worker that stops reading its stdin holds it back here). */
+  private send(h: ToWorker, body?: Uint8Array): Promise<void> {
+    try {
+      const w = this.proc.stdin.write(encodeFrame(h, body))
+      const f = this.proc.stdin.flush()
+      return Promise.all([w, f]).then(() => {}, () => {})
+    } catch { return Promise.resolve() /* worker gone; exit handling reports it */ }
   }
 
   private async readOut() {
@@ -333,9 +342,29 @@ class Worker {
     }
   }
 
-  private reply(id: number, error: WireError | null, value?: unknown, body?: Uint8Array) {
-    if (!this.serving) return
-    this.send(error ? { t: 'reply', id, ok: false, error } : { t: 'reply', id, ok: true, value }, body)
+  private reply(id: number, error: WireError | null, value?: unknown, body?: Uint8Array): Promise<void> {
+    if (!this.serving) return Promise.resolve()
+    return this.send(error ? { t: 'reply', id, ok: false, error } : { t: 'reply', id, ok: true, value }, body)
+  }
+
+  /**
+   * File contents for the worker are held in this process from the backend read until the pipe has taken them. At most
+   * READS_IN_FLIGHT reads per worker run at once, and each holds its slot until its reply has left: a worker that asks for
+   * many large files, or stops reading its stdin, cannot make the server buffer them (its own RSS cap is what bounds it).
+   */
+  private readSlots = READS_IN_FLIGHT
+  private readWaiters: (() => void)[] = []
+  private async readSlot(): Promise<() => void> {
+    if (this.readSlots > 0) this.readSlots--
+    else await new Promise<void>((r) => this.readWaiters.push(r))
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const next = this.readWaiters.shift()
+      if (next) next()
+      else this.readSlots++
+    }
   }
 
   private async serve(h: Extract<FromWorker, { t: 'fs' | 'cmd' }>, body?: Uint8Array) {
@@ -347,6 +376,15 @@ class Worker {
         return this.reply(h.id, null, { stdout: String(r.stdout), stderr: String(r.stderr), exitCode: Number(r.exitCode) | 0 })
       }
       this.fsCalls++
+      if (h.op === 'read') {
+        const release = await this.readSlot()
+        try {
+          if (!this.serving) return
+          const r = await withCmd(() => fsCall(this.backend!, h.op, h.args, body)) as Uint8Array
+          await this.reply(h.id, null, undefined, r)
+        } finally { release() }
+        return
+      }
       const r = await withCmd(() => fsCall(this.backend!, h.op, h.args, body))
       if (r instanceof Uint8Array) this.reply(h.id, null, undefined, r)
       else this.reply(h.id, null, r)
@@ -371,6 +409,9 @@ class Worker {
 }
 
 class ArgError extends Error {}
+
+/** File reads served to one worker at the same time (see Worker.readSlot). */
+const READS_IN_FLIGHT = 2
 
 /** Where backend bugs are reported (server log by default). */
 let onBackendError = (what: string, e: unknown) => console.error(`[worker] backend error in ${what}:`, e)
@@ -439,6 +480,7 @@ export class Executor {
   private readonly warmReserve: number
   private readonly pollMs: number
   private readonly bootTimeoutMs: number
+  private readonly preloadShell: boolean
   private idle: Worker[] = []
   /** workers kept after a clean shell job, for the same token's next one (oldest first) */
   private kept: { w: Worker; timer: ReturnType<typeof setTimeout> }[] = []
@@ -489,12 +531,13 @@ export class Executor {
     this.warmReserve = Math.min(this.warmTarget, cfg.warmReserve ?? 1)
     this.pollMs = cfg.pollMs ?? 20
     this.bootTimeoutMs = cfg.bootTimeoutMs ?? 10_000
+    this.preloadShell = cfg.preloadShell ?? true
     this.reuse = cfg.reuse === false ? null : { idleMs: 5000, maxJobs: 32, maxIdle: 4, ...cfg.reuse }
     this.refill()
   }
 
   info() {
-    return { isolation: this.isolation, user: this.user, refusal: this.refusal, warnings: this.warnings, memProbe: memProbe()?.kind ?? null, warm: this.idle.length, kept: this.kept.length, ...this.scheduler.stats }
+    return { isolation: this.isolation, user: this.user, refusal: this.refusal, warnings: this.warnings, memProbe: memProbe()?.kind ?? null, warm: this.idle.length, kept: this.kept.length, limits: { ...this.scheduler.limits }, runningBy: this.scheduler.runningBy, ...this.scheduler.stats }
   }
 
   /** Runs one job in an isolated worker. Never throws for job failures: see RunResult.status. */
@@ -526,7 +569,7 @@ export class Executor {
     const owner = JSON.stringify([opts.token, opts.person])
     // only plain shell jobs share a process (with the same token): extraction parses hostile documents, and grants
     // would carry over
-    const reusable = !!this.reuse && job.kind === 'shell' && !opts.readPaths?.length
+    const reusable = !!this.reuse && job.kind === 'shell' && !opts.readPaths?.length && !opts.execPaths?.length
     const onAbort = () => w?.kill('aborted')
     try {
       const t1 = performance.now()
@@ -534,7 +577,7 @@ export class Executor {
       // jobs starts cold (~100 ms more), so a flood cannot drain the pool and slow down everyone else's first command
       const busy = this.scheduler.runningFor(opts.token) > 1
       const kept = reusable ? this.unpark(owner) : null
-      const got = kept ? { w: kept, warm: true } : await this.take(opts.readPaths ?? [], limits, busy)
+      const got = kept ? { w: kept, warm: true } : await this.take(opts.readPaths ?? [], opts.execPaths ?? [], limits, busy)
       if (!got) return result('crashed', { error: new Error(`worker failed to start${this.lastBootLog ? ': ' + this.lastBootLog : ''}`) })
       w = got.w
       if (kept) w.setLimits(limits)
@@ -632,14 +675,15 @@ export class Executor {
   }
 
   /** A ready worker: a warm one if the job needs no extra grants, else a fresh one. */
-  private async take(readPaths: string[], limits: JobLimits, busyToken: boolean): Promise<{ w: Worker; warm: boolean } | null> {
+  private async take(readPaths: string[], execPaths: string[], limits: JobLimits, busyToken: boolean): Promise<{ w: Worker; warm: boolean } | null> {
     const grants = readPaths.map((p) => realOrNull(p)).filter((p): p is string => !!p)
-    const mayUseWarm = !grants.length && (!busyToken || this.idle.length > this.warmReserve)
+    const execs = execPaths.flatMap((p) => { const r = realOrNull(p); return r ? [path.resolve(p), r] : [] })
+    const mayUseWarm = !grants.length && !execs.length && (!busyToken || this.idle.length > this.warmReserve)
     let w: Worker | null | undefined = mayUseWarm ? this.idle.shift() : undefined
     const warm = !!w
     this.refill()
     if (!w) {
-      w = this.spawn(grants)
+      w = this.spawn(grants, false, execs)
       if (!w) return null
       w.setLimits(limits)
       let bootTimer: ReturnType<typeof setTimeout> | undefined
@@ -651,19 +695,21 @@ export class Executor {
     return { w, warm }
   }
 
-  private spawn(grants: string[], prewarm = false): Worker | null {
+  private spawn(grants: string[], prewarm = false, execs: string[] = []): Worker | null {
     let dir: string
     try { dir = fs.mkdtempSync(path.join(this.tmpRoot, 'job-')) } catch (e) { this.warnings.push(`cannot create job dir: ${(e as Error).message}`); return null }
     if (this.ids) { try { fs.chownSync(dir, this.ids.uid, this.ids.gid) } catch {} }
-    const toolReads = this.execPaths.flatMap(toolReadPaths)
+    const execPaths = [...new Set([...this.execPaths, ...execs])]
+    const toolReads = execPaths.flatMap(toolReadPaths)
     const listPaths = [...new Set(this.codePaths.map((p) => path.dirname(p)))]
-    const argv = wrapArgv(this.isolation, { workDir: dir, readPaths: [...this.codePaths, ...toolReads, ...grants], listPaths, execPaths: this.execPaths, runtime: this.runtime }, [this.runtime, this.entry])
+    const argv = wrapArgv(this.isolation, { workDir: dir, readPaths: [...this.codePaths, ...toolReads, ...grants], listPaths, execPaths, runtime: this.runtime }, [this.runtime, this.entry])
     const env: Record<string, string> = {
       PATH: '/usr/bin:/bin', HOME: dir, TMPDIR: dir, LANG: 'C.UTF-8', NO_COLOR: '1', TZ: this.tz,
       // the transpiler cache would be shared state between jobs (and lives outside the job dir)
       BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
     }
-    if (prewarm) env.WORKER_PREWARM = '1'
+    if (prewarm && this.preloadShell) env.WORKER_PREWARM = '1'
+    if (!this.preloadShell) env.WORKER_PRELOAD = '0'
     try {
       const w = new Worker(argv, dir, env, this.ids, (gone) => {
         this.live.delete(gone)
@@ -715,30 +761,65 @@ export class Executor {
 
 // ---------- module-level convenience ----------
 
+const env = (k: string) => process.env[`${ENV_PREFIX}_${k}`]
+const envInt = (k: string): number | undefined => { const v = Number(env(k)); return env(k) && Number.isInteger(v) && v >= 0 ? v : undefined }
+/** Admission limits from the environment (<PREFIX>_WORKERS_GLOBAL, _WORKERS_PER_TOKEN, _WORKERS_PER_PERSON, _WORKERS_QUEUE). */
+function envLimits(prefix: string): Partial<SchedulerLimits> {
+  const out: Partial<SchedulerLimits> = {}
+  const set = (k: keyof SchedulerLimits, name: string) => { const v = envInt(`${prefix}_${name}`); if (v !== undefined && (v > 0 || k === 'maxQueuedPerToken')) out[k] = v }
+  set('global', 'GLOBAL'); set('perToken', 'PER_TOKEN'); set('perPerson', 'PER_PERSON'); set('maxQueuedPerToken', 'QUEUE')
+  return out
+}
+const envBase = (): ExecutorConfig => ({
+  isolation: (env('ISOLATION') as Isolation | 'auto' | undefined) ?? 'auto',
+  requireIsolation: env('REQUIRE_ISOLATION') !== '0',
+  runAs: env('WORKER_USER') ?? null,
+})
+
 let shared: Executor | null = null
-/** The process-wide executor, configured from the environment (<PREFIX>_ISOLATION, _REQUIRE_ISOLATION, _WORKER_USER, _WORKERS_WARM). */
+/**
+ * The process-wide executor for shell commands, configured from the environment (<PREFIX>_ISOLATION, _REQUIRE_ISOLATION,
+ * _WORKER_USER, _WORKERS_WARM, _WORKER_REUSE, and the admission limits _WORKERS_GLOBAL / _PER_TOKEN / _PER_PERSON / _QUEUE).
+ */
 export function defaultExecutor(): Executor {
-  if (!shared) {
-    const env = (k: string) => process.env[`${ENV_PREFIX}_${k}`]
-    shared = new Executor({
-      isolation: (env('ISOLATION') as Isolation | 'auto' | undefined) ?? 'auto',
-      requireIsolation: env('REQUIRE_ISOLATION') !== '0',
-      runAs: env('WORKER_USER') ?? null,
-      warm: env('WORKERS_WARM') ? Number(env('WORKERS_WARM')) : undefined,
-      reuse: env('WORKER_REUSE') === '0' ? false : undefined,
-    })
-  }
+  shared ??= new Executor({
+    ...envBase(),
+    warm: envInt('WORKERS_WARM'),
+    reuse: env('WORKER_REUSE') === '0' ? false : undefined,
+    limits: envLimits('WORKERS'),
+  })
   return shared
 }
 
+let sharedExtract: Executor | null = null
 /**
- * Closes the process-wide executor if one was started (its warm workers are killed and their job dirs removed), so a
- * one-shot process such as `cli sh` can exit. The next defaultExecutor() call starts a new one.
+ * The process-wide executor for document extraction. Separate from the shell's: a shell command that reads an office
+ * file holds a shell slot while it waits for the text, so extraction must not queue behind shell jobs (that would
+ * deadlock until the deadline). One job per process, never reused; workers do not load the shell engine.
+ * Environment: the same isolation settings, <PREFIX>_EXTRACT_WARM (default 1) and _EXTRACT_GLOBAL / _PER_TOKEN /
+ * _PER_PERSON / _QUEUE (defaults: half the CPUs, 2, 3, 256).
+ */
+export function extractExecutor(): Executor {
+  const cpus = os.availableParallelism?.() ?? os.cpus().length
+  sharedExtract ??= new Executor({
+    ...envBase(),
+    warm: envInt('EXTRACT_WARM') ?? 1,
+    reuse: false,
+    preloadShell: false,
+    limits: { global: Math.max(2, Math.floor(cpus / 2)), perToken: 2, perPerson: 3, maxQueuedPerToken: 256, ...envLimits('EXTRACT') },
+  })
+  return sharedExtract
+}
+
+/**
+ * Closes the process-wide executors that were started (their warm workers are killed and their job dirs removed), so a
+ * one-shot process such as `cli sh` can exit. The next defaultExecutor() / extractExecutor() call starts a new one.
  */
 export async function closeDefaultExecutor() {
-  const ex = shared
+  const ex = [shared, sharedExtract]
   shared = null
-  await ex?.close()
+  sharedExtract = null
+  await Promise.all(ex.map((e) => e?.close()))
 }
 
 /** Kills the workers the process-wide executor keeps for this token (no-op when it was never started). */

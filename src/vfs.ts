@@ -41,6 +41,7 @@ const eisdir = (syscall: string, p: string) => new FsError('EISDIR', `EISDIR: il
 const enotdir = (syscall: string, p: string) => new FsError('ENOTDIR', `ENOTDIR: not a directory, ${syscall} '${p}'`, p)
 const eexist = (syscall: string, p: string) => new FsError('EEXIST', `EEXIST: file already exists, ${syscall} '${p}'`, p)
 const eio = (syscall: string, p: string) => new FsError('EIO', `EIO: input/output error, ${syscall} '${p}'`, p)
+const MB = (n: number) => `${Math.round(n / (1024 * 1024))} MB`
 
 /** Where unexpected errors inside the VFS are reported (server log; tests replace it). */
 export let reportInternal = (where: string, p: string, e: unknown) => console.error(`[vfs] ${where} '${p}':`, e)
@@ -93,6 +94,22 @@ const encOf = (o?: WriteFileOptions | ReadFileOptions | BufferEncoding | null) =
 
 export class VirtualFs implements IFileSystem {
   constructor(readonly s: Session) {}
+
+  /**
+   * Content bytes this call has read (one VirtualFs per call). Each file is checked against LIMITS.fileBytes and the
+   * call against LIMITS.callReadBytes before anything is read into this process, so a command over many large files is
+   * refused (EFBIG) instead of buffering them here. Only files the token may read count: a hidden or nonexistent path
+   * never reaches this check and answers ENOENT as before. Shell commands print every read error as "No such file or
+   * directory", so the reason also goes to the call's notes (stderr).
+   */
+  private readTotal = 0
+  private charge(n: number, p: string) {
+    const why = n > LIMITS.fileBytes ? `file too large to read (one file may be at most ${MB(LIMITS.fileBytes)})`
+      : this.readTotal + n > LIMITS.callReadBytes ? `not read: one command may read at most ${MB(LIMITS.callReadBytes)} of files (this one had read ${MB(this.readTotal)})`
+        : null
+    if (why) { this.s.notes.add(`${p}: ${why}`); throw new FsError('EFBIG', `EFBIG: ${why}, open '${p}'`, p) }
+    this.readTotal += n
+  }
 
   // ---------- resolution ----------
   /** What a virtual path is for this call, or null when it is not there for this token (hidden or nonexistent). */
@@ -165,18 +182,32 @@ export class VirtualFs implements IFileSystem {
       // just-bash's in-memory /bin /proc /dev throw plain Errors; callers (the read tool) expect FsError
       return sysCall(() => sys().readFileBuffer(h.p), 'open', p)
     }
-    if (h.t === 'draft') { this.s.touchDraft(h.item, !m.weak); return this.s.draftContent(h.item) }
+    if (h.t === 'draft') {
+      this.charge(h.item.pending?.length ?? h.item.draft!.size, p)
+      this.s.touchDraft(h.item, !m.weak)
+      return this.s.draftContent(h.item)
+    }
     if (h.t !== 'file') throw eisdir('read', p)
     const f = h.f
     try {
       let bytes: Uint8Array
-      if (h.raw || m.raw || !isOffice(f.name)) bytes = this.s.access.readBytes(f, LIMITS.fileBytes)
-      else { bytes = await this.s.ctx.mirror.text(this.s.access, f); this.s.extracted.add(f.vpath) }
+      if (h.raw || m.raw || !isOffice(f.name)) {
+        this.charge(f.size, p)
+        bytes = this.s.access.readBytes(f, LIMITS.fileBytes)
+        this.readTotal += bytes.length - f.size // the file changed size since the listing
+      } else {
+        bytes = await this.s.ctx.mirror.text(this.s.access, f, { token: String(this.s.token.id), person: String(this.s.token.person_id) }, (n) => this.charge(n, p))
+        this.s.extracted.add(f.vpath)
+      }
       this.s.touchFile(f, !m.weak)
       return bytes
     } catch (e) {
       if (e instanceof Closed) throw enoent('open', p)
-      if (e instanceof ExtractError) { this.s.touchFile(f, false); throw new FsError('EIO', e.message, p) }
+      if (e instanceof ExtractError) {
+        this.s.touchFile(f, false)
+        this.s.notes.add(`${f.vpath}: ${e.message} (original bytes: /.raw${f.vpath})`)
+        throw new FsError('EIO', e.message, p)
+      }
       throw e
     }
   }
@@ -261,6 +292,8 @@ export class VirtualFs implements IFileSystem {
     const base = append && h?.t === 'draft' ? this.s.draftContent(h.item) : new Uint8Array()
     const content = append ? Buffer.concat([base, bytes]) : bytes
     if (content.length > LIMITS.draftBytes) throw new FsError('EFBIG', `EFBIG: file too large (drafts are limited to ${LIMITS.draftBytes} bytes), open '${p}'`, p)
+    const quota = this.s.draftQuotaRefusal(rel, content.length)
+    if (quota) { this.s.notes.add(quota); throw new FsError('EDQUOT', `EDQUOT: ${quota}`, p) }
     this.s.pending.set(rel, content)
     this.s.files.add('/drafts/' + rel)
   }

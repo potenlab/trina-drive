@@ -1,5 +1,6 @@
 // Text of office documents for cat/grep/read. Plain files are used as they are.
-// Converters get bytes (never a path): pdftotext reads stdin, the rest is in-process TypeScript with output caps.
+// Converters get bytes (never a path): pdftotext reads stdin, the rest is TypeScript with output caps. The server runs
+// them only in an isolated worker (run.ts); this module is what the worker loads.
 import fs from 'node:fs'
 import path from 'node:path'
 import { ext } from '../names'
@@ -28,16 +29,22 @@ function findTool(name: string): string | null {
   return null
 }
 
-/** Extracted text ends with a newline (so `cat a.docx b.pdf` keeps files apart). */
-export async function extractText(name: string, bytes: Uint8Array): Promise<string> {
-  const t = await extractRaw(name, bytes)
+/** Tool paths the server passes to an isolated worker (whose environment and PATH it does not share). */
+export interface ExtractOptions { pdftotext?: string }
+
+/**
+ * Extracted text ends with a newline (so `cat a.docx b.pdf` keeps files apart). This parses untrusted documents: the
+ * server calls it in an isolated worker (src/extract/run.ts), never in its own process.
+ */
+export async function extractText(name: string, bytes: Uint8Array, opts: ExtractOptions = {}): Promise<string> {
+  const t = await extractRaw(name, bytes, opts)
   return t && !t.endsWith('\n') ? t + '\n' : t
 }
 
-async function extractRaw(name: string, bytes: Uint8Array): Promise<string> {
+async function extractRaw(name: string, bytes: Uint8Array, opts: ExtractOptions): Promise<string> {
   try {
     switch (ext(name)) {
-      case 'pdf': return await pdfText(bytes)
+      case 'pdf': return await pdfText(bytes, opts.pdftotext && path.isAbsolute(opts.pdftotext) ? opts.pdftotext : TOOLS.pdftotext)
       case 'docx': return docxText(bytes)
       case 'pptx': return pptxText(bytes)
       case 'xlsx': return xlsxText(bytes)
@@ -51,9 +58,9 @@ async function extractRaw(name: string, bytes: Uint8Array): Promise<string> {
   }
 }
 
-async function pdfText(bytes: Uint8Array): Promise<string> {
-  if (!TOOLS.pdftotext) throw new ExtractError('pdftotext is not installed on the server')
-  const p = Bun.spawn([TOOLS.pdftotext, '-layout', '-enc', 'UTF-8', '-', '-'], { stdin: bytes, stdout: 'pipe', stderr: 'pipe', env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' } })
+async function pdfText(bytes: Uint8Array, pdftotext: string | null): Promise<string> {
+  if (!pdftotext) throw new ExtractError('pdftotext is not installed on the server')
+  const p = Bun.spawn([pdftotext, '-layout', '-enc', 'UTF-8', '-', '-'], { stdin: bytes, stdout: 'pipe', stderr: 'pipe', env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' } })
   const timer = setTimeout(() => p.kill('SIGKILL'), 20_000)
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited])
   clearTimeout(timer)

@@ -4,7 +4,7 @@ import path from 'node:path'
 import { defaultExecutor, type CommandResult, type Executor, type FsBackend, type RunOptions, type RunResult, type ShellHooks } from './pool'
 import type { ShellJob } from './protocol'
 
-export { closeDefaultExecutor, defaultCodePaths, discardKept, defaultExecutor, Executor, runIsolated, setBackendErrorHandler, toolReadPaths } from './pool'
+export { closeDefaultExecutor, defaultCodePaths, discardKept, defaultExecutor, Executor, extractExecutor, runIsolated, setBackendErrorHandler, toolReadPaths } from './pool'
 export type { BackendDirent, BackendStat, CommandResult, ExecutorConfig, FsBackend, JobLimits, RunOptions, RunResult, RunStats, RunStatus, ShellHooks } from './pool'
 export { PROTOCOL_VERSION } from './protocol'
 export type { ExtractJob, JobSpec, ShellJob } from './protocol'
@@ -56,13 +56,13 @@ export const DEFAULT_EXTRACTOR = path.resolve(import.meta.dir, '../extract/index
 export async function extractIsolated(
   input: string | Uint8Array,
   kind: string,
-  opts: Common & { module?: string; fn?: string },
+  opts: Common & { module?: string; fn?: string; options?: Record<string, string> },
 ): Promise<{ status: RunResult['status']; text?: string; error?: string; run: RunResult }> {
   const name = kind.includes('.') ? kind : `document.${kind}`
   const module = opts.module ?? DEFAULT_EXTRACTOR
   const byPath = typeof input === 'string'
   const run = await (opts.executor ?? defaultExecutor()).run(
-    { kind: 'extract', module, fn: opts.fn, name, path: byPath ? fs.realpathSync(input) : undefined },
+    { kind: 'extract', module, fn: opts.fn, name, path: byPath ? fs.realpathSync(input) : undefined, options: opts.options },
     { ...opts, body: byPath ? undefined : input, readPaths: byPath ? [input] : undefined },
   )
   if (run.status === 'ok') return { status: 'ok', text: new TextDecoder().decode(run.body ?? new Uint8Array()), run }

@@ -112,3 +112,10 @@ export function procargs(name: string): string {
 export function signal(name: string): string {
   try { process.kill(Number(name), 0); return 'SIGNAL-OK' } catch (e) { return `SIGNAL-BLOCKED ${(e as NodeJS.ErrnoException).code}` }
 }
+
+/** Asks the parent for `name` (a count) reads of /big at once, then never reads its stdin again (a busy loop). */
+export async function readFlood(name: string): Promise<string> {
+  const { encodeFrame } = await import('../../src/worker/protocol')
+  for (let i = 0; i < Number(name); i++) fs.writeSync(1, encodeFrame({ t: 'fs', id: 7000 + i, op: 'read', args: ['/big'] }))
+  for (;;) { /* never read the replies */ }
+}

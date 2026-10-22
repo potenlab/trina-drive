@@ -41,6 +41,8 @@ export interface ExtractJob {
   name: string
   /** Read this path inside the worker (it must be read-granted); otherwise the bytes are the frame body. */
   path?: string
+  /** Passed to the extractor as its third argument (JSON), e.g. { pdftotext: '/opt/homebrew/bin/pdftotext' }. */
+  options?: Record<string, string>
 }
 
 export type JobSpec = ShellJob | ExtractJob

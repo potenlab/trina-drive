@@ -170,6 +170,13 @@ What the shell sees:
 | `/drafts/` | this token's drafts (writable, `.md`/`.csv`/text only); other tokens' visible drafts under `/drafts/@<token>/` (read-only) |
 | any other write | refused: "Originals are read-only. Write to /drafts/ and a person will move it." |
 
+Limits per call and per token (`src/config.ts` `LIMITS`): a file read is at most 64 MB and one call reads at most
+128 MB of files in all (beyond: `EFBIG`, with the reason on stderr; nothing is read into the server first); a draft is
+at most 8 MB; live drafts are at most 500 files / 200 MB per token and 1 GB per person (`EDQUOT`; env
+`SHELF_DRAFT_MAX_FILES`, `SHELF_DRAFT_MAX_BYTES`, `SHELF_DRAFT_PERSON_MAX_BYTES`; writes that do not grow a draft
+always pass); commands run at most 2 per token, 3 per person and CPUs − 2 overall at once (`SHELF_WORKERS_*`, see
+[docs/worker.md](docs/worker.md)).
+
 ## Permission model (summary of plan §4.1, as implemented)
 
 `src/policy.ts` is the only place that decides reads; shell, read tool, grep, mirror and drafts all go through it,
@@ -277,7 +284,7 @@ src/names.ts       NFC, system names, office extensions     src/grep.ts     grep
 src/mirror.ts      text mirror keyed by content sha256      src/shell.ts    Bash instance, read modes, caps
 src/drafts.ts      draft box, versions, R4                  src/tools.ts    the five MCP tools
 src/audit.ts       hash-chained audit log                   src/mcp.ts      POST /mcp endpoint
-src/extract/       pdf (pdftotext), docx/xlsx/pptx, hwpx, hwp (own CFB reader), zip
+src/extract/       pdf (pdftotext), docx/xlsx/pptx, hwpx, hwp (own CFB reader), zip; run.ts = always in an isolated worker
 src/rights.ts      R5/R7/R9 admin-side decisions            src/web/        REST API, sessions, mail, notices, server
 web/               the admin app (Vite + React, en/ko)
 src/samples.ts     generated sample office files            src/demo.ts     demo seed       src/cli.ts  CLI
@@ -290,9 +297,14 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
 
 ## Known limits
 
-- Shell commands run in the isolated executor (sandboxed worker processes, one token per process; see
-  [docs/worker.md](docs/worker.md)); `SHELF_SHELL=inprocess` runs just-bash in the server process (development only).
-  ripgrep and pdftotext are child processes of the server with timeouts and output caps but no sandbox.
+- Shell commands and document text extraction (on demand and in the reconciler's queue) run in the isolated executor
+  (sandboxed worker processes; see [docs/worker.md](docs/worker.md)); without OS isolation both are refused.
+  `SHELF_SHELL=inprocess` / `SHELF_EXTRACT=inprocess` run just-bash / the parsers in the server process (development
+  and tests only). pdftotext runs inside a PDF's extraction worker; ripgrep is a child process of the server with a
+  timeout and output caps but no sandbox.
+- The draft quota is checked when a call writes, against what is committed: two calls of one token running at once
+  can each pass it (by at most what those calls write). just-bash prints every read error as "No such file or
+  directory"; the real reason (too large, cannot extract) is added to stderr as a `shelf:` note.
 - just-bash lets some redirect failures (`echo x > /경영/a`) escape `exec()`; the server reports them like bash does
   (`bash: <path>: …`) but the rest of that command line does not run.
 - `mkdir` inside `/drafts/` lasts only for the call (drafts are files; folders come from their paths). `/tmp` does not
@@ -356,5 +368,7 @@ bun run test:fuzz        # path/argument fuzzer, 60 s; --seconds N --seed S (or 
 `test/security/` (plan 7.1, 7.4; review-permissions 7): `matrix` (entrances × roles × cases from 4.1), `existence`
 (hidden = nonexistent, byte for byte, plus timing p50/p95; `SHELF_TIMING_RUNS`), `fuzz` (canaries in every forbidden
 file, hidden names, originals unchanged, no crash, deadline, no server paths), `resource` (shell attacks bounded; another
-token's `ls` p99 < 200 ms — the in-process cases are `test.failing` until the worker sandbox), `mcp-protocol`, `links`,
-`tools`. Parts owned by features not built yet are `test.todo` with the owner in the name.
+token's `ls` p99 < 200 ms; per-call read caps, draft quota, concurrent command limits), `mcp-protocol`, `links`,
+`tools`. `test/extract-isolation.test.ts`: malicious documents (zip bombs, a parser that never returns, a huge
+allocation) killed in their extraction worker. Parts owned by features not built yet are `test.todo` with the owner in
+the name.

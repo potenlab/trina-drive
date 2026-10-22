@@ -149,7 +149,7 @@ async function collect(vfs: VirtualFs, o: Opts, flavor: Flavor, cwd: string): Pr
     }
     if (h.t === 'file') {
       const f = h.f
-      targets.push({ vpath, textPath: () => s.ctx.mirror.textPath(s.access, f), touch: (strong) => s.touchFile(f, strong), recheck: () => s.access.recheck(f) })
+      targets.push({ vpath, textPath: () => s.ctx.mirror.textPath(s.access, f, { token: String(s.token.id), person: String(s.token.person_id) }), touch: (strong) => s.touchFile(f, strong), recheck: () => s.access.recheck(f) })
     } else if (h.t === 'draft') {
       const item = h.item
       targets.push({ vpath, textPath: async () => s.ctx.blobs.path(item.pending ? s.ctx.blobs.put(item.pending) : item.draft!.sha256), touch: (strong) => s.touchDraft(item, strong), recheck: () => {} })

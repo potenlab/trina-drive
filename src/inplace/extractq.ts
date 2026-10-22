@@ -1,14 +1,14 @@
 // Background reading of originals the reconciler found new or changed: hash, text extraction into the mirror,
 // widened-draft matching. Small files first, a fixed number at a time.
 import fs from 'node:fs'
-import { extractText } from '../extract'
+import { extractDocument, INDEX_WHO } from '../extract/run'
 
 /**
- * The one call that turns original bytes into text for the index. Another stream moves extraction into an isolated
- * worker: swap the body of this function, nothing else here calls an extractor.
+ * The one call that turns original bytes into text for the index: in an isolated worker (extract/run.ts), with the
+ * bytes this process read with its own no-follow checks. Nothing else here calls an extractor.
  */
 export async function extractForIndex(name: string, bytes: Uint8Array): Promise<string> {
-  return extractText(name, bytes)
+  return extractDocument(name, bytes, INDEX_WHO)
 }
 
 export class IdentityChanged extends Error {}

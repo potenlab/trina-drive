@@ -31,6 +31,11 @@ export class FairScheduler {
     return { running: this.running, queued }
   }
 
+  /** Jobs running now per token and per person (monitoring, tests). */
+  get runningBy() {
+    return { token: Object.fromEntries(this.byToken), person: Object.fromEntries(this.byPerson) }
+  }
+
   /** Jobs this token is running now. */
   runningFor(token: string) { return this.byToken.get(token) ?? 0 }
 
