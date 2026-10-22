@@ -6,7 +6,7 @@
 // Hidden and nonexistent give the same answer everywhere: the policy simply returns nothing for both.
 import { AsyncLocalStorage } from 'node:async_hooks'
 import path from 'node:path'
-import { Bash, InMemoryFs, type BufferEncoding, type ByteString, type CpOptions, type FileContent, type FsStat, type IFileSystem, type MkdirOptions, type RmOptions } from 'just-bash'
+import { Bash, getCommandNames, InMemoryFs, type BufferEncoding, type CommandName, type ByteString, type CpOptions, type FileContent, type FsStat, type IFileSystem, type MkdirOptions, type RmOptions } from 'just-bash'
 
 type DirentEntry = { name: string; isFile: boolean; isDirectory: boolean; isSymbolicLink: boolean }
 type ReadFileOptions = { encoding?: BufferEncoding | null }
@@ -41,10 +41,15 @@ const eexist = (syscall: string, p: string) => new FsError('EEXIST', `EEXIST: fi
 const SYSTEM_DIRS = new Set(['bin', 'usr', 'dev', 'proc'])
 export const RESERVED = new Set([...SYSTEM_DIRS, 'drafts', '.raw', 'tmp', 'home'])
 
+/** Commands the plan keeps out of the shell (5.1: no real processes, network, ln, python, sqlite3, curl). */
+const EXCLUDED_COMMANDS = new Set(['sqlite3'])
+/** Built-in just-bash commands the agent shell offers (network, python and js are off unless configured). */
+export const SHELL_COMMANDS = getCommandNames().filter((n) => !EXCLUDED_COMMANDS.has(n)) as CommandName[]
+
 let sysFs: InMemoryFs | null = null
 /** In-memory /bin, /usr/bin, /dev, /proc as just-bash lays them out (it looks commands up there). */
 function sys(): InMemoryFs {
-  if (!sysFs) { sysFs = new InMemoryFs(); new Bash({ fs: sysFs }) }
+  if (!sysFs) { sysFs = new InMemoryFs(); new Bash({ fs: sysFs, commands: SHELL_COMMANDS }) }
   return sysFs
 }
 

@@ -4,7 +4,7 @@ import { Bash, defineCommand, type Command } from 'just-bash'
 import { LIMITS, NAME } from './config'
 import { grepCommands } from './grep'
 import type { Session } from './session'
-import { commandMode, FsError, VirtualFs, type Mode } from './vfs'
+import { commandMode, FsError, SHELL_COMMANDS, VirtualFs, type Mode } from './vfs'
 
 export interface ShellResult { stdout: string; stderr: string; exitCode: number }
 
@@ -39,7 +39,7 @@ function cap(s: string, max: number, what: string): string {
 export async function runShell(s: Session, command: string): Promise<ShellResult> {
   const vfs = new VirtualFs(s)
   const bash = new Bash({
-    fs: vfs, cwd: '/',
+    fs: vfs, cwd: '/', commands: SHELL_COMMANDS,
     env: { HOME: '/drafts', PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', USER: 'agent' },
     customCommands: [...grepCommands(vfs), ...modeWrappers()],
     executionLimitProfile: 'hardened',

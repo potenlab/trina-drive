@@ -25,3 +25,17 @@ describe('shell on just-bash pseudo folders', () => {
     expect(typeof r.exitCode).toBe('number')
   })
 })
+
+describe('command set (plan 5.1: no real processes, network, ln, python, sqlite3, curl)', () => {
+  test.each([['sqlite3 :memory: "select 1"'], ['python3 -c 1'], ['python -c 1'], ['node -e 1'], ['js-exec 1'], ['curl http://127.0.0.1/'], ['wget http://127.0.0.1/']])('%s is not available', async (c) => {
+    const r = await e.sh('kim', c)
+    expect(r.exitCode).toBe(127)
+    expect(r.stdout).toBe('')
+  })
+  test('ln is refused', async () => {
+    expect((await e.sh('kim', 'ln -s /공용/c.md /drafts/l; ln /공용/c.md /drafts/h')).stderr).toContain('Links are not supported')
+  })
+  test('sqlite3 is not listed in /bin', async () => {
+    expect((await e.sh('kim', 'ls /bin')).stdout.split('\n')).not.toContain('sqlite3')
+  })
+})
