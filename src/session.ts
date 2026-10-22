@@ -5,6 +5,7 @@ import type { DB } from './db'
 import { appendAudit } from './audit'
 import { LIMITS } from './config'
 import { Blobs, canSeeDraft, draftRel, liveDrafts, type Draft } from './drafts'
+import { inheritedSources } from './inplace/closures'
 import { Mirror } from './mirror'
 import { Access, type FileEntry, type Node } from './policy'
 import { ensureFolder, identityKey, type TokenRow } from './store'
@@ -30,6 +31,7 @@ export class Session {
   readonly pending = new Map<string, Uint8Array | null>()
   readonly pendingDirs = new Set<string>()
   private stored: Draft[] | null = null
+  private inherited: Map<string, Map<number, boolean>> | null = null
 
   constructor(readonly ctx: Ctx, readonly token: TokenRow, readdir?: (p: string) => string[]) {
     this.access = Access.forToken(ctx.db, token, readdir)
@@ -43,7 +45,13 @@ export class Session {
     const t = this.folderTouches.get(k)
     if (!t || (strong && !t.strong)) this.folderTouches.set(k, { node, strong: strong || !!t?.strong })
   }
-  touchFile(f: FileEntry, strong: boolean) { this.touchNode(f.parent, strong); this.files.add(f.vpath) }
+  touchFile(f: FileEntry, strong: boolean) {
+    this.touchNode(f.parent, strong)
+    this.files.add(f.vpath)
+    // a NAS copy of a draft (R6, tracked or confirmed) passes the draft's sources on to whoever reads it
+    this.inherited ??= inheritedSources(this.ctx.db)
+    for (const [id, s] of this.inherited.get(identityKey(f.dev, f.ino)) ?? []) this.srcTouches.set(id, (strong && s) || !!this.srcTouches.get(id))
+  }
   /** Reading a draft brings its sources into this token's window. */
   touchDraft(item: DraftItem, strong: boolean) {
     this.files.add('/drafts/' + item.rel)

@@ -7,6 +7,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { DB } from './db'
+import { loadClosures, type Closures } from './inplace/closures'
+import { sniffLink, SNIFF_BYTES } from './inplace/linkish'
 import { isSystemName, nfc, nfcCollisions } from './names'
 import { identityKey, type FolderRow, type RuleRow, type TokenRow } from './store'
 
@@ -24,6 +26,10 @@ export interface DirEntry { kind: 'dir'; node: Node }
 export type Entry = FileEntry | DirEntry
 
 export class Closed extends Error {}
+
+/** Called with the real path when a re-check (⑦) fails, so the reconciler can look at that folder again right away. */
+let recheckFailed: ((real: string) => void) | null = null
+export function onRecheckFailure(fn: ((real: string) => void) | null) { recheckFailed = fn }
 
 type Readdir = (real: string) => string[]
 
@@ -53,6 +59,8 @@ export class Access {
   private readonly listCache = new Map<string, { names: string[]; collide: Set<string> } | null>()
   private readonly visibleCache = new Map<string, boolean>()
   private mountMap: Map<string, FolderRow> | null = null
+  /** reconciler findings: closed identities (R1 ⑤, R6, R10) and paths of lost rule-bearing folders */
+  private readonly closures: Closures
 
   constructor(readonly db: DB, principal: { personId: number; token?: TokenRow }, private readonly readdir: Readdir = (p) => fs.readdirSync(p)) {
     this.personId = principal.personId
@@ -61,6 +69,7 @@ export class Access {
     this.scope = scope ? new Set(JSON.parse(scope) as number[]) : null
     for (const f of db.query<FolderRow, []>('SELECT * FROM folders').all()) { this.byIdentity.set(identityKey(f.dev, f.ino), f); this.byId.set(f.id, f) }
     for (const r of db.query<RuleRow, []>('SELECT * FROM rules').all()) this.rules.set(r.folder_id, [...(this.rules.get(r.folder_id) ?? []), r])
+    this.closures = loadClosures(db)
   }
 
   static forToken(db: DB, token: TokenRow, readdir?: Readdir) { return new Access(db, { personId: token.person_id, token }, readdir) }
@@ -120,6 +129,7 @@ export class Access {
     let st: fs.BigIntStats
     try { st = fs.lstatSync(row.path, { bigint: true }) } catch { return null }
     if (!st.isDirectory() || st.isSymbolicLink() || identityKey(st.dev, st.ino) !== identityKey(row.dev, row.ino)) return null
+    if (this.closures.identities.has(identityKey(st.dev, st.ino))) return null
     return { real: row.path, vpath: '/' + nfc(row.mount_name!), dev: st.dev, ino: st.ino, rows: [row], parent: null }
   }
 
@@ -141,7 +151,11 @@ export class Access {
     try { st = fs.lstatSync(real, { bigint: true }) } catch { return null }
     const vpath = (parent.vpath === '/' ? '' : parent.vpath) + '/' + nfc(name)
     if (st.isSymbolicLink()) return null
+    const key = identityKey(st.dev, st.ino)
+    if (this.closures.identities.has(key)) return null
     if (st.isDirectory()) {
+      const lost = this.closures.lostPaths.get(real)
+      if (lost !== undefined && lost !== key) return null
       const row = this.byIdentity.get(identityKey(st.dev, st.ino))
       return { kind: 'dir', node: { real, vpath, dev: st.dev, ino: st.ino, rows: row ? [...parent.rows, row] : parent.rows, parent } }
     }
@@ -204,6 +218,7 @@ export class Access {
       const buf = Buffer.alloc(Number(st.size))
       let off = 0
       while (off < buf.length) { const n = fs.readSync(fd, buf, off, buf.length - off, off); if (n <= 0) break; off += n }
+      if (sniffLink(buf.subarray(0, SNIFF_BYTES), off)) throw new Closed() // XSym / alias: a link in a file's clothes
       this.recheck(f)
       return buf.subarray(0, off)
     } finally { fs.closeSync(fd) }
@@ -218,7 +233,10 @@ export class Access {
     try {
       same(f.real, f.dev, f.ino, false)
       for (let n: Node | null = f.parent; n; n = n.parent) same(n.real, n.dev, n.ino, true)
-    } catch (e) { throw e instanceof Closed ? e : new Closed() }
+    } catch (e) {
+      recheckFailed?.(f.parent.real)
+      throw e instanceof Closed ? e : new Closed()
+    }
   }
 
   // ---------- folders by id (drafts R4, widening R5/R6) ----------
@@ -265,16 +283,25 @@ function nasReaders(rows: FolderRow[], everyone: number[]): Set<number> | 'unkno
 }
 
 function readers(db: DB, folderId: number, as: 'target' | 'source'): Set<number> {
+  const node = new Access(db, { personId: -1 }).nodeForFolder(folderId)
+  return readersOfChain(db, node?.rows ?? null, as)
+}
+
+/**
+ * R5 readers of a location given its folder rows from the mount down (as Node.rows). null or no registered row:
+ * unknown, unregistered or vanished, so everyone as a target, nobody as a source. Used by the reconciler (R10) to
+ * judge a location that no longer exists on disk.
+ */
+export function readersOfChain(db: DB, rows: FolderRow[] | null, as: 'target' | 'source'): Set<number> {
   const people = activePeople(db)
   const everyone = people.map((p) => p.id)
-  const a = new Access(db, { personId: -1 })
-  const node = a.nodeForFolder(folderId)
-  // unknown, unregistered or vanished: everyone as a target, nobody as a source
-  if (!node) return new Set(as === 'target' ? everyone : [])
+  if (!rows || !rows.some((r) => r.registered)) return new Set(as === 'target' ? everyone : [])
+  const rules = new Map<number, RuleRow[]>()
+  for (const r of db.query<RuleRow, []>('SELECT * FROM rules').all()) rules.set(r.folder_id, [...(rules.get(r.folder_id) ?? []), r])
   const out = new Set<number>()
-  const aiClosed = as === 'source' && node.rows.some((r) => r.no_ai || r.quarantine)
-  if (!aiClosed) for (const p of people) if (a.level(node, p.id, p.groups) >= 1) out.add(p.id)
-  const nas = nasReaders(node.rows, everyone)
+  const aiClosed = as === 'source' && rows.some((r) => r.no_ai || r.quarantine)
+  if (!aiClosed) for (const p of people) if (effectiveLevel(rows, p.id, p.groups, rules) >= 1) out.add(p.id)
+  const nas = nasReaders(rows, everyone)
   if (nas === 'unknown') { if (as === 'target') everyone.forEach((id) => out.add(id)) }
   else nas.forEach((id) => out.add(id))
   return out

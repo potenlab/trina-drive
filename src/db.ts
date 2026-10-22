@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
+import { INPLACE_SCHEMA } from './inplace/schema'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -66,5 +67,6 @@ export function openDb(dataDir: string): DB {
   const db = new Database(path.join(dataDir, 'store.db'), { create: true, strict: true })
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
   db.exec(SCHEMA)
+  db.exec(INPLACE_SCHEMA)
   return db
 }
