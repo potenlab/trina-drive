@@ -4,8 +4,16 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import fs from 'node:fs'
 import path from 'node:path'
 import { LIMITS } from '../../src/config'
-import { grantManage, registerFolder, setFlag, setRule } from '../../src/store'
+import { confirmWidened, listEvents, listQuarantine, releaseQuarantine } from '../../src/inplace/events'
+import { reconcile } from '../../src/inplace/reconcile'
+import type { FsOps } from '../../src/inplace/walk'
+import { listWidened } from '../../src/inplace/widened'
+import { isWidening } from '../../src/policy'
+import { grantManage, person, registerFolder, setFlag, setRule, sha256 } from '../../src/store'
 import { MSG } from '../../src/vfs'
+import { OutboxMailer } from '../../src/web/mail'
+import * as webOps from '../../src/web/ops'
+import { makeWebCtx } from '../../src/web/server'
 import { textOf } from '../helpers'
 import { ALL_CASES, ROLES, securitySetup, type Role, type SecEnv } from './fixture'
 
@@ -16,6 +24,26 @@ afterAll(() => e.cleanup())
 
 const nx = (vpath: string) => vpath.replace(/[^/]+$/, (b) => 'nx_' + b)
 const can = (role: Role, c: { readers: Role[] }) => c.readers.includes(role)
+const rec = (env: SecEnv, ops?: FsOps) => reconcile(env.db, { dataDir: env.dir, ops })
+const pid = (env: SecEnv, name: string) => person(env.db, name).id
+/** `cat` of a path answers exactly like `cat` of a name that is not there (stdout, stderr with the path masked, exit code). */
+async function closedFor(env: SecEnv, role: string, vpath: string) {
+  const a = await env.sh(role, `cat '${vpath}'`)
+  const b = await env.sh(role, `cat '${nx(vpath)}'`)
+  return { role, vpath, same: { out: a.stdout, err: a.stderr.replaceAll(vpath, 'P'), code: a.exitCode }, missing: { out: b.stdout, err: b.stderr.replaceAll(nx(vpath), 'P'), code: b.exitCode } }
+}
+const expectClosed = async (env: SecEnv, roles: readonly string[], vpath: string) => {
+  for (const role of roles) { const c = await closedFor(env, role, vpath); expect({ role, vpath, got: c.same }).toEqual({ role, vpath, got: c.missing }) }
+}
+/** The admin acting through the web layer (R9 steps that notify and audit). */
+function adminOp(env: SecEnv) {
+  const w = makeWebCtx(env.ctx, { mailer: new OutboxMailer(env.dir, true), webDir: '/nonexistent' })
+  return { w, actor: { personId: pid(env, 'dion'), admin: true }, base: 'http://shelf.test' }
+}
+const noticesOf = (env: SecEnv, name: string, kind: string) =>
+  env.db.query<{ kind: string }, [number, string]>('SELECT kind FROM notices WHERE person_id = ? AND kind = ?').all(pid(env, name), kind)
+/** Paragraphs long enough to count as a draft's content when they reappear on the NAS (R6). */
+const PARAS = Array.from({ length: 4 }, (_, i) => `${i + 1}번 항목: 2026년 3분기 손익 검토 결과 영업이익률은 ${10 + i}.${i}%로 집계되었고 원가 절감 계획 ${i}안을 함께 보고한다.`)
 
 describe.each(ROLES.map((r) => [r]))('reads as %s', (role) => {
   test.each(ALL_CASES.map((c) => [c.key, c]))('%s', async (_k, c) => {
@@ -306,11 +334,127 @@ describe('identity cases that exist on main', () => {
     } finally { env.cleanup() }
   })
 
-  test.todo('renaming a registered folder keeps it open with its rules (R10: same identity) — today it is closed [owner: reconciler]', () => {})
-  test.todo('a folder moved across a rule boundary that widens it is quarantined (R10) [owner: reconciler]', () => {})
-  test.todo('a file whose identity appears at another path in the index is closed (R1 ⑤ file-identity index) [owner: reconciler]', () => {})
-  test.todo('unregister + re-register: old draft sources lock / count as widening (review §7 axis 2) [owner: admin REST]', () => {})
+  test('renaming a registered folder keeps it open with its rules (R10: same identity); until the reconciler has seen it, it is closed', async () => {
+    const env = securitySetup()
+    try {
+      await rec(env)
+      fs.renameSync(env.R('경영'), env.R('경영_2026'))
+      fs.renameSync(env.R('개인_kim'), env.R('개인_kim_old'))
+      await expectClosed(env, ['boss'], '/경영/c.md') // not judged yet: closed, like a name that is not there
+      const r = await rec(env)
+      expect([r.renamed, r.quarantined, r.lost]).toEqual([2, 0, 0])
+      // same mount names, same rules, the sub-folder rule (경영/공개: @전체 read) and the personal owner came along
+      expect((await env.sh('boss', 'cat /경영/c.md /경영/보고.docx')).stdout).toContain(env.canary.get('mgmt')!)
+      expect((await env.sh('boss', 'cat /경영/보고.docx')).stdout).toContain(env.canary.get('mgmtDocx')!)
+      expect((await env.sh('kim', 'cat /경영/공개/c.md')).stdout).toContain(env.canary.get('mgmtPub')!)
+      expect((await env.sh('kim', 'cat /개인_kim/sub/c.md')).stdout).toContain(env.canary.get('personalSub')!)
+      for (const role of ['kim', 'dion', 'lee', 'bossNarrow'] as const) await expectClosed(env, [role], '/경영/c.md')
+      for (const role of ['boss', 'dion', 'lee'] as const) await expectClosed(env, [role], '/개인_kim/c.md')
+      expect(env.db.query<{ path: string }, [string]>('SELECT path FROM folders WHERE mount_name = ?').get('경영')!.path).toBe(env.R('경영_2026'))
+      expect(listEvents(env.db, { kind: 'renamed' }).length).toBeGreaterThanOrEqual(2)
+    } finally { env.cleanup() }
+  })
+
+  test('a folder moved across a rule boundary that widens it is quarantined (R10); one that does not widen keeps its rules', async () => {
+    const env = securitySetup()
+    try {
+      fs.mkdirSync(env.R('인사/면담'))
+      fs.writeFileSync(env.R('인사/면담/m.md'), `INTERVIEW_${env.salt}\n`)
+      await rec(env)
+      expect((await env.sh('lee', 'cat /인사/면담/m.md')).stdout).toBe(`INTERVIEW_${env.salt}\n`)
+      fs.renameSync(env.R('인사/면담'), env.R('프로젝트/면담')) // 인사 (lee) -> 프로젝트 (everyone): wider
+      fs.renameSync(env.R('프로젝트/비공개'), env.R('경영/비공개')) // boss only, NAS all -> boss only, NAS boss: narrower
+      await expectClosed(env, ROLES, '/프로젝트/면담/m.md') // moved since the last walk: closed until judged
+      const r = await rec(env)
+      expect([r.moved, r.quarantined]).toEqual([2, 1])
+      for (const role of ROLES) {
+        const x = await env.sh(role, `grep -r INTERVIEW_ /; ls -a /프로젝트; find / -name 'm.md'`)
+        expect({ role, leak: x.stdout.includes('INTERVIEW_') || x.stdout.includes('면담') }).toEqual({ role, leak: false })
+      }
+      await expectClosed(env, ROLES, '/프로젝트/면담/m.md')
+      const q = listQuarantine(env.db)
+      expect(q.map((x) => [x.kind, x.item, x.path])).toEqual([['moved', 'dir', env.R('프로젝트/면담')]])
+      expect(JSON.parse(listEvents(env.db, { kind: 'quarantined' })[0]!.notify).admins).toEqual([pid(env, 'dion')])
+      // the narrowing move kept the folder's own rule
+      expect((await env.sh('boss', 'cat /경영/비공개/c.md')).stdout).toContain(env.canary.get('projPrivate')!)
+      await expectClosed(env, ['kim', 'dion'], '/경영/비공개/c.md')
+      // only the admin opens the quarantined folder again
+      expect(() => releaseQuarantine(env.db, q[0]!.id, pid(env, 'lee'))).toThrow()
+      releaseQuarantine(env.db, q[0]!.id, pid(env, 'dion'))
+      expect((await env.sh('kim', 'cat /프로젝트/면담/m.md')).stdout).toBe(`INTERVIEW_${env.salt}\n`)
+    } finally { env.cleanup() }
+  })
+
+  test('a file whose identity appears at another path in the index is closed (R1 ⑤ file-identity index)', async () => {
+    const env = securitySetup()
+    try {
+      await rec(env)
+      // renamed outside since the last walk: the index has its identity at the old path, so the new path is closed until judged
+      fs.renameSync(env.R('공용/c.md'), env.R('공용/c2.md'))
+      await expectClosed(env, ['kim', 'dion'], '/공용/c2.md')
+      expect((await env.sh('kim', 'grep -r CANARY_pub_ /공용')).stdout).toBe('')
+      await rec(env)
+      expect((await env.sh('kim', 'cat /공용/c2.md')).stdout).toContain(env.canary.get('pub')!) // a rename keeps it open
+      // one identity under two paths at once (a bind mount, a NAS-side clone; simulated: APFS has no such thing for files)
+      const twin = env.R('프로젝트/twin.md')
+      const ops: FsOps = {
+        readdir: async (d) => d === env.R('프로젝트') ? [...await fs.promises.readdir(d), 'twin.md'] : fs.promises.readdir(d),
+        lstat: (p) => fs.promises.lstat(p === twin ? env.R('공용/c2.md') : p, { bigint: true }),
+      }
+      await rec(env, ops)
+      const ev = listEvents(env.db, { kind: 'closed' }).map((x) => JSON.parse(x.detail)).find((d) => d.reason === 'shared_identity')
+      expect(ev.paths.sort()).toEqual([env.R('공용/c2.md'), twin].sort())
+      // with the plain listing (no twin to be seen), the file is still closed by its identity
+      await expectClosed(env, ['kim', 'dion', 'boss'], '/공용/c2.md')
+      expect((await env.sh('kim', 'grep -r CANARY_pub_ /; ls /공용')).stdout).not.toMatch(/CANARY_pub_|c2\.md/)
+    } finally { env.cleanup() }
+  })
+
+  test('unregister + re-register: old draft sources lock / count as widening (review §7 axis 2)', async () => {
+    const env = securitySetup()
+    try {
+      await rec(env)
+      env.addToken('bossD', 'boss', { name: 'boss-d' })
+      await env.sh('bossD', 'cat /경영/c.md > /dev/null')
+      const content = PARAS.join('\n\n') + '\n'
+      await env.tool('bossD', 'write', { path: '/drafts/d.md', content })
+      const mgmt = env.folderId('경영')
+      const op = adminOp(env)
+      const see = async () => (await env.sh('bossD', 'ls /drafts; cat /drafts/d.md')).stdout
+      expect(await see()).toBe('d.md\n' + content)
+
+      // unregistered: the source is nowhere, so the draft is locked and putting it anywhere widens
+      await webOps.unregisterFolder(op, mgmt)
+      expect(await see()).toBe('')
+      expect(isWidening(env.db, [mgmt], env.folderId('공용'))).toBe(true)
+      expect(isWidening(env.db, [mgmt], env.folderId('인사'))).toBe(true)
+      fs.writeFileSync(env.R('공용/d.md'), content) // a copy shows up on the NAS meanwhile
+      await rec(env)
+      expect(listWidened(env.db).map((w) => [path.basename(w.path), w.status])).toEqual([['d.md', 'pending']])
+
+      // registered again (same identity, its rules kept): the draft is judged by the rules now (R4); the copy stays pending (R6: never erased)
+      await webOps.registerFolder(op, { path: env.R('경영'), template: 'custom', nas: { mode: 'chosen', people: [pid(env, 'boss')] } })
+      expect(await see()).toBe('d.md\n' + content)
+      await rec(env)
+      expect(listWidened(env.db).map((w) => w.status)).toEqual(['pending'])
+      await expectClosed(env, ['kim', 'boss'], '/공용/d.md')
+
+      // the folder deleted and made again under the same name is another identity: the old source stays locked and widening
+      await webOps.unregisterFolder(op, mgmt)
+      fs.renameSync(env.R('경영'), env.R('경영.bak'))
+      fs.mkdirSync(env.R('경영'))
+      fs.writeFileSync(env.R('경영/n.md'), 'NEW\n')
+      const again = await webOps.registerFolder(op, { path: env.R('경영'), template: 'custom', nas: { mode: 'chosen', people: [pid(env, 'boss')] } })
+      setRule(env.db, env.R('경영'), 'boss', 'read')
+      expect(again.id).not.toBe(mgmt)
+      expect((await env.sh('bossD', 'cat /경영/n.md')).stdout).toBe('NEW\n')
+      expect(await see()).toBe('')
+      expect(isWidening(env.db, [mgmt], again.id)).toBe(true)
+    } finally { env.cleanup() }
+  })
+
   test.todo('a Mac alias file (bookmark data / FinderInfo "alis") is closed like a link (R1 ⑤) [owner: reconciler]', () => {})
+
   test.todo('the text mirror is keyed by (dev, ino, size, mtime): a file rewritten in place with the same size and a reset mtime serves its old text; key by content or re-hash on identity reuse [owner: reconciler / file-identity index]', () => {})
 })
 
@@ -356,7 +500,30 @@ describe('R0: a personal folder is its owner\'s only, whatever sits inside it', 
       expect(kim.stdout).toBe('PERSONAL_broken\nPERSONAL_registered\nPERSONAL_ruled\nPERSONAL_top\n')
     } finally { env.cleanup() }
   })
-  test.todo('re-registering a personal folder as an ordinary one (or another owner) is refused or notifies the owner (R9) — today registerFolder silently clears personal_owner [owner: admin REST / notifications]', () => {})
+  test('re-registering a personal folder as an ordinary one (or for another owner) is refused; releasing it is the admin step that tells the owner and is audited (R9)', async () => {
+    const env = securitySetup()
+    try {
+      const box = env.R('개인_kim')
+      const id = env.folderId('개인_kim')
+      // the store (CLI) refuses any re-registration of it, even for the same owner (its NAS readers are the owner's to set)
+      for (const opts of [{}, { personalOwner: 'boss' }, { nasReaders: 'all' as const, name: '열기' }, { personalOwner: 'kim', nasReaders: 'all' as const }, { personalOwner: 'kim' }]) {
+        expect(() => registerFolder(env.db, box, opts)).toThrow(/personal folder/)
+      }
+      expect(env.db.query('SELECT registered, personal_owner, nas_readers, mount_name FROM folders WHERE id = ?').get(id))
+        .toEqual({ registered: 1, personal_owner: pid(env, 'kim'), nas_readers: JSON.stringify([pid(env, 'kim')]), mount_name: '개인_kim' })
+      expect((await env.sh('kim', 'cat /개인_kim/c.md')).stdout).toContain(env.canary.get('personal')!)
+      await expectClosed(env, ['dion', 'boss'], '/개인_kim/c.md')
+      // the web's "unregister" is the release step: the owner hears of it and it is in the audit
+      const op = adminOp(env)
+      await webOps.unregisterFolder(op, id)
+      expect(noticesOf(env, 'kim', 'personal_folder_changed').length).toBe(1)
+      expect(env.db.query<{ command: string }, []>("SELECT command FROM audit WHERE tool = 'web' ORDER BY id DESC LIMIT 1").get()!.command).toContain('folder unregister')
+      // after it, registering the same identity as an ordinary folder tells the former owner again
+      const r = await webOps.registerFolder(op, { path: box, template: 'custom', nas: { mode: 'chosen', people: [pid(env, 'dion')] } })
+      expect(r.warnings).toContain('former_personal')
+      expect(noticesOf(env, 'kim', 'former_personal_registered').length).toBe(1)
+    } finally { env.cleanup() }
+  })
 })
 
 describe('more rule computation (review §7 axis 1) and window edges (axis 4)', () => {
@@ -412,5 +579,44 @@ describe('more rule computation (review §7 axis 1) and window edges (axis 4)', 
   })
 
   test.todo('"출처 초기화" (provenance reset) needs a fresh login, is audited and notifies the admin (5.1) [owner: admin REST / notifications]', () => {})
-  test.todo('after a widened copy is confirmed, reading it brings Src(d) into the reader\'s window (R6) [owner: reconciler]', () => {})
+  test('after a widened copy is confirmed, reading it brings Src(d) into the reader\'s window (R6); while pending, nobody reads it', async () => {
+    const env = securitySetup()
+    try {
+      await rec(env)
+      env.addToken('bossW', 'boss', { name: 'boss-w' })
+      await env.sh('bossW', 'cat /경영/c.md > /dev/null')
+      const content = '# 메모\n\n' + PARAS.join('\n\n') + '\n'
+      await env.tool('bossW', 'write', { path: '/drafts/memo.md', content })
+      fs.writeFileSync(env.R('공용/memo.md'), content) // a person puts it where everyone reads
+      expect((await rec(env)).widened).toBe(1)
+      const [w] = listWidened(env.db)
+      expect(w!.status).toBe('pending')
+      await expectClosed(env, ROLES, '/공용/memo.md')
+      for (const role of ROLES) expect({ role, out: (await env.sh(role, 'grep -r 영업이익률 /공용')).stdout }).toEqual({ role, out: '' })
+      expect(() => confirmWidened(env.db, w!.id, pid(env, 'kim'))).toThrow()
+      confirmWidened(env.db, w!.id, pid(env, 'dion'))
+
+      const mgmt = env.folderId('경영'), pub = env.folderId('공용')
+      // content out (cat, read tool): strong; only its name or a match count (grep -l): weak
+      env.addToken('kimCat', 'kim', { name: 'kim-cat' })
+      expect((await env.sh('kimCat', 'cat /공용/memo.md')).stdout).toBe(content)
+      await env.tool('kimCat', 'write', { path: '/drafts/a.md', content: 'x' })
+      expect(env.draftSrc('kimCat', 'a.md')).toEqual(new Map([[mgmt, true], [pub, true]]))
+      env.addToken('kimRead', 'kim', { name: 'kim-read' })
+      expect(textOf(await env.tool('kimRead', 'read', { path: '/공용/memo.md' }))).toContain('영업이익률')
+      await env.tool('kimRead', 'write', { path: '/drafts/b.md', content: 'x' })
+      expect(env.draftSrc('kimRead', 'b.md').get(mgmt)).toBe(true)
+      env.addToken('kimGrep', 'kim', { name: 'kim-grep' })
+      expect((await env.sh('kimGrep', 'grep -l 영업이익률 /공용/memo.md')).stdout).toBe('/공용/memo.md\n')
+      await env.tool('kimGrep', 'write', { path: '/drafts/c.md', content: 'x' })
+      expect(env.draftSrc('kimGrep', 'c.md').get(mgmt)).toBe(false)
+      // kim cannot read 경영, so these drafts are locked for every kim token, the writer included (R4)
+      for (const t of ['kimCat', 'kimRead', 'kimGrep', 'kim']) expect({ t, ls: (await env.sh(t, 'ls -a /drafts')).stdout }).toEqual({ t, ls: '.\n..\n' })
+      // a token that never read the copy keeps a clean window
+      env.addToken('kimClean', 'kim', { name: 'kim-clean' })
+      await env.sh('kimClean', 'cat /공용/c.md > /dev/null')
+      await env.tool('kimClean', 'write', { path: '/drafts/d.md', content: 'x' })
+      expect(env.draftSrc('kimClean', 'd.md').has(mgmt)).toBe(false)
+    } finally { env.cleanup() }
+  })
 })
