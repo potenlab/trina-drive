@@ -35,7 +35,8 @@ export async function handleRequest(ctx: Ctx, req: Request, opts: ServerOptions 
 
   const pv = req.headers.get('mcp-protocol-version')
   if (pv && !(SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(pv)) return rpcError(null, -32600, `unsupported MCP-Protocol-Version ${pv}`, 400)
-  if (!(req.headers.get('content-type') ?? '').includes('application/json')) return json({ error: 'content-type must be application/json' }, 415)
+  // the media type itself, not a substring ("text/plain; x=application/json" is a CORS-simple type)
+  if ((req.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase() !== 'application/json') return json({ error: 'content-type must be application/json' }, 415)
 
   let msg: { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> }
   try { msg = (await req.json()) as typeof msg } catch { return rpcError(null, -32700, 'parse error', 400) }

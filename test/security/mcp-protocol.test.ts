@@ -143,6 +143,17 @@ describe('Origin (DNS-rebinding guard)', () => {
   })
 })
 
+describe('content type', () => {
+  const ping = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' })
+  test.each([['text/plain'], ['application/x-www-form-urlencoded'], ['multipart/form-data; boundary=x'], ['text/plain; x=application/json'], ['application/jsonp'], ['']])('%p → 415', async (ct) => {
+    expect((await post(ping, { ...auth(), 'content-type': ct })).status).toBe(415)
+  })
+  test.each([['application/json'], ['application/json; charset=utf-8'], ['Application/JSON']])('%p is accepted', async (ct) => {
+    expect((await post(ping, { ...auth(), 'content-type': ct })).status).toBe(200)
+  })
+})
+
+
 describe('token format (secret scanners) and storage', () => {
   test('tokens are <prefix>_pat_ + 32 base64url chars; only a hash and a short hint are stored', () => {
     const t = createToken(e.db, 'kim', { name: 'fmt' })
