@@ -1,6 +1,7 @@
 // One Bun server: /mcp and /health (Bearer tokens only, src/mcp.ts — the session cookie is scoped to /api and is never
 // read there), /api (sessions, src/web/api.ts), and the built web app (web/dist) for everything else. Security headers
 // on every response.
+import { LIMITS, NAME } from '../config'
 import fs from 'node:fs'
 import path from 'node:path'
 import { handleRequest } from '../mcp'
@@ -65,6 +66,18 @@ export async function handleWeb(w: WebCtx, req: Request, addr?: string): Promise
 
 export function serveWeb(ctx: Ctx, port: number, hostname = '127.0.0.1', opts: WebOptions = {}) {
   const w = makeWebCtx(ctx, opts)
-  const server = Bun.serve({ port, hostname, fetch: (req, srv) => handleWeb(w, req, srv.requestIP(req)?.address) })
+  const server = Bun.serve({
+    port, hostname,
+    // never Bun's development error page (it shows source and stack traces to the caller)
+    development: false,
+    // bodies without a Content-Length are cut here too
+    maxRequestBodySize: LIMITS.requestBytes,
+    fetch: async (req, srv) => {
+      try { return await handleWeb(w, req, srv.requestIP(req)?.address) } catch (e) {
+        console.error(`[${NAME}] request failed:`, e)
+        return Response.json({ error: 'internal error' }, { status: 500 })
+      }
+    },
+  })
   return { server, w }
 }
