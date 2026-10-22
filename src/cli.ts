@@ -2,6 +2,7 @@
 // Admin CLI. Usage: bun run src/cli.ts [--data DIR] <command> …   (run without arguments for help)
 import { verifyAudit } from './audit'
 import { defaultDataDir, NAME, VERSION } from './config'
+import { backupCommand } from './backup/cli'
 import { openDb } from './db'
 import { seedDemo } from './demo'
 import { TOOLS } from './extract'
@@ -31,6 +32,7 @@ ${NOTIFY_HELP}
   demo seed                              sample company tree, people, rules and tokens
   sh --token <pat> -c <command>          run one shell command as that token (audited)
   serve [--port 8787] [--host 127.0.0.1] [--allow-origin URL]
+  backup …                 (encrypted backups; see: backup help)
 
 data directory: --data, $${NAME.toUpperCase()}_HOME, or ~/.${NAME}`
 
@@ -55,6 +57,8 @@ async function main(argv: string[]) {
   const single = ['init', 'sh', 'serve'].includes(cmd ?? '')
   const rest = args.slice(single ? 1 : 2)
   if (!cmd || cmd === 'help' || cmd === '--help') return console.log(HELP)
+  // backup works on a data directory (and may run as root via launchd/sudo): never open or create a database for it
+  if (cmd === 'backup') { process.exitCode = await backupCommand(args.slice(1), { dataDir }); return }
   const db = openDb(dataDir)
   const need = (v: string | undefined, what: string) => { if (!v) throw new StoreError(`missing ${what}`); return v }
 

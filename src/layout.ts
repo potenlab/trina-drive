@@ -54,9 +54,10 @@ export function layoutFor(dataDir: string, kind: LayoutKind): Layout {
   }
 }
 
-/** The layout an existing data directory uses: installed when it has db/ (or no store.db at the top), else flat. */
+/** The layout a data directory uses: SHELF_LAYOUT if set, else installed when it has db/ (the installer creates it), else flat. */
 export function detectLayout(dataDir: string): Layout {
   const d = path.resolve(dataDir)
-  const installed = fs.existsSync(path.join(d, 'db')) || !fs.existsSync(path.join(d, 'store.db'))
+  const forced = process.env.SHELF_LAYOUT
+  const installed = forced ? forced === 'installed' : fs.existsSync(path.join(d, 'db'))
   return layoutFor(d, installed ? 'installed' : 'flat')
 }

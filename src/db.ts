@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
+import { detectLayout } from './layout'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -63,7 +64,9 @@ export type DB = Database
 
 export function openDb(dataDir: string): DB {
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 })
-  const db = new Database(path.join(dataDir, 'store.db'), { create: true, strict: true })
+  const file = detectLayout(dataDir).dbFile
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+  const db = new Database(file, { create: true, strict: true })
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
   db.exec(SCHEMA)
   return db

@@ -1,10 +1,10 @@
 // One tool call by one token: the policy view, what the call touched (provenance, R3), pending draft writes, and the
 // commit that writes touches + drafts + the audit row in one transaction (if the audit row fails, nothing is kept).
-import path from 'node:path'
 import type { DB } from './db'
 import { appendAudit } from './audit'
 import { LIMITS } from './config'
 import { Blobs, canSeeDraft, draftRel, liveDrafts, type Draft } from './drafts'
+import { detectLayout } from './layout'
 import { Mirror } from './mirror'
 import { Access, type FileEntry, type Node } from './policy'
 import { ensureFolder, identityKey, type TokenRow } from './store'
@@ -17,7 +17,8 @@ export interface Ctx {
 }
 
 export function makeCtx(db: DB, dataDir: string): Ctx {
-  return { db, dataDir, mirror: new Mirror(db, path.join(dataDir, 'mirror')), blobs: new Blobs(path.join(dataDir, 'blobs')), now: Date.now }
+  const l = detectLayout(dataDir)
+  return { db, dataDir, mirror: new Mirror(db, l.mirrorDir), blobs: new Blobs(l.draftsDir), now: Date.now }
 }
 
 /** A draft as this call sees it: a stored one (maybe with pending new content) or a new pending one. */

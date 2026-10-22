@@ -1,6 +1,7 @@
 // Text of office documents for cat/grep/read. Plain files are used as they are.
 // Converters get bytes (never a path): pdftotext reads stdin, the rest is in-process TypeScript with output caps.
 import fs from 'node:fs'
+import path from 'node:path'
 import { ext } from '../names'
 import { hwpText, hwpxText, tidy, unescapeXml, xmlParagraphs } from './hwp'
 import { ArchiveError, readZip } from './zip'
@@ -9,8 +10,15 @@ export class ExtractError extends Error {}
 
 /** External tools, found once at startup. */
 export const TOOLS = {
-  rg: findTool('rg'),
-  pdftotext: findTool('pdftotext'),
+  rg: envTool('SHELF_RG') ?? findTool('rg'),
+  pdftotext: envTool('SHELF_PDFTOTEXT') ?? findTool('pdftotext'),
+}
+
+/** The installer pins tool paths in the launchd plist; only an absolute, executable path counts. */
+function envTool(name: string): string | null {
+  const p = process.env[name]
+  if (!p || !path.isAbsolute(p)) return null
+  try { fs.accessSync(p, fs.constants.X_OK); return p } catch { return null }
 }
 
 function findTool(name: string): string | null {
