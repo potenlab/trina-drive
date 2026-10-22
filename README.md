@@ -40,6 +40,9 @@ The demo: people `dion` (admin), `kim` (member, not 경영), `boss` (경영), `l
 `경영`, `프로젝트`, `인사`, `영업`, `공용` and kim's personal folder `개인_kim`, with csv/md plus generated pdf, docx,
 xlsx, hwpx and hwp files. `bun run sim/provenance-day.ts` replays an office day (plan ★8, see below).
 
+Installing for a team: a Mac with `install-macos.sh` ([docs/INSTALL.md](docs/INSTALL.md)), or a Linux box with Docker
+([docs/DOCKER.md](docs/DOCKER.md): `docker compose run --rm shelf demo seed && docker compose up -d`; workers run in bwrap).
+
 ## Connecting clients
 
 `mcp add` runs on the person's own computer (it never opens a data directory). It signs in with the person's password

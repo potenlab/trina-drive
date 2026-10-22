@@ -3,7 +3,7 @@
 `shelf` is a temporary codename; every name below comes from `scripts/macos/common.sh` and `package.json`.
 
 v0.1 has one supported install: **natively on an office Mac (a Mac mini), with a release folder and
-`install-macos.sh`.** Linux/Docker is planned for v0.2.
+`install-macos.sh`.** Linux/Docker (v0.2): [DOCKER.md](DOCKER.md).
 
 ## 1. Requirements
 

@@ -1,0 +1,10 @@
+# Build context for Dockerfile: sources only. Never a data directory, a database or a local build.
+.git
+node_modules
+dist
+web/dist
+.shelf
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/.DS_Store

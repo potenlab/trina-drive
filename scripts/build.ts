@@ -101,7 +101,7 @@ async function download(url: string, sha: string, cacheDir: string): Promise<str
   return f
 }
 
-async function vendorDownload(pin: ToolPin, t: NonNullable<ToolPin['targets'][Target]>, rel: string, cacheDir: string): Promise<ToolEntry> {
+export async function vendorDownload(pin: ToolPin, t: NonNullable<ToolPin['targets'][Target]>, rel: string, cacheDir: string): Promise<ToolEntry> {
   const archive = await download(t.url!, t.sha256!, cacheDir)
   const x = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-'))
   try {

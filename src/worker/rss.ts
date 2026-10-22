@@ -57,7 +57,8 @@ function libprocProbe(): MemProbe | null {
 
 function procfsProbe(): MemProbe | null {
   if (!fs.existsSync('/proc/self/stat')) return null
-  const page = 4096
+  // RSS in /proc/<pid>/stat is in pages: 4 KB on most x86-64 and arm64 kernels, 16/64 KB on some arm64 ones
+  const page = linuxPageSize()
   const stat = (pid: number) => {
     try {
       const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
@@ -85,6 +86,16 @@ function procfsProbe(): MemProbe | null {
       return { bytes: total, pids: [...inTree] }
     },
   }
+}
+
+function linuxPageSize(): number {
+  try {
+    const lib = dlopen('libc.so.6', { getpagesize: { args: [], returns: FFIType.i32 } })
+    const n = lib.symbols.getpagesize()
+    lib.close()
+    if (n >= 4096 && (n & (n - 1)) === 0) return n
+  } catch {}
+  return 4096
 }
 
 let probe: MemProbe | null | undefined
