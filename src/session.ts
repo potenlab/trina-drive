@@ -1,0 +1,117 @@
+// One tool call by one token: the policy view, what the call touched (provenance, R3), pending draft writes, and the
+// commit that writes touches + drafts + the audit row in one transaction (if the audit row fails, nothing is kept).
+import path from 'node:path'
+import type { DB } from './db'
+import { appendAudit } from './audit'
+import { LIMITS } from './config'
+import { Blobs, canSeeDraft, draftRel, liveDrafts, type Draft } from './drafts'
+import { Mirror } from './mirror'
+import { Access, type FileEntry, type Node } from './policy'
+import { ensureFolder, identityKey, type TokenRow } from './store'
+
+export interface Ctx { db: DB; dataDir: string; mirror: Mirror; blobs: Blobs }
+
+export function makeCtx(db: DB, dataDir: string): Ctx {
+  return { db, dataDir, mirror: new Mirror(db, path.join(dataDir, 'mirror')), blobs: new Blobs(path.join(dataDir, 'blobs')) }
+}
+
+/** A draft as this call sees it: a stored one (maybe with pending new content) or a new pending one. */
+export interface DraftItem { rel: string; own: boolean; draft?: Draft; pending?: Uint8Array }
+
+export class Session {
+  readonly access: Access
+  private readonly folderTouches = new Map<string, { node: Node; strong: boolean }>()
+  private readonly srcTouches = new Map<number, boolean>()
+  readonly files = new Set<string>()
+  readonly notes = new Set<string>()
+  readonly extracted = new Set<string>()
+  /** own draft path -> new content, or null = deleted */
+  readonly pending = new Map<string, Uint8Array | null>()
+  readonly pendingDirs = new Set<string>()
+  private stored: Draft[] | null = null
+
+  constructor(readonly ctx: Ctx, readonly token: TokenRow, readdir?: (p: string) => string[]) {
+    this.access = Access.forToken(ctx.db, token, readdir)
+  }
+
+  // ---------- provenance (R3) ----------
+  touchNode(node: Node, strong: boolean) {
+    const k = identityKey(node.dev, node.ino)
+    const t = this.folderTouches.get(k)
+    if (!t || (strong && !t.strong)) this.folderTouches.set(k, { node, strong: strong || !!t?.strong })
+  }
+  touchFile(f: FileEntry, strong: boolean) { this.touchNode(f.parent, strong); this.files.add(f.vpath) }
+  /** Reading a draft brings its sources into this token's window. */
+  touchDraft(item: DraftItem, strong: boolean) {
+    this.files.add('/drafts/' + item.rel)
+    for (const [f, s] of item.draft?.src ?? []) this.srcTouches.set(f, (strong && s) || !!this.srcTouches.get(f))
+  }
+
+  // ---------- drafts as seen by this call (R4 + pending writes) ----------
+  storedDrafts(): Draft[] {
+    this.stored ??= liveDrafts(this.ctx.db, this.token.person_id).filter((d) => canSeeDraft(this.access, this.token, d))
+    return this.stored
+  }
+  /** rel path under /drafts -> item */
+  draftItems(): Map<string, DraftItem> {
+    const out = new Map<string, DraftItem>()
+    for (const d of this.storedDrafts()) out.set(draftRel(d, this.token), { rel: draftRel(d, this.token), own: d.token_id === this.token.id, draft: d })
+    for (const [rel, content] of this.pending) {
+      if (content === null) out.delete(rel)
+      else out.set(rel, { ...(out.get(rel) ?? { rel, own: true }), pending: content })
+    }
+    return out
+  }
+  draftContent(item: DraftItem): Uint8Array {
+    return item.pending ?? this.ctx.blobs.get(item.draft!.sha256)
+  }
+
+  /** The token's window now: stored touches in the last 8 hours plus this call's. */
+  window(now = Date.now()): Map<number, boolean> {
+    const cutoff = now - LIMITS.windowMs
+    const out = new Map<number, boolean>()
+    for (const r of this.ctx.db.query<{ folder_id: number; strong_at: number | null; weak_at: number | null }, [number, number, number]>(
+      'SELECT folder_id, strong_at, weak_at FROM touches WHERE token_id = ? AND (strong_at > ? OR weak_at > ?)').all(this.token.id, cutoff, cutoff)) {
+      out.set(r.folder_id, (r.strong_at ?? 0) > cutoff)
+    }
+    return out
+  }
+
+  /** Write touches, pending drafts and the audit row atomically. Throws (and keeps nothing) if any part fails. */
+  commit(tool: string, command: string, outcome: string) {
+    const db = this.ctx.db
+    const shas = new Map<string, string>()
+    for (const [rel, c] of this.pending) if (c) shas.set(rel, this.ctx.blobs.put(c))
+    db.transaction(() => {
+      const now = Date.now()
+      const touched = new Map(this.srcTouches)
+      for (const { node, strong } of this.folderTouches.values()) {
+        const id = ensureFolder(db, node.real, node.dev, node.ino)
+        touched.set(id, strong || !!touched.get(id))
+      }
+      for (const [id, strong] of touched) {
+        db.query(`INSERT INTO touches (token_id, folder_id, strong_at, weak_at) VALUES (?, ?, ?, ?)
+          ON CONFLICT DO UPDATE SET strong_at = coalesce(excluded.strong_at, strong_at), weak_at = coalesce(excluded.weak_at, weak_at)`)
+          .run(this.token.id, id, strong ? now : null, strong ? null : now)
+      }
+      if (this.pending.size) {
+        const win = this.window(now)
+        for (const [rel, content] of this.pending) {
+          const existing = db.query<{ id: number }, [number, string]>('SELECT id FROM drafts WHERE token_id = ? AND path = ? AND deleted_at IS NULL').get(this.token.id, rel)
+          if (content === null) {
+            if (existing) db.query('UPDATE drafts SET deleted_at = ? WHERE id = ?').run(now, existing.id)
+            continue
+          }
+          const id = existing?.id ?? Number(db.query('INSERT INTO drafts (token_id, person_id, path, created_at) VALUES (?, ?, ?, ?)').run(this.token.id, this.token.person_id, rel, now).lastInsertRowid)
+          const v = (db.query<{ v: number | null }, [number]>('SELECT max(version) AS v FROM draft_versions WHERE draft_id = ?').get(id)?.v ?? 0) + 1
+          db.query('INSERT INTO draft_versions (draft_id, version, sha256, size, created_at) VALUES (?, ?, ?, ?, ?)').run(id, v, shas.get(rel)!, content.length, now)
+          db.query('DELETE FROM draft_versions WHERE draft_id = ? AND version <= ?').run(id, v - LIMITS.draftVersionsKept)
+          for (const [f, strong] of win) {
+            db.query('INSERT INTO draft_src (draft_id, folder_id, strong) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET strong = max(strong, excluded.strong)').run(id, f, strong ? 1 : 0)
+          }
+        }
+      }
+      appendAudit(db, { personId: this.token.person_id, tokenId: this.token.id, tool, command, files: [...this.files], outcome })
+    })()
+  }
+}

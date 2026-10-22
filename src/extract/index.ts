@@ -20,7 +20,13 @@ function findTool(name: string): string | null {
   return null
 }
 
+/** Extracted text ends with a newline (so `cat a.docx b.pdf` keeps files apart). */
 export async function extractText(name: string, bytes: Uint8Array): Promise<string> {
+  const t = await extractRaw(name, bytes)
+  return t && !t.endsWith('\n') ? t + '\n' : t
+}
+
+async function extractRaw(name: string, bytes: Uint8Array): Promise<string> {
   try {
     switch (ext(name)) {
       case 'pdf': return await pdfText(bytes)
