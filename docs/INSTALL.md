@@ -1,6 +1,7 @@
 # Installing the server on a Mac
 
-`shelf` is a temporary codename; every name below comes from `scripts/macos/common.sh` and `package.json`.
+Every name below (accounts `_tdrive`/`_tdrivework`, labels `app.trina.drive.*`, the command `tdrive`) comes from
+`scripts/macos/common.sh`, which must agree with `src/brand.ts` (the build checks it).
 
 v0.1 has one supported install: **natively on an office Mac (a Mac mini), with a release folder and
 `install-macos.sh`.** Linux/Docker (v0.2): [DOCKER.md](DOCKER.md).
@@ -23,32 +24,32 @@ Turn on FileVault on the server Mac and lock its screen: the server's NAS accoun
 | Account | What it runs | What it can read and write |
 |---|---|---|
 | `root` | only the installer and uninstaller, and launchd itself | owns the app, config and LaunchDaemon files, so the server account cannot change what root or administrators run |
-| `_shelf` (server) | the server (HTTP API, MCP endpoint, web), the daily backup job | the data folders below (0700), the registered folders it is given read access to, the backup folder |
-| `_shelfwork` (worker) | text extraction and shell workers, in a `sandbox-exec` profile (when the release has a worker) | only `work/` and the bytes the server hands it; no data folder, no NAS mount, no network |
+| `_tdrive` (server) | the server (HTTP API, MCP endpoint, web), the daily backup job | the data folders below (0700), the registered folders it is given read access to, the backup folder |
+| `_tdrivework` (worker) | text extraction and shell workers, in a `sandbox-exec` profile (when the release has a worker) | only `work/` and the bytes the server hands it; no data folder, no NAS mount, no network |
 
 Both role accounts are hidden, have no password and `/usr/bin/false` as their shell, and take the first free UID/GID
 in 450-499.
 
-Files (`/Library/Application Support/shelf/` unless the path is absolute):
+Files (`/Library/Application Support/trina-drive/` unless the path is absolute):
 
 | Path | Owner : group, mode | Contents |
 |---|---|---|
-| `app/versions/<version>/` | root : wheel, 755 | `bin/shelf` (the compiled server and CLI), `tools/` (pinned ripgrep, pdftotext and its libraries), `release.json`, `tools.json`, `docs/` |
+| `app/versions/<version>/` | root : wheel, 755 | `bin/tdrive` (the compiled server and CLI), `tools/` (pinned ripgrep, pdftotext and its libraries), `release.json`, `tools.json`, `docs/` |
 | `app/current` | link | the running version (the previous one is kept next to it) |
-| `config/server.json` | root : _shelf, 640 | listen address and port, data folder, tool paths, worker account |
-| `config/backup-recipient` | root : _shelf, 644 | the backup PUBLIC key |
+| `config/server.json` | root : _tdrive, 640 | listen address and port, data folder, tool paths, worker account |
+| `config/backup-recipient` | root : _tdrive, 644 | the backup PUBLIC key |
 | `setup/first-setup-token` | root : admin, 640 | the one-time first-setup token (until first setup is done) |
-| `db/` | _shelf, 700 | `store.db` (SQLite), `backup.json` (backup target), `setup-token.sha256` |
-| `drafts/` | _shelf, 700 | draft version contents |
-| `mirror/` | _shelf, 700 | extracted text (cache; excluded from Time Machine) |
-| `backup-staging/` | _shelf, 700 | short-lived database snapshot while a backup runs (excluded from Time Machine) |
-| `logs/` | _shelf, 700 | `server.log`, `backup.log` (launchd output; rotated by `/etc/newsyslog.d/shelf.conf`) |
-| `work/` | _shelfwork, 700 | worker scratch space, `worker.log` |
-| `run/worker/` | _shelfwork : _shelf, 750 | the worker socket (only the server can connect) |
-| `/Library/LaunchDaemons/app.treesoop.shelf.server.plist` | root, 644 | server: `RunAtLoad`, `KeepAlive`, `ExitTimeOut` 30 s, umask 077, 8192 open files |
-| `/Library/LaunchDaemons/app.treesoop.shelf.backup.plist` | root, 644 | daily backup at 03:17 (`backup run --if-configured`) |
-| `/Library/LaunchDaemons/app.treesoop.shelf.worker.plist` | root, 644 | worker (only when the release lists a `worker` daemon) |
-| `/usr/local/bin/shelf` | link | `app/current/bin/shelf`, the CLI on PATH |
+| `db/` | _tdrive, 700 | `store.db` (SQLite), `backup.json` (backup target), `setup-token.sha256` |
+| `drafts/` | _tdrive, 700 | draft version contents |
+| `mirror/` | _tdrive, 700 | extracted text (cache; excluded from Time Machine) |
+| `backup-staging/` | _tdrive, 700 | short-lived database snapshot while a backup runs (excluded from Time Machine) |
+| `logs/` | _tdrive, 700 | `server.log`, `backup.log` (launchd output; rotated by `/etc/newsyslog.d/trina-drive.conf`) |
+| `work/` | _tdrivework, 700 | worker scratch space, `worker.log` |
+| `run/worker/` | _tdrivework : _tdrive, 750 | the worker socket (only the server can connect) |
+| `/Library/LaunchDaemons/app.trina.drive.server.plist` | root, 644 | server: `RunAtLoad`, `KeepAlive`, `ExitTimeOut` 30 s, umask 077, 8192 open files |
+| `/Library/LaunchDaemons/app.trina.drive.backup.plist` | root, 644 | daily backup at 03:17 (`backup run --if-configured`) |
+| `/Library/LaunchDaemons/app.trina.drive.worker.plist` | root, 644 | worker (only when the release lists a `worker` daemon) |
+| `/usr/local/bin/tdrive` | link | `app/current/bin/tdrive`, the CLI on PATH |
 
 The installer also: sets `pmset sleep 0 autorestart 1` (skip with `--no-power`), adds the binary to the application
 firewall when it is on, and excludes `mirror/` and `backup-staging/` from Time Machine.
@@ -57,15 +58,15 @@ firewall when it is on, and excludes `mirror/` and `backup-staging/` from Time M
 
 ```sh
 # 1) get the release for your Mac and check it
-shasum -a 256 -c shelf-<version>-darwin-arm64.tar.gz.sha256
-tar -xzf shelf-<version>-darwin-arm64.tar.gz
-cd shelf-<version>-darwin-arm64
+shasum -a 256 -c trina-drive-<version>-darwin-arm64.tar.gz.sha256
+tar -xzf trina-drive-<version>-darwin-arm64.tar.gz
+cd trina-drive-<version>-darwin-arm64
 
 # 2) see what it would do (no root; writes only into a temporary folder and prints its path)
 ./install-macos.sh --dry-run
 
 # 3) install (an external disk for backups is optional now, see section 6)
-sudo ./install-macos.sh --backup-dir /Volumes/Backup/shelf-backup
+sudo ./install-macos.sh --backup-dir /Volumes/Backup/trina-drive-backup
 ```
 
 Options: `--listen ADDR` (default `0.0.0.0`; give the Tailscale address to serve only over the VPN), `--port N`
@@ -84,7 +85,7 @@ At the end it prints, once:
    away from the server. Without it no backup can be restored.
 
 Releases are not yet signed with a Developer ID. A release downloaded with a browser carries the quarantine flag;
-remove it before installing: `xattr -dr com.apple.quarantine shelf-<version>-darwin-arm64`.
+remove it before installing: `xattr -dr com.apple.quarantine trina-drive-<version>-darwin-arm64`.
 
 ## 4. First setup
 
@@ -93,7 +94,7 @@ the first administrator. The server deletes the token's hash when that is done, 
 
 There is no "trusted loopback": a request from the server Mac itself (for example a browser or an AI agent running on
 it) gets no special treatment, and first setup is impossible without the token. Lost the token before setup? Read it
-with `sudo cat "/Library/Application Support/shelf/setup/first-setup-token"`.
+with `sudo cat "/Library/Application Support/trina-drive/setup/first-setup-token"`.
 
 ## 5. Exposure (v0.1: LAN or VPN only)
 
@@ -114,15 +115,15 @@ NAS's own backup (for example Synology Hyper Backup or snapshots). The text mirr
 The admin commands run as the server account. For short, define in your shell:
 
 ```sh
-shelfadm() { sudo -H -u _shelf shelf --data "/Library/Application Support/shelf" "$@"; }
+tdriveadm() { sudo -H -u _tdrive tdrive --data "/Library/Application Support/trina-drive" "$@"; }
 ```
 
 Set a target (an external disk; formatted APFS, encrypted if you like):
 
 ```sh
-sudo mkdir -p /Volumes/Backup/shelf-backup && sudo chown _shelf /Volumes/Backup/shelf-backup && sudo chmod 700 /Volumes/Backup/shelf-backup
-shelfadm backup target set /Volumes/Backup/shelf-backup --keep 14
-shelfadm backup target show
+sudo mkdir -p /Volumes/Backup/trina-drive-backup && sudo chown _tdrive /Volumes/Backup/trina-drive-backup && sudo chmod 700 /Volumes/Backup/trina-drive-backup
+tdriveadm backup target set /Volumes/Backup/trina-drive-backup --keep 14
+tdriveadm backup target show
 ```
 
 The daily job (03:17) then writes one archive and keeps the newest 14. A target on the server's own disk is refused
@@ -132,9 +133,9 @@ available in v0.1.
 By hand:
 
 ```sh
-shelfadm backup run                     # one backup now
-shelfadm backup list
-shelf backup verify /Volumes/Backup/shelf-backup/shelf-20261022T031700Z.bkp --key-file -   # paste the secret key, then Ctrl-D
+tdriveadm backup run                     # one backup now
+tdriveadm backup list
+tdrive backup verify /Volumes/Backup/trina-drive-backup/trina-drive-20261022T031700Z.bkp --key-file -   # paste the secret key, then Ctrl-D
 ```
 
 `verify` needs the secret key, so run it on a computer you trust with the key (it does not need the server), decrypts
@@ -144,24 +145,24 @@ version present. Do this monthly, and after changing the backup disk.
 Restore (into a NEW folder; the restore never overwrites data):
 
 ```sh
-sudo launchctl bootout system/app.treesoop.shelf.server
-sudo launchctl bootout system/app.treesoop.shelf.backup
+sudo launchctl bootout system/app.trina.drive.server
+sudo launchctl bootout system/app.trina.drive.backup
 cd "/Library/Application Support"
-sudo shelf backup restore /Volumes/Backup/shelf-backup/shelf-20261022T031700Z.bkp --into "/Library/Application Support/shelf-restored" --key-file -
+sudo tdrive backup restore /Volumes/Backup/trina-drive-backup/trina-drive-20261022T031700Z.bkp --into "/Library/Application Support/trina-drive-restored" --key-file -
 # move the current data aside and the restored data in
-sudo mkdir shelf-old
-for d in db drafts mirror backup-staging logs; do sudo mv "shelf/$d" shelf-old/ ; sudo mv "shelf-restored/$d" shelf/ ; done
-sudo rmdir shelf-restored
-# from the installed version's release folder: rerun its installer; it gives the restored files back to _shelf
+sudo mkdir trina-drive-old
+for d in db drafts mirror backup-staging logs; do sudo mv "trina-drive/$d" trina-drive-old/ ; sudo mv "trina-drive-restored/$d" trina-drive/ ; done
+sudo rmdir trina-drive-restored
+# from the installed version's release folder: rerun its installer; it gives the restored files back to _tdrive
 # and starts the daemons
-cd ~/shelf-<version>-darwin-arm64 && sudo ./install-macos.sh
-shelfadm backup target set /Volumes/Backup/shelf-backup   # the target setting is not part of a backup
+cd ~/trina-drive-<version>-darwin-arm64 && sudo ./install-macos.sh
+tdriveadm backup target set /Volumes/Backup/trina-drive-backup   # the target setting is not part of a backup
 ```
 
 On a new Mac: install first, stop the daemons, then restore as above. The registered folders must be reachable at the
 same paths (the database refers to them by path and file identity).
 
-Key rotation: `sudo ./install-macos.sh --new-backup-key` (or `sudo shelf --data "/Library/Application Support/shelf"
+Key rotation: `sudo ./install-macos.sh --new-backup-key` (or `sudo tdrive --data "/Library/Application Support/trina-drive"
 backup keygen --set`). Archives made before keep needing the old secret key.
 
 ## 7. Update and roll back
@@ -174,7 +175,7 @@ installer (the previous version folder is still there, so this is quick). Take a
 
 ```sh
 sudo ./uninstall-macos.sh                 # keeps the data (db, drafts, mirror, backup-staging, logs)
-sudo ./uninstall-macos.sh --delete-data   # removes /Library/Application Support/shelf entirely
+sudo ./uninstall-macos.sh --delete-data   # removes /Library/Application Support/trina-drive entirely
 ```
 
 It stops and removes the LaunchDaemons, the CLI link, log rotation, the firewall and Time Machine entries, `app/`,
@@ -201,7 +202,7 @@ bundled tools and libraries are in `tools/licenses/`.
 
 ```sh
 bun install
-bun scripts/build.ts                                   # dist/shelf-<version>-darwin-arm64/ and .tar.gz(.sha256)
+bun scripts/build.ts                                   # dist/trina-drive-<version>-darwin-arm64/ and .tar.gz(.sha256)
 bun scripts/build.ts --targets darwin-arm64,darwin-x64
 bun scripts/build.ts --tools none                      # without tools (installer falls back to Homebrew, warns)
 bun scripts/build.ts --tools stub --entry src/backup/cli.ts --no-tar   # what the installer test uses
@@ -236,4 +237,4 @@ account creation with `dscl` on macOS 14/15/26 and the approval prompts on delet
 as the role accounts and creating the log files in folders those accounts own; `ExitTimeOut` and `KeepAlive`
 behaviour; the application firewall prompt for an ad-hoc-signed binary; Gatekeeper with a quarantined, unsigned
 release; the vendored `pdftotext` on a Mac without Homebrew (fontconfig without its config file); a backup to a real
-external disk owned by `_shelf` and a restore swap as in section 6; `newsyslog` picking up the rotation file.
+external disk owned by `_tdrive` and a restore swap as in section 6; `newsyslog` picking up the rotation file.

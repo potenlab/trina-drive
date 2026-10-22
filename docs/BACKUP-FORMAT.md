@@ -1,6 +1,6 @@
 # Backup archive format, version 1
 
-A backup is one file, `<name>-<UTC time>.bkp` (for example `shelf-20261022T031700Z.bkp`), made by
+A backup is one file, `<name>-<UTC time>.bkp` (for example `trina-drive-20261022T031700Z.bkp`), made by
 `<name> backup run`. It is encrypted to a public key, so the server can make backups without being able to read
 them; only the holder of the matching secret key can verify or restore one. Code: `src/backup/`.
 

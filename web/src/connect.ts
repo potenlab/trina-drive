@@ -1,6 +1,6 @@
-// What the My tokens page tells a person to run to connect an AI client (src/client/mcp.ts, README "Connecting
-// clients"). No secret is ever put on a command line: the recommended command signs in and makes its own token (kept
-// in the Keychain / a private file), and a token made on this page is pasted at the CLI's hidden prompt
+// What the My tokens page tells a person to run to connect an AI client (src/client/mcp.ts, docs/CONNECT-CLIENTS.md).
+// No secret is ever put on a command line: the recommended command signs in and makes its own token (kept in the
+// Keychain / a private file), and a token made on this page is pasted at the CLI's hidden prompt
 // (--token-stdin). Only the collapsed manual fallback writes the token into a client file, in clear text.
 // Pure functions (no DOM) so they can be tested without a browser.
 import { CLI, NAME } from '../../src/brand'

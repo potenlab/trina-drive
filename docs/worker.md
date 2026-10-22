@@ -113,7 +113,7 @@ read with its own no-follow checks (R1 ⑤ ⑦) to a worker, so the worker has n
   …"); the mirror remembers it for that file version, so a malicious document costs one worker, not one per read.
   `refused` (no isolation and `requireIsolation`), `busy` and a worker that did not start are `ExtractUnavailable`: the
   read fails with that message and nothing is remembered. There is no in-process fallback.
-- `SHELF_EXTRACT=inprocess` runs the parsers in the server process (development and tests only).
+- `TDRIVE_EXTRACT=inprocess` runs the parsers in the server process (development and tests only).
 
 ## Protocol (v1, `protocol.ts`)
 
@@ -149,7 +149,7 @@ The worker answers `/bin`, `/usr`, `/dev`, `/proc` itself from just-bash's stub 
 - **One token per process.** A warm pool (default 2) keeps processes that have booted and loaded code — including a
   warm-up run of common commands on a throwaway in-memory filesystem, because just-bash loads each command on first
   use (~35 ms) — but have never seen a job. If the pool is empty the job starts a fresh worker (cold).
-- **Kept for the same token** (`reuse`, default on; `SHELF_WORKER_REUSE=0` turns it off). After a *clean* shell job
+- **Kept for the same token** (`reuse`, default on; `TDRIVE_WORKER_REUSE=0` turns it off). After a *clean* shell job
   (`done` received, no limit breach, no abort, RSS below half the cap) the process waits up to `idleMs` (5 s) for the
   same token's next shell command, at most `maxJobs` (32) jobs, at most `perToken` kept per token and `maxIdle` (4)
   overall. It is keyed by token **and** person and never given to anyone else; extraction jobs and jobs with read
@@ -174,7 +174,7 @@ The worker answers `/bin`, `/usr`, `/dev`, `/proc` itself from just-bash's stub 
   ENOENT like missing ones).
 - **Kill** = SIGKILL to the process group (workers start with `setsid`) **and** to every descendant found by the probe
   (in case one left the group), at the breach and again after exit. Tests check that no worker or child survives.
-- **Job dir**: `mkdtemp` under `$TMPDIR/shelf-work-<uid>/` (0700; 0711 with a worker user), the worker's cwd, HOME
+- **Job dir**: `mkdtemp` under `$TMPDIR/tdrive-work-<uid>/` (0700; 0711 with a worker user), the worker's cwd, HOME
   and TMPDIR, the only writable place; removed when the process is killed (after its job, or its last job when kept).
 - **Environment**: the worker gets only `PATH HOME TMPDIR LANG NO_COLOR TZ` (+ `WORKER_PREWARM`), never the server's.
   `BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`: a shared transpiler cache would be state shared between jobs.
@@ -183,7 +183,7 @@ The worker answers `/bin`, `/usr`, `/dev`, `/proc` itself from just-bash's stub 
 ## Admission (`scheduler.ts`)
 
 Limits per token (default 2), per person (3) and overall (CPU count − 2, at least 2), plus at most 64 waiting jobs per
-token (beyond: `busy`); env `SHELF_WORKERS_GLOBAL`, `_PER_TOKEN`, `_PER_PERSON`, `_QUEUE` (read when the process-wide
+token (beyond: `busy`); env `TDRIVE_WORKERS_GLOBAL`, `_PER_TOKEN`, `_PER_PERSON`, `_QUEUE` (read when the process-wide
 executor starts). `info()` reports `limits` and `runningBy` (per token / per person); test/security/resource.test.ts
 checks all four through the `bash` tool. Extraction has its own scheduler (above). Waiting jobs sit in one queue per token, served round-robin across tokens; a person's tokens
 share the person limit. So one token's flood only fills its own slots and its own queue, and another token's job
@@ -220,11 +220,11 @@ works but this sandbox does not (Docker's masked `/proc`) reports `none` with th
 subprocess, `isolation: "none"`, refused unless `requireIsolation: false`. A cgroup per job (`Bun.spawn({cgroup})`,
 `memory.max`, `pids.max`) is the natural next step there.
 
-**Dedicated worker user** (`runAs`, env `SHELF_WORKER_USER`, e.g. `_shelfwork`): workers are spawned with that
+**Dedicated worker user** (`runAs`, env `TDRIVE_WORKER_USER`, e.g. `_tdrivework`): workers are spawned with that
 uid/gid. This needs the spawning process to be root; there is no sudo and no setuid helper. When the server is not
 root the executor runs workers as the server user, reports `user: null` and adds a warning (or refuses with
 `requireRunAs`). The intended deployment (installer, later): a root launchd daemon that starts a tiny spawner which
-keeps root only to start workers as `_shelfwork`, while the server itself runs as `_shelf`; code and runtime installed
+keeps root only to start workers as `_tdrivework`, while the server itself runs as `_tdrive`; code and runtime installed
 in a world-readable place (not under a 0700 home). This is what closes the gap below.
 
 ## Measured on this Mac (M1 Pro, 10 cores, under load from other sessions)
@@ -272,10 +272,10 @@ A pre-built single-file bundle of the worker did not start faster (4.5 MB to par
 
 ## Configuration
 
-`new Executor(config)`, `defaultExecutor()` for shell commands (env: `SHELF_ISOLATION=auto|sandbox-exec|bwrap|none`,
-`SHELF_REQUIRE_ISOLATION=0`, `SHELF_WORKER_USER=_shelfwork`, `SHELF_WORKERS_WARM=2`, `SHELF_WORKER_REUSE=0`,
-`SHELF_WORKERS_GLOBAL/_PER_TOKEN/_PER_PERSON/_QUEUE`) and `extractExecutor()` for extraction (same isolation settings,
-`SHELF_EXTRACT_WARM=1`, `SHELF_EXTRACT_GLOBAL/_PER_TOKEN/_PER_PERSON/_QUEUE`). Config
+`new Executor(config)`, `defaultExecutor()` for shell commands (env: `TDRIVE_ISOLATION=auto|sandbox-exec|bwrap|none`,
+`TDRIVE_REQUIRE_ISOLATION=0`, `TDRIVE_WORKER_USER=_tdrivework`, `TDRIVE_WORKERS_WARM=2`, `TDRIVE_WORKER_REUSE=0`,
+`TDRIVE_WORKERS_GLOBAL/_PER_TOKEN/_PER_PERSON/_QUEUE`) and `extractExecutor()` for extraction (same isolation settings,
+`TDRIVE_EXTRACT_WARM=1`, `TDRIVE_EXTRACT_GLOBAL/_PER_TOKEN/_PER_PERSON/_QUEUE`). Config
 fields: `isolation`, `requireIsolation`, `runAs`, `requireRunAs`, `tmpRoot`, `warm`, `warmReserve`, `reuse`
 (`false` or `{idleMs, maxJobs, maxIdle}`), `limits` (scheduler), `defaults` (job limits), `codePaths`, `execPaths`,
 `runtime`, `entry`, `pollMs`, `bootTimeoutMs`, `preloadShell`. `closeDefaultExecutor()` stops the process-wide executor (a one-shot
