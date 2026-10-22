@@ -118,7 +118,7 @@ What the shell sees:
 
 | path / command | sees |
 |---|---|
-| `/<registered folder>/…` | originals the token may read; hidden = nonexistent (same output, error text, exit code) |
+| `/<registered folder>/…` | originals the token may read; hidden = nonexistent (same output, error text, exit code), also when the server fails while deciding (fail closed); other unexpected server errors are a fixed `EIO` |
 | `cat head tail grep rg sed awk wc -l`, `read` | extracted text for pdf/docx/xlsx/pptx/hwp/hwpx (stderr notes "(extracted text …)" once) |
 | `ls -l stat du wc -c sha256sum md5sum od base64 file` | original bytes |
 | `/.raw/<path>` | original bytes of any visible file (not listed at `/`) |
@@ -233,10 +233,9 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
 
 ## Known limits
 
-- **No isolated executor yet.** just-bash runs in the server process with its `hardened` limits (command count,
-  loop iterations, output size) and a wall-clock deadline; ripgrep and pdftotext are child processes with timeouts and
-  output caps but no sandbox (`sandbox-exec`/bwrap is planned for dev weeks 3–4). The deadline is cooperative: a
-  pathological in-process step could overrun it.
+- Shell commands run in the isolated executor (sandboxed worker processes, one token per process; see
+  [docs/worker.md](docs/worker.md)); `SHELF_SHELL=inprocess` runs just-bash in the server process (development only).
+  ripgrep and pdftotext are child processes of the server with timeouts and output caps but no sandbox.
 - just-bash lets some redirect failures (`echo x > /경영/a`) escape `exec()`; the server reports them like bash does
   (`bash: <path>: …`) but the rest of that command line does not run.
 - `mkdir` inside `/drafts/` lasts only for the call (drafts are files; folders come from their paths). `/tmp` does not
@@ -291,5 +290,6 @@ bytes are refused at read time. `serve` reconciles on start, every 5 min (`--rec
 
 ```sh
 bun test                 # SHELF_TEST_HWP=/path/to/real.hwp also checks a Hangul-made file
+SHELF_SHELL=inprocess bun test   # the same with just-bash in-process (the hidden-path suites run both modes anyway)
 bunx tsc --noEmit
 ```

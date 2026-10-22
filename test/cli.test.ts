@@ -44,7 +44,8 @@ async function sh(command: string, env: Record<string, string> = {}) {
 }
 
 test('cli sh runs the command in an isolated worker, exits promptly and leaves no worker behind', async () => {
-  const r = await sh('ls /; cat /프로젝트/README.md | wc -l')
+  // (the sleep keeps the worker alive long enough for the ps poll to see it)
+  const r = await sh('ls /; cat /프로젝트/README.md | wc -l; sleep 0.3')
   expect(r.stdout).toBe('drafts\n개인_kim\n공용\n프로젝트\n3\n')
   expect(r.code).toBe(0)
   expect(r.ms).toBeLessThan(5000)
