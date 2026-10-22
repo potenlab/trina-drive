@@ -444,6 +444,21 @@ html[lang="ko"] .arch-box li { font-family: var(--font-sans); font-size: 13px; }
 .price-krw { display: none; }
 [data-currency="KRW"] .price-krw { display: revert; }
 [data-currency="KRW"] .price-usd { display: none; }
+.bill-y { display: none; }
+[data-billing="yearly"] .bill-y { display: revert; }
+[data-billing="yearly"] .bill-m { display: none; }
+.pricing-toggles { display: flex; gap: 10px; flex-wrap: wrap; }
+.pricing-notes .price-krw { max-width: 560px; }
+.plan-seats {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: -8px 0 14px;
+  font-size: 13px; color: var(--fg-muted);
+}
+.plan-seats input {
+  width: 76px; min-height: 36px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; text-align: right;
+}
+.plan-seats input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn[aria-busy="true"] { opacity: 0.7; cursor: progress; }
 @media (max-width: 1080px) { .plans { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) {
   .plans { grid-template-columns: minmax(0, 1fr); }

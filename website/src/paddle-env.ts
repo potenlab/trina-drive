@@ -1,0 +1,16 @@
+// Reads the Paddle settings from build-time env (Vite inlines each import.meta.env.PUBLIC_* at build time, so the
+// built site carries the values it was built with). Unset → PADDLE is null and every button keeps the mailto flow.
+import { readPaddleConfig } from './paddle'
+
+export const PADDLE = readPaddleConfig({
+  PUBLIC_PADDLE_CLIENT_TOKEN: import.meta.env.PUBLIC_PADDLE_CLIENT_TOKEN,
+  PUBLIC_PADDLE_ENV: import.meta.env.PUBLIC_PADDLE_ENV,
+  PUBLIC_PADDLE_PRICE_TEAM_MONTHLY: import.meta.env.PUBLIC_PADDLE_PRICE_TEAM_MONTHLY,
+  PUBLIC_PADDLE_PRICE_TEAM_YEARLY: import.meta.env.PUBLIC_PADDLE_PRICE_TEAM_YEARLY,
+  PUBLIC_PADDLE_PRICE_BUSINESS_MONTHLY: import.meta.env.PUBLIC_PADDLE_PRICE_BUSINESS_MONTHLY,
+  PUBLIC_PADDLE_PRICE_BUSINESS_YEARLY: import.meta.env.PUBLIC_PADDLE_PRICE_BUSINESS_YEARLY,
+  PUBLIC_PADDLE_PRICE_EXTRA_SEAT_TEAM: import.meta.env.PUBLIC_PADDLE_PRICE_EXTRA_SEAT_TEAM,
+  PUBLIC_PADDLE_PRICE_EXTRA_SEAT_BUSINESS: import.meta.env.PUBLIC_PADDLE_PRICE_EXTRA_SEAT_BUSINESS,
+  PUBLIC_PADDLE_PRICE_EXTRA_SEAT_TEAM_YEARLY: import.meta.env.PUBLIC_PADDLE_PRICE_EXTRA_SEAT_TEAM_YEARLY,
+  PUBLIC_PADDLE_PRICE_EXTRA_SEAT_BUSINESS_YEARLY: import.meta.env.PUBLIC_PADDLE_PRICE_EXTRA_SEAT_BUSINESS_YEARLY,
+})

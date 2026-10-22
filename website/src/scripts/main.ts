@@ -1,6 +1,6 @@
-// Client behaviour for every page: theme toggle, mobile menu, copy button, currency toggle, checkout buttons,
+// Client behaviour for every page: theme toggle, mobile menu, copy button, currency/billing toggles, checkout buttons,
 // and the hero terminal replay. No dependencies; everything degrades to static HTML without JS.
-import { isPlanId, startCheckout, type Currency } from '../checkout'
+import { isPlanId, startCheckout, type Billing, type Currency } from '../checkout'
 
 const root = document.documentElement
 const lang = root.lang === 'ko' ? 'ko' : 'en'
@@ -39,29 +39,45 @@ document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((btn) => {
   })
 })
 
-// ---- pricing currency + checkout ----
+// ---- pricing currency / billing + checkout ----
 const pricing = document.querySelector<HTMLElement>('[data-pricing]')
 const currency = (): Currency => (pricing?.dataset.currency === 'KRW' ? 'KRW' : 'USD')
-if (pricing) {
-  const buttons = pricing.querySelectorAll<HTMLButtonElement>('[data-currency-btn]')
-  const apply = (cur: Currency) => {
-    pricing.dataset.currency = cur
-    buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.currencyBtn === cur)))
+const billing = (): Billing => (pricing?.dataset.billing === 'yearly' ? 'yearly' : 'monthly')
+// One segmented toggle → one data-* attribute on the pricing section, remembered per browser.
+function toggle(attr: 'currency' | 'billing', values: readonly string[]) {
+  if (!pricing) return
+  const btnAttr = attr === 'currency' ? 'currencyBtn' : 'billingBtn'
+  const buttons = pricing.querySelectorAll<HTMLButtonElement>(`[data-${attr}-btn]`)
+  const apply = (v: string) => {
+    pricing.dataset[attr] = v
+    buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset[btnAttr] === v)))
   }
   try {
-    const saved = localStorage.getItem('currency')
-    if (saved === 'KRW' || saved === 'USD') apply(saved)
+    const saved = localStorage.getItem(attr)
+    if (saved && values.includes(saved)) apply(saved)
   } catch { /* ignore */ }
   buttons.forEach((b) => b.addEventListener('click', () => {
-    const cur = b.dataset.currencyBtn === 'KRW' ? 'KRW' : 'USD'
-    apply(cur)
-    try { localStorage.setItem('currency', cur) } catch { /* ignore */ }
+    const v = b.dataset[btnAttr] ?? ''
+    if (!values.includes(v)) return
+    apply(v)
+    try { localStorage.setItem(attr, v) } catch { /* ignore */ }
   }))
 }
+toggle('currency', ['USD', 'KRW'])
+toggle('billing', ['monthly', 'yearly'])
+
 document.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((btn) => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
     const id = btn.dataset.plan
-    if (isPlanId(id)) startCheckout(id, { currency: currency(), lang })
+    if (!isPlanId(id) || btn.getAttribute('aria-busy') === 'true') return
+    const seats = document.querySelector<HTMLInputElement>(`[data-seats="${id}"]`)
+    const people = seats ? Number(seats.value) : undefined
+    btn.setAttribute('aria-busy', 'true')
+    try {
+      await startCheckout(id, { currency: currency(), billing: billing(), lang, people })
+    } finally {
+      btn.removeAttribute('aria-busy')
+    }
   })
 })
 

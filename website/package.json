@@ -6,7 +6,8 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "og": "bun scripts/og.ts"
+    "og": "bun scripts/og.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "astro": "7.3.8"

@@ -1,0 +1,31 @@
+---
+// Paddle's successUrl after a completed checkout (/thanks, /ko/thanks). noindex: it is only useful after paying.
+// The payment itself is confirmed by the webhook (api/paddle-webhook.js), not by this page.
+import type { Copy } from '../content/en'
+import Base from '../layouts/Base.astro'
+import { CONTACT_EMAIL } from '../site'
+import Footer from './Footer.astro'
+import Icon from './Icon.astro'
+import Nav from './Nav.astro'
+
+interface Props { t: Copy }
+const { t } = Astro.props
+const home = t.lang === 'ko' ? '/ko' : '/'
+const c = t.thanks
+---
+<Base t={t} title={`${c.title} — Trina Drive`} noindex>
+  <Nav t={t} home={home} langHref={t.lang === 'ko' ? '/thanks' : '/ko/thanks'} />
+  <main id="main" class="container legal">
+    <h1>{c.title}</h1>
+    <p class="notice">{c.lead}</p>
+    <ul class="thanks-steps">
+      {c.steps.map((s) => <li><Icon name="check" />{s}</li>)}
+    </ul>
+    <p class="prose"><a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> · <a href="https://paddle.net" rel="noopener">paddle.net</a></p>
+    <a class="back" href={home}>← {c.back}</a>
+  </main>
+  <Footer t={t} home={home} />
+  <script>
+    import '../scripts/main'
+  </script>
+</Base>
