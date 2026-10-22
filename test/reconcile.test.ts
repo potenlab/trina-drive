@@ -71,6 +71,16 @@ describe('renames and moves (R10)', () => {
     expect(outside(e).map((a) => a.outcome)).toEqual(['quarantined', 'quarantined'])
   })
 
+  test('path + identity installs quarantine renames too', async () => {
+    const e = fresh()
+    write(e, '프로젝트/설계/a.md', 'a\n')
+    await reconcile(e.db, { dataDir: e.dir, quarantineRenames: true })
+    fs.renameSync(p(e, '프로젝트/설계'), p(e, '프로젝트/설계2'))
+    const r = await reconcile(e.db, { dataDir: e.dir, quarantineRenames: true })
+    expect([r.renamed, r.quarantined]).toEqual([1, 1])
+    expect((await e.sh('kim', 'cat /프로젝트/설계2/a.md')).exitCode).toBe(1)
+  })
+
   test('a move that does not widen keeps the rules (공용 -> 프로젝트)', async () => {
     const e = fresh()
     await rec(e)
