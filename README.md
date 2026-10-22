@@ -9,7 +9,8 @@ A permission-aware **read shell and draft box for AI agents** over a team's exis
 An agent (Claude Code, Codex, Cursor …) connects over remote MCP with a personal access token and gets a `bash`
 tool over a virtual tree that holds **only what that person, narrowed by that token, may read**. Originals are never
 written: agents write to `/drafts/`, every draft carries the folders it was derived from, and every call is in a
-hash-chained audit log.
+hash-chained audit log. (v0.2: a draft can be **promoted** into a folder that allows it, as a new file — at once when
+that does not widen who reads it, otherwise after a person approves it with a passkey.)
 
 Plan: `research/plans/에이전트 팀 스토리지 기획.md` (§4.1 permission model R0–R11, §5.1 v0.1 scope, §11 phase-0
 experiments). This repo is the ★ prototype of §11.
@@ -113,6 +114,10 @@ or `src/policy.ts` (drafts, R4 with the session as a full-scope token). What the
 | drafts (own, R4) | `GET drafts` (+ locked count and dates), `GET drafts/:id/download` |
 | files (read only, R1) | `GET files?path=` (list), `GET files/stat`, `GET files/download` (attachment only), `GET files/text` (extracted, 1 MB), `GET files/who`, `GET search?q=&path=` — see "Files on the web" |
 | audit | `GET audit?view=mine` · `view=folders` (folders you manage; others' command lines hidden) · `view=summary` (admin: who, which connection, how many; hash-chain check) |
+| second step of sign-in | `POST login` answers `{second_factor: {ticket, methods, passkey}}` (no cookie) for someone with a second factor; `POST login/second` `{ticket, method: passkey\|totp\|recovery, response\|code}` → session. A reset link (`links/accept`) asks for it too |
+| second factors (own) | `GET me/2fa`, `POST me/passkeys/options`, `POST me/passkeys`, `DELETE me/passkeys/:id`, `POST me/totp/setup`, `POST me/totp/confirm`, `DELETE me/totp`, `POST me/recovery-codes` — changes need a fresh login (`POST me/reauth`) |
+| promote | `GET promote/targets`, `POST drafts/:id/promote` `{folder, name, expected_sha256?, note?}`, `PUT folders/:id/promote` `{enabled}` (admin) |
+| approvals (R8) | `GET approvals`, `GET approvals/:id`, `POST approvals/:id/step-up/options` `{sha256}`, `POST approvals/:id/step-up` `{sha256, response\|code}` → `{assertion}`, `POST approvals/:id/approve` `{sha256, assertion}`, `POST approvals/:id/reject` `{reason}` (the requester: cancel) |
 
 R7 as built: a manage holder edits AI readers and "start fresh here" in their folder and below, and can turn
 "No AI" on; NAS readers, "No AI" off, register/unregister, quarantine and manage grants are admin only (personal
@@ -148,6 +153,9 @@ Code: `src/web/files.ts`, `web/src/pages/Files.tsx`.
   provenance window** (R3): provenance labels what an agent's token touched so its drafts carry their sources; a person
   in a browser writes no drafts through this server.
 
+See [Draft promote and approvals](#draft-promote-and-approvals-v02) and [Second factors](#second-factors-passkeys-totp)
+for the last four rows.
+
 Web tables (created on demand by `src/web/schema.ts`, not in `db.ts`): `accounts`, `web_sessions`, `web_links`,
 `notices`, `folder_history`, `web_reauth`; `rate_limits` (src/ratelimit.ts); keys `web_setup_token` and `everyone_group` in `meta`.
 
@@ -170,6 +178,7 @@ mcp add claude|codex|cursor --server URL [--login N] [--password-stdin|--token-s
         [--ttl 7d] [--scope f1,f2|--all-folders] [--read-only] [--store keychain|file|inline] [--auto-approve] [--force] [--dry-run]
 share add <path> | share list | reconcile once [--json] | reconcile watch [--every 5m] [--no-watch-hint]
 events list [--kind K] | quarantine list [--all] | quarantine release <id> --by <person> | widened list | widened rejudge
+folder promote <path> [--off] | mfa status | mfa reset <person>
 ```
 
 ## MCP
@@ -192,6 +201,7 @@ TCP peer: behind a reverse proxy every client shares one address.
 | `write` | `{path, content, expected_sha256?}` drafts only |
 | `edit` | `{path, old_string, new_string, replace_all?, expected_sha256?}` own drafts only |
 | `history` | `{path, action: list\|read\|restore, version?}` draft versions |
+| `promote` | `{draft, folder, name, reason?, expected_sha256?}` one of this token's drafts → a NEW file in a team folder; widening → `structuredContent.status: "input_required"` with the approval link (information only; agents cannot approve) |
 
 What the shell sees:
 
@@ -267,6 +277,8 @@ Plan §4.1 R9/R11, §5.1 "출처와 기록", §7.1 (token leak, audit forgery). 
 | `token_revoked` | `connections revoke`, `token revoke`, auto-suspend | the token owner |
 | `audit_anchor` | anchor timer, `audit anchor` | admins (email carries the signed anchor) |
 | `provenance_reset` | web: `POST /api/tokens/:id/provenance-reset` | admins (detail) and the person (if it was not them, their password is known) |
+| `approval_pending` | `promote` (MCP or web) that widens | people who may approve it now (R8, detail) ; other managers of the target or a source: count only ("1 pending"). Link: `<baseUrl>/#/approvals` |
+| `approval_decided` | approve / reject, or a request closed because no one can approve | the requester |
 
 `manage` is inherited down (none inside personal folders); inactive people never receive anything.
 
@@ -320,6 +332,8 @@ src/drafts.ts      draft box, versions, R4                  src/tools.ts    the 
 src/audit.ts       hash-chained audit log                   src/mcp.ts      POST /mcp endpoint
 src/extract/       pdf (pdftotext), docx/xlsx/pptx, hwpx, hwp (own CFB reader), zip; run.ts = always in an isolated worker
 src/rights.ts      R5/R7/R9 admin-side decisions            src/web/        REST API, sessions, mail, notices, server
+src/promote.ts     promote (R2 v0.2, R6), approvals (R8)    src/promote-tool.ts  the MCP promote tool's glue
+src/web/mfa.ts     passkeys, TOTP, recovery, step-ups       src/web/totp.ts  RFC 6238   src/web/approve.ts  their HTTP side
 web/               the admin app (Vite + React, en/ko)
 src/samples.ts     generated sample office files            src/demo.ts     demo seed       src/cli.ts  CLI
 src/redact.ts      secrets out of audit rows                src/ratelimit.ts  sign-in (SQLite) and /mcp limits
@@ -330,6 +344,14 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
 ```
 
 ## Known limits
+
+- Promote / approvals: a name taken by a file the caller cannot see (a closed link, an NFC twin) is refused as
+  "exists", which shows that something is there (principle 2's documented hole). The link-then-unlink placement leaves
+  the file with two links for a moment (agents see it closed until the unlink); shares without hard links fall back to
+  an exclusive create, where a reader may see a half-written new file. The folder chain is re-checked around the write,
+  not atomically with it. Eligibility is computed per request on every inbox view (fine for a team, not for thousands
+  of requests). Expired requests close lazily (on the next view). The web pages were checked end to end in headless
+  Chrome with a virtual authenticator, not on real devices.
 
 - Shell commands and document text extraction (on demand and in the reconciler's queue) run in the isolated executor
   (sandboxed worker processes; see [docs/worker.md](docs/worker.md)); without OS isolation both are refused.
@@ -359,6 +381,78 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
   (rows removed since then look like rows never written); the anchor covers everything up to it.
 - macOS and Linux only. On APFS two NFC/NFD spellings cannot coexist, so that case is tested with a simulated listing.
 
+## Draft promote and approvals (v0.2)
+
+Plan 5.2 "초안 반영 + 승인함", 4.1 R2 (v0.2), R6, R8, R11, principle 5. Code: `src/promote.ts` (deciding and writing),
+`src/promote-tool.ts` (MCP), `src/web/approve.ts` (web), `web/src/pages/Approvals.tsx`.
+
+- **Where.** A folder takes promoted drafts when the admin turned **promote** on for it or a folder above it
+  (`PUT /api/folders/:id/promote`, the folder page, or `folder promote <path>`; never inside a personal folder). Decision:
+  admin only for now — R7 lets `manage` change rules, but promote decides where the server's NAS account writes (5.2: that
+  account has write only on promote folders), which is an admin matter. The person's effective rule there must be
+  `write` (R2: in v0.2 `write` marks where a person's drafts may land), and the target must be readable in the caller's
+  view (the token's, for an agent: scope, flags, "No AI"). A hidden target answers like a missing one.
+- **What.** NEW files only (overwrite is v0.3): text names (`.md .markdown .txt .csv .tsv .json .yaml .yml .log`), no
+  path, no hidden/system/temporary name, ≤ 255 bytes; refused when a name equal after NFC and case-folding (or its
+  `._` sidecar) is there; content that looks like an XSym / alias link is refused. `expected_sha256` pins the version.
+- **Not widening** (R6 with S ≠ F on R5 readers; no sources = not widening): written at once. The bytes go to a temp
+  file `~$shelf-promote-….tmp` in the target folder (`O_EXCL|O_NOFOLLOW`, fsync), the folder chain is re-checked
+  (identity, no links), then `link(temp, final)` — which refuses an existing name, so it is a rename that never
+  replaces — and the temp is unlinked; shares without hard links get an exclusive create of the final name. The draft's
+  current version is checked right before (base hash) and the result after (regular file, one link, same bytes). The
+  promotion and its audit row are written in the call's transaction; if that fails the file is removed again. The
+  file's identity is recorded as a **tracked copy** of the draft (`widened`, `match = 'promote'`): whoever reads it
+  inherits Src(d) (R3), and R6 re-judges it when rules change, exactly as with copies the reconciler finds.
+- **Widening**: an approval request (`approvals`), status `pending`, 7 days. The bytes are the content-addressed blob
+  of that version (kept). The agent gets `Pending approval … <public url>/#/approvals/<id> … You cannot approve it`
+  (`structuredContent.status: "input_required"` — information only). The same draft version, target and name again
+  is the same request; at most 20 pending per person. **No eligible approver → `closed`** ("no one can approve") at once.
+- **Who approves (R8, judged at every view and again at the click).** A person with a web sign-in (never a token) who can
+  read every source folder by rule with no flag on it or above (agents' R1 ①–③: "No AI", quarantine, widened-pending
+  all count) **and** manages the target folder **or** every source folder. Their own request only by the second way.
+  Admins are not stand-ins. Sources = Src at request time ∪ what the draft gained since.
+- **What they see.** Eligible approvers: the sources by name, who gains access (count and names), the requester and
+  token, the content as plain text (`<pre>` text, never HTML; 256 KB) and a diff against nothing, and the agent's reason
+  folded away as "Agent's claim (not verified)". The requester: status, their sources (hidden ones counted), no names of
+  other people, cancel. Other managers of the target or a source: only "N pending" on the inbox (R11). Anyone else: 404.
+- **Approve** = `step-up/options` → passkey (`userVerification: required`) → `step-up` returns a random assertion
+  (2 minutes, single use, stored as sha256, bound to session + person + approval id + version hash) → `approve`
+  consumes it, then re-judges everything: R8 for the approver, the draft still at that hash (else the request closes as
+  `stale`), the target still there / not quarantined / promote still on, the requester still with `write`, the name
+  still free (else `failed`). Writes exactly the stored bytes as above; the copy is recorded `confirmed`.
+  **Reject** needs a reason (the requester sees it); no step-up (it writes nothing).
+- **Browser agents (7.1).** Every approve click needs a fresh passkey assertion bound to that request: a browser agent
+  driving a signed-in session cannot produce one. No magic links: notifications carry `<baseUrl>/#/approvals` only.
+  Bearer tokens are never read under `/api`; CSRF + same-origin `Origin` as everywhere.
+- **Passkeys vs LAN.** Passkeys need the public https address (`serve --public-url https://…`; its host is the RP ID).
+  With one, approvals require a passkey (an authenticator code is not accepted). Without one (LAN-only install), approvals
+  step up with the authenticator app (TOTP, each code once) and the page says so. Recovery codes never approve.
+
+## Second factors (passkeys, TOTP)
+
+`src/web/mfa.ts`, `src/web/totp.ts`, Settings → Second factor (`web/src/pages/SecondFactor.tsx`).
+
+- **Passkeys** via `@simplewebauthn/server` (works under Bun): RP ID = host of `--public-url` when it is https (http only
+  on `localhost`); attestation `none`; user verification required; algorithms ES256, EdDSA, RS256; counter kept.
+  Challenges are single use, 5 minutes, bound to what they are for (`session:<hash>`, a sign-in ticket, or
+  `approval:<id>:<sha256>:<session>`).
+- **TOTP** RFC 6238 (SHA-1, 6 digits, 30 s, ±1 step); confirmed with a code before it counts; each step accepted once
+  per person (`last_step`), so a code seen by someone else is useless. The secret is stored in the database (the same
+  disk as everything else; documented).
+- **Recovery codes**: 10, shown once, sha256 stored, single use, sign-in only; made when the first factor is added.
+- **Sign-in**: a correct password of someone with a second factor gives a 5-minute ticket (sha256 stored, ≤ 5 tries),
+  not a session; a reset link does the same (R9: a reset mail is no way around it). Second-step failures are limited per
+  person (5 per 15 min) and per address.
+- Adding or removing a factor needs the password typed within 5 minutes, is audited and tells the person (notice +
+  mail). Lost everything: the operator runs `mfa reset <person>` on the server (audited, sessions end).
+- **Admin 2FA gate** (for the public listener / OAuth): `adminHas2FA(db, personId)` (a passkey or a confirmed TOTP),
+  `allAdminsHave2FA(db)` (every active admin, at least one), `requireAdmin2FA(db)` (throws `MfaError`
+  `admin_2fa_required`, 403, with a count and no names) — all in `src/web/mfa.ts`. `serve` prints whether passkeys
+  are available and warns about admins without a second factor.
+
+Tables (created on demand): `mfa_passkeys`, `mfa_totp`, `mfa_recovery`, `mfa_challenges`, `mfa_tickets`,
+`mfa_stepups` (`src/web/mfa.ts`); `promote_folders`, `approvals`, `promotions` (`src/promote.ts`).
+
 ## In-place reconciler (plan 2.2, R1 ⑤–⑦, R6, R10, 11-9)
 
 `src/inplace/`. Walks the registered folders (and `share add` roots: the whole share, identity + hash only) with lstat,
@@ -387,6 +481,7 @@ bytes are refused at read time. `serve` reconciles on start, every 5 min (`--rec
 | poppler `pdftotext` | GPL-2.0/3.0 | external binary, separate process (not linked) |
 | HWP/HWPX extractor | own code (adapted from Team AX `server/src/files/hwp.ts`, same owner) | the CFB reader replaces SheetJS |
 | @modelcontextprotocol/sdk 1.32 | MIT | tests only (as the HTTP client); the server endpoint is hand-written because 1.32 does not know protocol 2026-07-28 |
+| @simplewebauthn/server 13.3.3 | MIT | runtime (passkeys); its tree: @peculiar/* MIT, @hexagon/base64 MIT, @levischuck/tiny-cbor MIT, asn1js BSD-3-Clause, pvtsutils/pvutils MIT, tslib 0BSD, reflect-metadata Apache-2.0, tsyringe MIT |
 | typescript, @types/bun | Apache-2.0, MIT | dev |
 
 ## Tests
