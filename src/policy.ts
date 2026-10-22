@@ -27,6 +27,9 @@ export class Closed extends Error {}
 
 type Readdir = (real: string) => string[]
 
+/** Some step of an absolute server path is a NAS/OS system folder (R1 ⑥). */
+const onSystemPath = (real: string) => real.split(path.sep).some((n) => n !== '' && isSystemName(n))
+
 const FLAGGED = (r: FolderRow) => r.no_ai || r.quarantine || r.widened_pending
 
 /** A Minshall-French symlink ("XSym") as macOS smbfs stores links on SMB shares: 1067 bytes, "XSym\n" + 4-digit length. */
@@ -123,7 +126,8 @@ export class Access {
   /** Top-level registered folders by NFC name; two with the same name are both closed. */
   mounts(): Map<string, FolderRow> {
     if (this.mountMap) return this.mountMap
-    const reg = [...this.byId.values()].filter((f) => f.registered)
+    // R1 ⑥: a folder registered at or below a NAS system folder (a snapshot or recycle-bin copy) is never opened
+    const reg = [...this.byId.values()].filter((f) => f.registered && !onSystemPath(f.path))
     const top = reg.filter((f) => !reg.some((o) => o !== f && f.path.startsWith(o.path + '/')))
     const count = new Map<string, number>()
     for (const f of top) count.set(nfc(f.mount_name!), (count.get(nfc(f.mount_name!)) ?? 0) + 1)
@@ -132,6 +136,7 @@ export class Access {
   }
 
   mountNode(row: FolderRow): Node | null {
+    if (onSystemPath(row.path)) return null
     let st: fs.BigIntStats
     try { st = fs.lstatSync(row.path, { bigint: true }) } catch { return null }
     if (!st.isDirectory() || st.isSymbolicLink() || identityKey(st.dev, st.ino) !== identityKey(row.dev, row.ino)) return null

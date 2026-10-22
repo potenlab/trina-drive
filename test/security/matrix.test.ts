@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import fs from 'node:fs'
 import path from 'node:path'
+import { registerFolder, setRule } from '../../src/store'
 import { MSG } from '../../src/vfs'
 import { textOf } from '../helpers'
 import { ALL_CASES, ROLES, securitySetup, type Role, type SecEnv } from './fixture'
@@ -291,3 +292,22 @@ describe('identity cases that exist on main', () => {
   test.todo('a Mac alias file (bookmark data / FinderInfo "alis") is closed like a link (R1 ⑤) [owner: reconciler]', () => {})
 })
 
+describe('NAS system folders (R1 ⑥) on the registered path itself', () => {
+  test('a folder registered at or under a NAS system folder (snapshot, recycle bin) is closed', async () => {
+    const env = securitySetup()
+    try {
+      for (const [i, rel] of ['#snapshot/daily/경영사본', '@Recently-Snapshot/경영사본2', '#recycle'].entries()) {
+        const d = env.R(rel)
+        fs.mkdirSync(d, { recursive: true })
+        fs.writeFileSync(path.join(d, 'c.md'), `SNAPSHOT_COPY_${i}\n`)
+        registerFolder(env.db, d, { name: `snap${i}`, nasReaders: 'all' })
+        setRule(env.db, d, '@전체', 'read')
+      }
+      for (const role of ['kim', 'dion'] as const) {
+        const r = await env.sh(role, 'ls -a /; grep -r SNAPSHOT_COPY /; cat /snap0/c.md /snap1/c.md /snap2/c.md')
+        expect(r.stdout + r.stderr).not.toContain('SNAPSHOT_COPY')
+        expect(r.stdout).not.toContain('snap')
+      }
+    } finally { env.cleanup() }
+  })
+})
