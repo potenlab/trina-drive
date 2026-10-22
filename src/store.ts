@@ -79,6 +79,9 @@ export function registerFolder(db: DB, dir: string, opts: { name?: string; perso
   const real = fs.realpathSync(dir)
   const st = dirIdentity(real)
   const outer = containingRegistered(db, real)
+  // R9: a personal folder changes hands or becomes ordinary only through the admin's release step (unregister or change
+  // owner from the admin web), which tells the owner and is audited; registering it again here would do it silently
+  if (outer && outer.personal_owner != null && outer.path === real) throw new StoreError(`${real} is a personal folder; release it first (unregister it or change its owner as the admin, which tells the owner)`)
   if (outer && outer.personal_owner != null) throw new StoreError('cannot register a folder inside a personal folder')
   const owner = opts.personalOwner ? person(db, opts.personalOwner).id : null
   let nas: string

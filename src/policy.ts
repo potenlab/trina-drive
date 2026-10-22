@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { DB } from './db'
 import { loadClosures, type Closures } from './inplace/closures'
-import { sniffLink, SNIFF_BYTES } from './inplace/linkish'
+import { appleDoubleSaysLink, sniffLink, SNIFF_BYTES } from './inplace/linkish'
 import { isSystemName, nfc, nfcCollisions } from './names'
 import { identityKey, type FolderRow, type RuleRow, type TokenRow } from './store'
 
@@ -21,7 +21,11 @@ export interface Node {
   rows: FolderRow[]
   parent: Node | null
 }
-export interface FileEntry { kind: 'file'; parent: Node; name: string; real: string; vpath: string; dev: bigint; ino: bigint; size: number; mtimeMs: number; mtimeNs: bigint }
+export interface FileEntry {
+  kind: 'file'; parent: Node; name: string; real: string; vpath: string; dev: bigint; ino: bigint; size: number; mtimeMs: number; mtimeNs: bigint
+  /** change time: moves whenever the content (or metadata) is written, and cannot be set back like mtime */
+  ctimeNs: bigint
+}
 export interface DirEntry { kind: 'dir'; node: Node }
 export type Entry = FileEntry | DirEntry
 
@@ -57,6 +61,23 @@ function isXSymFile(real: string, size: bigint): boolean {
   } catch { return true } finally { fs.closeSync(fd) }
 }
 
+/** Bytes of an AppleDouble sidecar read for its Finder info (the entry sits near the start). */
+const SIDECAR_BYTES = 64 * 1024
+
+/**
+ * R1 ⑤: the `._name` AppleDouble sidecar next to a file (how SMB/NAS keep a Mac's Finder info) says the file is an alias
+ * or a Mac symlink. Read without following; a sidecar that cannot be read says nothing.
+ */
+function sidecarSaysLink(dir: string, name: string): boolean {
+  let fd: number
+  try { fd = fs.openSync(path.join(dir, '._' + name), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK) } catch { return false }
+  try {
+    if (!fs.fstatSync(fd).isFile()) return false
+    const b = Buffer.alloc(SIDECAR_BYTES)
+    return appleDoubleSaysLink(b.subarray(0, fs.readSync(fd, b, 0, b.length, 0)))
+  } catch { return false } finally { fs.closeSync(fd) }
+}
+
 /** R0: max over the person and their groups of the rules from F up to the nearest break (inclusive). */
 export function effectiveLevel(rows: FolderRow[], personId: number, groups: Set<number>, rules: Map<number, RuleRow[]>): number {
   // Inside a personal folder only its owner counts, whatever lies below it (R0: no registration, rule or break may sit
@@ -81,7 +102,7 @@ export class Access {
   private readonly byIdentity = new Map<string, FolderRow>()
   private readonly byId = new Map<number, FolderRow>()
   private readonly rules = new Map<number, RuleRow[]>()
-  private readonly listCache = new Map<string, { names: string[]; collide: Set<string> } | null>()
+  private readonly listCache = new Map<string, { names: string[]; collide: Set<string>; sidecars: Set<string> } | null>()
   private readonly visibleCache = new Map<string, boolean>()
   private mountMap: Map<string, FolderRow> | null = null
   /** reconciler findings: closed identities (R1 ⑤, R6, R10) and paths of lost rule-bearing folders */
@@ -165,8 +186,11 @@ export class Access {
 
   private listing(real: string) {
     if (this.listCache.has(real)) return this.listCache.get(real)!
-    let v: { names: string[]; collide: Set<string> } | null = null
-    try { const names = this.readdir(real); v = { names, collide: nfcCollisions(names) } } catch { v = null }
+    let v: { names: string[]; collide: Set<string>; sidecars: Set<string> } | null = null
+    try {
+      const names = this.readdir(real)
+      v = { names, collide: nfcCollisions(names), sidecars: new Set(names.filter((n) => n.startsWith('._') && n.length > 2).map((n) => n.slice(2))) }
+    } catch { v = null }
     this.listCache.set(real, v)
     return v
   }
@@ -202,7 +226,8 @@ export class Access {
       return { kind: 'dir', node: { real, vpath, dev: st.dev, ino: st.ino, rows: row ? [...parent.rows, row] : parent.rows, parent } }
     }
     if (!st.isFile() || st.nlink !== 1n || isXSymFile(real, st.size)) return null
-    return { kind: 'file', parent, name, real, vpath, dev: st.dev, ino: st.ino, size: Number(st.size), mtimeMs: Number(st.mtimeMs), mtimeNs: st.mtimeNs }
+    if (l.sidecars.has(name) && sidecarSaysLink(parent.real, name)) return null // a Mac alias by its Finder info
+    return { kind: 'file', parent, name, real, vpath, dev: st.dev, ino: st.ino, size: Number(st.size), mtimeMs: Number(st.mtimeMs), mtimeNs: st.mtimeNs, ctimeNs: st.ctimeNs }
   }
 
   /** Resolve virtual path parts under the mounts. Hidden and nonexistent are the same: null. */

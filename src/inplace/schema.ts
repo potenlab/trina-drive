@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS fs_index (
   path TEXT PRIMARY KEY, root TEXT NOT NULL, dev TEXT NOT NULL, ino TEXT NOT NULL,
   kind TEXT NOT NULL,                -- file | dir | symlink | other
   size INTEGER NOT NULL, mtime_ns TEXT NOT NULL, birth_ns TEXT NOT NULL, nlink INTEGER NOT NULL,
-  sha256 TEXT, hashed_key TEXT,      -- hashed_key = dev:ino:size:mtime the hash belongs to
+  sha256 TEXT, hashed_key TEXT,      -- hashed_key = dev:ino:size:mtime:ctime the hash belongs to
   sniff TEXT,                        -- 'xsym' | 'alias' found in the content (with the hash)
   closed TEXT,                       -- why R1 ⑤ / NFC closes this path, if it does
   seen_at INTEGER NOT NULL);

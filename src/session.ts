@@ -10,6 +10,18 @@ import { Mirror } from './mirror'
 import { Access, type FileEntry, type Node } from './policy'
 import { ensureFolder, identityKey, type TokenRow } from './store'
 
+/** A free draft path next to `rel` for a hidden draft moved out of the way: "a/b.md" -> "a/b (earlier 12).md". */
+function asidePath(db: DB, tokenId: number, rel: string, id: number): string {
+  const slash = rel.lastIndexOf('/') + 1
+  const dot = rel.lastIndexOf('.')
+  const [stem, ext] = dot > slash ? [rel.slice(0, dot), rel.slice(dot)] : [rel, '']
+  const taken = db.query<{ id: number }, [number, string]>('SELECT id FROM drafts WHERE token_id = ? AND path = ? AND deleted_at IS NULL')
+  for (let n = 0; ; n++) {
+    const p = `${stem} (earlier ${id}${n ? '-' + n : ''})${ext}`
+    if (!taken.get(tokenId, p)) return p
+  }
+}
+
 /** `now` is injectable so the provenance simulation can replay a day. */
 export interface Ctx {
   db: DB; dataDir: string; mirror: Mirror; blobs: Blobs; now: () => number
@@ -116,7 +128,14 @@ export class Session {
       if (this.pending.size) {
         const win = this.window(now)
         for (const [rel, content] of this.pending) {
-          const existing = db.query<{ id: number }, [number, string]>('SELECT id FROM drafts WHERE token_id = ? AND path = ? AND deleted_at IS NULL').get(this.token.id, rel)
+          let existing = db.query<{ id: number }, [number, string]>('SELECT id FROM drafts WHERE token_id = ? AND path = ? AND deleted_at IS NULL').get(this.token.id, rel)
+          // R4: an own draft this token cannot see now is not there for it. Writing its path starts a new draft (its own
+          // sources only); the hidden one is moved aside untouched and shows up there once the token can see it again.
+          if (existing && !this.storedDrafts().some((d) => d.id === existing!.id)) {
+            if (content === null) continue
+            db.query('UPDATE drafts SET path = ? WHERE id = ?').run(asidePath(db, this.token.id, rel, existing.id), existing.id)
+            existing = null
+          }
           if (content === null) {
             if (existing) db.query('UPDATE drafts SET deleted_at = ? WHERE id = ?').run(now, existing.id)
             continue

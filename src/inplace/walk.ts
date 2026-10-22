@@ -8,7 +8,7 @@ export type Kind = 'file' | 'dir' | 'symlink' | 'other'
 
 export interface Seen {
   path: string; root: string; dev: string; ino: string; kind: Kind
-  size: number; mtimeNs: string; birthNs: string; nlink: number
+  size: number; mtimeNs: string; ctimeNs: string; birthNs: string; nlink: number
   /** another name in the same folder is equal after NFC */
   nfcCollision: boolean
 }
@@ -28,7 +28,7 @@ export const kindOf = (st: fs.BigIntStats): Kind => st.isSymbolicLink() ? 'symli
 
 export function seenFrom(p: string, root: string, st: fs.BigIntStats, nfcCollision = false): Seen {
   return { path: p, root, dev: String(st.dev), ino: String(st.ino), kind: kindOf(st), size: Number(st.size), mtimeNs: String(st.mtimeNs),
-    birthNs: String(st.birthtimeNs), nlink: Number(st.nlink), nfcCollision }
+    ctimeNs: String(st.ctimeNs), birthNs: String(st.birthtimeNs), nlink: Number(st.nlink), nfcCollision }
 }
 
 const BATCH = 64

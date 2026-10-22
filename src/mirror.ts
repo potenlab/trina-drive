@@ -11,6 +11,13 @@ import { sha256 } from './store'
 
 interface Row { sha256: string; status: string; message: string | null }
 
+/**
+ * The version part of a mirror row's key (stored in its mtime_ns column): mtime and ctime. mtime alone can be put back
+ * after a same-size rewrite in place (rsync --inplace, restore tools) or come with a reused inode; ctime moves on every
+ * write and cannot be set. A caller without a ctime gets a key no read matches: a cache miss, never stale text.
+ */
+const stamp = (f: { mtimeNs: bigint | string; ctimeNs?: bigint | string }) => `${f.mtimeNs}:${f.ctimeNs ?? '-'}`
+
 export class Mirror {
   constructor(private readonly db: DB, readonly dir: string) { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }) }
 
@@ -18,7 +25,7 @@ export class Mirror {
 
   /** Mirror file holding the text of `f` (extracted for office files, the bytes themselves otherwise). */
   async textPath(access: Access, f: FileEntry): Promise<string> {
-    const key = [String(f.dev), String(f.ino), f.size, String(f.mtimeNs)] as const
+    const key = [String(f.dev), String(f.ino), f.size, stamp(f)] as const
     const row = this.db.query<Row, [string, string, number, string]>('SELECT sha256, status, message FROM mirror WHERE dev = ? AND ino = ? AND size = ? AND mtime_ns = ?').get(...key)
     if (row?.status === 'error') { access.recheck(f); throw new ExtractError(row.message ?? 'cannot extract text') }
     if (row && fs.existsSync(this.file(row.sha256))) { access.recheck(f); return this.file(row.sha256) }
@@ -48,9 +55,9 @@ export class Mirror {
    * against the identity by the caller). Returns the text, or null if it cannot be extracted. Nothing is served from
    * here: reads still go through textPath and the policy.
    */
-  async ingest(f: { name: string; dev: bigint | string; ino: bigint | string; size: number; mtimeNs: bigint | string }, bytes: Uint8Array,
+  async ingest(f: { name: string; dev: bigint | string; ino: bigint | string; size: number; mtimeNs: bigint | string; ctimeNs?: bigint | string }, bytes: Uint8Array,
     extract: (name: string, bytes: Uint8Array) => Promise<string> = extractText): Promise<string | null> {
-    const key = [String(f.dev), String(f.ino), f.size, String(f.mtimeNs)] as const
+    const key = [String(f.dev), String(f.ino), f.size, stamp(f)] as const
     const sha = sha256(bytes)
     const out = this.file(sha)
     let status = 'ok', message: string | null = null, text: string | null = null

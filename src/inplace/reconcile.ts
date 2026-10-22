@@ -52,7 +52,8 @@ interface PrevRow {
 interface Cur extends Seen { sha256: string | null; hashedKey: string | null; sniff: string | null; closed: string | null }
 
 const idOf = (e: { dev: string; ino: string }) => identityKey(e.dev, e.ino)
-const hashKey = (e: { dev: string; ino: string; size: number; mtimeNs?: string; mtime_ns?: string }) => `${e.dev}:${e.ino}:${e.size}:${e.mtimeNs ?? e.mtime_ns}`
+/** What a stored hash belongs to. ctime too: mtime can be put back after a same-size rewrite in place (or a reused inode). */
+const hashKey = (e: Seen) => `${e.dev}:${e.ino}:${e.size}:${e.mtimeNs}:${e.ctimeNs}`
 const under = (p: string, dir: string) => p === dir || p.startsWith(dir + '/')
 const sameObject = (p: PrevRow, c: Seen) =>
   p.dev === c.dev && p.ino === c.ino && p.kind === c.kind && (p.birth_ns === '0' || c.birthNs === '0' || p.birth_ns === c.birthNs)
@@ -382,7 +383,7 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
     q.push({ size: c.size, run: async () => {
       const b = bytes ?? readOriginalBytes(c)
       if (!b) return
-      const text = await mirror.ingest({ name: path.basename(c.path), dev: c.dev, ino: c.ino, size: c.size, mtimeNs: c.mtimeNs }, b, extractForIndex)
+      const text = await mirror.ingest({ name: path.basename(c.path), dev: c.dev, ino: c.ino, size: c.size, mtimeNs: c.mtimeNs, ctimeNs: c.ctimeNs }, b, extractForIndex)
       rep.extracted++
       if (hasDrafts) rep.widened += detectWidened(db, corpusFor(), f, text, now()).length
     } })
@@ -399,7 +400,7 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
 
 // ---------- helpers ----------
 function fromPrev(r: PrevRow): Cur {
-  return { path: r.path, root: r.root, dev: r.dev, ino: r.ino, kind: r.kind as Cur['kind'], size: r.size, mtimeNs: r.mtime_ns, birthNs: r.birth_ns,
+  return { path: r.path, root: r.root, dev: r.dev, ino: r.ino, kind: r.kind as Cur['kind'], size: r.size, mtimeNs: r.mtime_ns, ctimeNs: '', birthNs: r.birth_ns,
     nlink: r.nlink, nfcCollision: r.closed === 'nfc_collision', sha256: r.sha256, hashedKey: r.hashed_key, sniff: r.sniff, closed: r.closed }
 }
 
