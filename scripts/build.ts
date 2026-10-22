@@ -307,10 +307,13 @@ export async function buildRelease(o: BuildOptions): Promise<string> {
     if (o.tools === 'stub') { tools.push(await stubTool(pin, rel)); continue }
     const t = pin.targets[o.target]
     if (!t) { missing.push(pin.package); continue }
-    if (pin.source === 'download') tools.push(await vendorDownload(pin, t, rel, o.cacheDir ?? path.join(REPO, 'dist', '.cache')))
-    else if (o.target !== hostTarget) { log(`[${o.target}] ${pin.package}: can only be vendored on a ${o.target} build host; left out`); missing.push(pin.package) }
-    else tools.push(await vendorHomebrew(pin, t, rel, !!o.acceptDrift))
-    log(`[${o.target}] ${pin.package} ${tools.at(-1)?.package === pin.package ? tools.at(-1)!.version : '(missing)'}`)
+    if (pin.source === 'homebrew' && o.target !== hostTarget) {
+      log(`[${o.target}] ${pin.package}: can only be vendored on a ${o.target} build host; left out`)
+      missing.push(pin.package)
+      continue
+    }
+    tools.push(pin.source === 'download' ? await vendorDownload(pin, t, rel, o.cacheDir ?? path.join(REPO, 'dist', '.cache')) : await vendorHomebrew(pin, t, rel, !!o.acceptDrift))
+    log(`[${o.target}] ${pin.package} ${tools.at(-1)!.version} (${pin.source})`)
   }
   if (!fs.readdirSync(path.join(rel, 'tools', 'bin')).length) fs.rmSync(path.join(rel, 'tools'), { recursive: true })
 

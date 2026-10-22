@@ -224,19 +224,21 @@ done
 APP_BIN="$F_BASE/app/versions/$VERSION/bin/$NAME"
 
 # ---- external tools: bundled (pinned, verified above) or Homebrew's as a fallback ----
-tool_path() {  # name -> logical path, or empty
-  if [ -x "$F_BASE/app/versions/$VERSION/tools/bin/$1" ]; then echo "$APP_CUR/tools/bin/$1"; return 0; fi
+TOOL=""
+find_tool() {  # name -> TOOL = logical path, or empty (not a $(...) call: warnings must reach WARNINGS)
+  TOOL=""
+  if [ -x "$F_BASE/app/versions/$VERSION/tools/bin/$1" ]; then TOOL="$APP_CUR/tools/bin/$1"; return 0; fi
   local d
   for d in /opt/homebrew/bin /usr/local/bin; do
     if [ -x "$d/$1" ]; then
       warn "$1 is not in this release: using Homebrew's $d/$1 (not pinned, and replaceable by whoever owns Homebrew; build a release with bundled tools for production)"
-      echo "$d/$1"; return 0
+      TOOL="$d/$1"; return 0
     fi
   done
   return 0
 }
-RG=$(tool_path rg)
-PDFTOTEXT=$(tool_path pdftotext)
+find_tool rg; RG=$TOOL
+find_tool pdftotext; PDFTOTEXT=$TOOL
 [ -n "$RG" ] || warn "ripgrep (rg) not found: search will not work until a release with tools is installed (or brew install ripgrep)"
 [ -n "$PDFTOTEXT" ] || warn "pdftotext not found: PDFs will not be readable (or brew install poppler)"
 
