@@ -10,6 +10,7 @@ import {
   accountByLogin, AuthError, checkPasswordRules, consumeLink, consumeSetupToken, createSession, csrfOk, hashPassword, lookupSession,
   peekLink, revokeSession, SESSION_COOKIE, SESSION_MAX_MS, setPassword, setupDone, setupPending, verifyPassword, type WebSession,
 } from './auth'
+import * as files from './files'
 import { ApiError, bad, json, notFound, type WebCtx } from './http'
 import { markNoticesRead, noticesOf } from './notices'
 import * as ops from './ops'
@@ -181,6 +182,13 @@ const routes: Route[] = [
       'content-disposition': `attachment; filename="${fname.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(fname)}`,
     } })
   }),
+  // people's read-only file view (files.ts; GET only, the session is required, R1 decides)
+  R('GET', '/files', true, ({ w, actor, url }) => files.list(w, actor, url)),
+  R('GET', '/files/stat', true, ({ w, actor, url }) => files.stat(w, actor, url)),
+  R('GET', '/files/download', true, ({ w, actor, url }) => files.download(w, actor, url)),
+  R('GET', '/files/text', true, ({ w, actor, url }) => files.text(w, actor, url)),
+  R('GET', '/files/who', true, ({ w, actor, url }) => files.who(w, actor, url)),
+  R('GET', '/search', true, ({ w, actor, url }) => files.search(w, actor, url)),
   R('GET', '/audit', true, ({ w, actor, url }) => views.auditView(w, actor, url.searchParams.get('view') ?? 'mine', Number(url.searchParams.get('before') ?? '') || undefined)),
 ]
 
