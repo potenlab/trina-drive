@@ -146,7 +146,6 @@ describe('another token\'s ls keeps p99 < 200 ms during the attack', () => {
 })
 
 describe('limits that are not built yet', () => {
-  test.todo('per-token draft quota (count and bytes): today a token can store unlimited 8 MB drafts [owner: drafts]', () => {})
 })
 
 describe('memory cap per command: what one call may read into the server (scaled down: 9 MB per file, 20 MB per call)', () => {
@@ -270,5 +269,62 @@ describe.skipIf(process.env.SHELF_SHELL === 'inprocess')('concurrent command lim
     expect(busy.length).toBe(3) // 2 running + 4 waiting
     expect(r.texts.filter((t) => t.includes('done')).length).toBe(6)
     expect(r.texts.at(-1)).toContain('boss-ok')
+  })
+})
+
+describe('draft quota (count and bytes per token, bytes per person; scaled down: 5 drafts / 1 MB per token, 1.5 MB per person)', () => {
+  const saved = { files: LIMITS.draftFilesPerToken, bytes: LIMITS.draftBytesPerToken, person: LIMITS.draftBytesPerPerson }
+  beforeAll(() => {
+    LIMITS.draftFilesPerToken = 5
+    LIMITS.draftBytesPerToken = 1 << 20
+    LIMITS.draftBytesPerPerson = 1.5 * (1 << 20)
+    for (const n of ['q1', 'q2', 'q3']) e.addToken(n, 'park', { name: `park-${n}` })
+    e.addToken('q4', 'lee', { name: 'lee-q4' })
+  })
+  afterAll(() => { LIMITS.draftFilesPerToken = saved.files; LIMITS.draftBytesPerToken = saved.bytes; LIMITS.draftBytesPerPerson = saved.person })
+  const write = (who: string, path: string, content: string) => e.tool(who, 'write', { path, content })
+  const live = (who: string) => e.db.query<{ n: number }, [number]>('SELECT count(*) AS n FROM drafts WHERE token_id = ? AND deleted_at IS NULL').get(e.tok(who).id)!.n
+
+  test('count: the 6th draft of a token is refused; overwriting and replacing a deleted one are not', async () => {
+    for (let i = 1; i <= 5; i++) expect((await write('q4', `/drafts/n${i}.md`, `note ${i}`)).isError).toBeFalsy()
+    const r = await write('q4', '/drafts/n6.md', 'one too many')
+    expect(r.isError).toBe(true)
+    expect(r.content[0]!.text).toMatch(/^EDQUOT: draft quota exceeded: a token may keep at most 5 drafts \(this one has 5\)\. Delete drafts/)
+    expect((await write('q4', '/drafts/n1.md', 'rewritten')).isError).toBeFalsy()
+    const sh = await e.sh('q4', 'rm /drafts/n2.md && echo new > /drafts/n6.md && cat /drafts/n6.md')
+    expect(sh.stdout).toBe('new\n')
+    expect(live('q4')).toBe(5)
+  })
+
+  test('count through the shell: a loop creating drafts stops at the quota, with the reason on stderr', async () => {
+    const r = await e.sh('q3', 'for i in 1 2 3 4 5 6 7 8; do echo $i > /drafts/s$i.md; done; ls /drafts | wc -l')
+    expect(r.stdout.trim()).toBe('5')
+    expect(r.stderr).toContain('draft quota exceeded: a token may keep at most 5 drafts')
+    expect(live('q3')).toBe(5)
+  })
+
+  test('bytes per token: a write that takes the token over 1 MB is refused; shrinking is allowed', async () => {
+    const kb = (n: number) => 'x'.repeat(n * 1024)
+    expect((await write('q1', '/drafts/a.md', kb(600))).isError).toBeFalsy()
+    const r = await write('q1', '/drafts/b.md', kb(600))
+    expect(r.isError).toBe(true)
+    expect(r.content[0]!.text).toContain("draft quota exceeded: a token's drafts may hold at most 1 MB")
+    expect((await write('q1', '/drafts/a.md', kb(100))).isError).toBeFalsy()
+    expect((await write('q1', '/drafts/b.md', kb(600))).isError).toBeFalsy()
+    // appending through the shell is checked on the grown size
+    const sh = await e.sh('q1', 'head -c 400000 /drafts/b.md >> /drafts/a.md')
+    expect(sh.exitCode).not.toBe(0)
+    expect(sh.stderr).toContain('draft quota exceeded')
+    expect((await e.sh('q1', 'wc -c < /drafts/a.md')).stdout.trim()).toBe(String(100 * 1024))
+  })
+
+  test('bytes per person: two tokens of one person together stay under 1.5 MB', async () => {
+    // q1 holds 700 KB now; q2 may add 700 KB (1.4 MB in all) but not another 200 KB
+    expect((await write('q2', '/drafts/c.md', 'y'.repeat(700 * 1024))).isError).toBeFalsy()
+    const r = await write('q2', '/drafts/d.md', 'y'.repeat(200 * 1024))
+    expect(r.isError).toBe(true)
+    expect(r.content[0]!.text).toContain("draft quota exceeded: one person's drafts (all tokens) may hold at most 1.5 MB")
+    // another person is not affected
+    expect((await write('q4', '/drafts/n1.md', 'y'.repeat(200 * 1024))).isError).toBeFalsy()
   })
 })

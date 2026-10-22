@@ -11,6 +11,11 @@ export const ENV_PREFIX = NAME.toUpperCase().replace(/[^A-Z0-9]/g, '_')
 /** Data directory: --data, then $<NAME>_HOME, then ~/.<name>. Never inside a registered folder. */
 export const defaultDataDir = () => process.env[`${ENV_PREFIX}_HOME`] || path.join(os.homedir(), `.${NAME}`)
 
+const envBytes = (k: string, dflt: number): number => {
+  const v = Number(process.env[`${ENV_PREFIX}_${k}`])
+  return process.env[`${ENV_PREFIX}_${k}`] && Number.isFinite(v) && v >= 0 ? Math.floor(v) : dflt
+}
+
 export const LIMITS = {
   /** provenance window (R3) */
   windowMs: 8 * 3600_000,
@@ -35,6 +40,10 @@ export const LIMITS = {
   extractRssBytes: 512 * 1024 * 1024,
   /** content one call may read (shell, read tool): each file at most fileBytes, all files together at most this */
   callReadBytes: 128 * 1024 * 1024,
+  /** draft quota: live drafts (latest version) per token and per person; env <PREFIX>_DRAFT_MAX_FILES / _MAX_BYTES / _PERSON_MAX_BYTES */
+  draftFilesPerToken: envBytes('DRAFT_MAX_FILES', 500),
+  draftBytesPerToken: envBytes('DRAFT_MAX_BYTES', 200 * 1024 * 1024),
+  draftBytesPerPerson: envBytes('DRAFT_PERSON_MAX_BYTES', 1024 * 1024 * 1024),
 }
 
 export const SUPPORTED_PROTOCOL_VERSIONS = ['2026-07-28', '2025-11-25'] as const

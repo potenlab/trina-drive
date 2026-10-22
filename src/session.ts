@@ -85,6 +85,42 @@ export class Session {
     return item.pending ?? this.ctx.blobs.get(item.draft!.sha256)
   }
 
+  // ---------- draft quota ----------
+  private quotaBase: { own: Map<string, number>; others: number } | null = null
+  /**
+   * Why writing `size` bytes to own draft `rel` would take this token or its person over the draft quota (live drafts,
+   * latest version; LIMITS.draftFilesPerToken / draftBytesPerToken / draftBytesPerPerson), or null if it may. A write
+   * that does not grow the drafts (overwrite with the same or less) is always allowed, so a box over a lowered quota
+   * can still be cleaned up. Counts every live draft of the token, also ones it cannot see right now (R4).
+   */
+  draftQuotaRefusal(rel: string, size: number): string | null {
+    if (!this.quotaBase) {
+      const own = new Map<string, number>()
+      let others = 0
+      for (const r of this.ctx.db.query<{ token_id: number; path: string; size: number }, [number]>(`
+        SELECT d.token_id, d.path, v.size FROM drafts d
+        JOIN draft_versions v ON v.draft_id = d.id AND v.version = (SELECT max(version) FROM draft_versions WHERE draft_id = d.id)
+        WHERE d.person_id = ? AND d.deleted_at IS NULL`).all(this.token.person_id)) {
+        if (r.token_id === this.token.id) own.set(r.path, r.size)
+        else others += r.size
+      }
+      this.quotaBase = { own, others }
+    }
+    const own = new Map(this.quotaBase.own)
+    for (const [k, c] of this.pending) { if (c === null) own.delete(k); else own.set(k, c.length) }
+    const before = own.get(rel)
+    if (before !== undefined && size <= before) return null
+    own.set(rel, size)
+    let bytes = 0
+    for (const n of own.values()) bytes += n
+    const MB = (n: number) => `${+(n / (1024 * 1024)).toFixed(1)} MB`
+    const fix = 'Delete drafts that are no longer needed (rm under /drafts/) or ask a person to move them.'
+    if (before === undefined && own.size > LIMITS.draftFilesPerToken) return `draft quota exceeded: a token may keep at most ${LIMITS.draftFilesPerToken} drafts (this one has ${own.size - 1}). ${fix}`
+    if (bytes > LIMITS.draftBytesPerToken) return `draft quota exceeded: a token's drafts may hold at most ${MB(LIMITS.draftBytesPerToken)} (this one would hold ${MB(bytes)}). ${fix}`
+    if (bytes + this.quotaBase.others > LIMITS.draftBytesPerPerson) return `draft quota exceeded: one person's drafts (all tokens) may hold at most ${MB(LIMITS.draftBytesPerPerson)} (would be ${MB(bytes + this.quotaBase.others)}). ${fix}`
+    return null
+  }
+
   /** The token's window now: stored touches in the last 8 hours plus this call's. */
   window(now = this.ctx.now()): Map<number, boolean> {
     const cutoff = now - LIMITS.windowMs

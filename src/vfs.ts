@@ -292,6 +292,8 @@ export class VirtualFs implements IFileSystem {
     const base = append && h?.t === 'draft' ? this.s.draftContent(h.item) : new Uint8Array()
     const content = append ? Buffer.concat([base, bytes]) : bytes
     if (content.length > LIMITS.draftBytes) throw new FsError('EFBIG', `EFBIG: file too large (drafts are limited to ${LIMITS.draftBytes} bytes), open '${p}'`, p)
+    const quota = this.s.draftQuotaRefusal(rel, content.length)
+    if (quota) { this.s.notes.add(quota); throw new FsError('EDQUOT', `EDQUOT: ${quota}`, p) }
     this.s.pending.set(rel, content)
     this.s.files.add('/drafts/' + rel)
   }
