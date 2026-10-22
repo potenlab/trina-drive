@@ -294,7 +294,38 @@ describe('R4 draft visibility', () => {
     } finally { e.db.query("INSERT INTO memberships (group_id, person_id) SELECT id, ? FROM groups WHERE name = '인사'").run(lee) }
   })
 
-  test.todo('writing to the path of an own draft that is now hidden behaves like a new path (today: merged into the hidden draft, whose sources leak in "Draft sources:") [owner: drafts]', () => {})
+  test('writing to the path of an own draft that is now hidden behaves like a new path (the hidden draft is kept aside, untouched)', async () => {
+    const env = securitySetup()
+    try {
+      let now = Date.UTC(2026, 9, 22, 9, 0, 0)
+      env.ctx.now = () => now
+      env.addToken('leeH', 'lee', { name: 'lee-hidden' })
+      await env.sh('leeH', 'cat /인사/c.csv > /drafts/hr.md')
+      const hidden = env.db.query<{ id: number }, []>("SELECT id FROM drafts WHERE path = 'hr.md'").get()!.id
+      now += LIMITS.windowMs + 60_000 // 인사 has left the token's window
+      const lee = pid(env, 'lee')
+      env.db.query("DELETE FROM memberships WHERE person_id = ? AND group_id = (SELECT id FROM groups WHERE name = '인사')").run(lee)
+      expect((await env.sh('leeH', 'ls -a /drafts')).stdout).toBe('.\n..\n')
+      const w = await env.tool('leeH', 'write', { path: '/drafts/hr.md', content: 'FRESH\n' })
+      expect(w.isError).toBeUndefined()
+      expect(textOf(w)).toContain('Draft sources: none (only this token can see it)')
+      expect(textOf(w)).not.toContain('인사')
+      expect((await env.sh('leeH', 'cat /drafts/hr.md; ls -a /drafts; echo more >> /drafts/hr.md; cat /drafts/hr.md')).stdout).toBe('FRESH\n.\n..\nhr.md\nFRESH\nmore\n')
+      expect(textOf(await env.tool('leeH', 'history', { path: '/drafts/hr.md', action: 'list' })).split('\n').length).toBe(2) // v1, v2: its own
+      expect((await env.sh('leeH', 'grep -r CANARY_hr_ /drafts')).stdout).toBe('')
+      expect(env.draftSrc('leeH', 'hr.md').size).toBe(0)
+      // the hidden draft was not merged into: same versions, same sources
+      expect(env.db.query<{ n: number }, [number]>('SELECT count(*) AS n FROM draft_versions WHERE draft_id = ?').get(hidden)!.n).toBe(1)
+      expect(env.db.query<{ folder_id: number }, [number]>('SELECT folder_id FROM draft_src WHERE draft_id = ?').all(hidden).map((r) => r.folder_id)).toEqual([env.folderId('인사')])
+      // when lee can read 인사 again, both are there: the new one at hr.md, the earlier one next to it
+      env.db.query("INSERT INTO memberships (group_id, person_id) SELECT id, ? FROM groups WHERE name = '인사'").run(lee)
+      const ls = (await env.sh('leeH', 'ls /drafts')).stdout.trim().split('\n')
+      expect(ls.length).toBe(2)
+      expect(ls).toContain('hr.md')
+      const aside = ls.find((n) => n !== 'hr.md')!
+      expect((await env.sh('leeH', `cat '/drafts/${aside}'`)).stdout).toContain(env.canary.get('hr')!)
+    } finally { env.cleanup() }
+  })
 })
 
 describe('identity cases that exist on main', () => {
