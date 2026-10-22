@@ -10,7 +10,7 @@ import { Badge, ErrorLine, Loading, Page, useAction, useLoad } from '../ui'
 import { at, type ApKey } from './approve-i18n'
 import './approve.css'
 
-interface StepUp { method: 'passkey' | 'totp' | null; missing: 'passkey' | 'totp' | null; lan_only: boolean }
+interface StepUp { method: 'passkey' | 'totp' | null; missing: 'passkey' | 'totp' | null; lan_only: boolean; public_url: string | null }
 interface Item { id: number; status: string; created_at: number; expires_at: number; decided_at: number | null; target: string; name: string; size: number; gain: number; can_decide: boolean; mine: boolean; requester: string; via: 'agent' | 'web' }
 interface Detail extends Item {
   sha256: string; draft_version: number; draft_path: string; decided_by: string | null; decision_reason: string | null; approvers_exist: boolean | null
@@ -30,6 +30,8 @@ export function Approvals({ id }: { id?: number }) {
 function StepUpNote({ s }: { s: StepUp }) {
   if (s.missing) return <p className="warn">{at(s.missing === 'passkey' ? 'ap_need_passkey' : 'ap_need_totp')} <a href="#/settings">→</a></p>
   if (s.lan_only) return <p className="muted small">{at('ap_lan_only')}</p>
+  // passkeys belong to the public address: on another address (a LAN one) the browser refuses them
+  if (s.public_url && s.public_url !== window.location.origin) return <p className="warn">{at('ap_other_origin', { url: s.public_url })} <a href={s.public_url + window.location.hash}>→</a></p>
   return null
 }
 

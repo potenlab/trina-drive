@@ -45,6 +45,7 @@ const en = {
   ap_need_passkey: 'Approving needs a passkey. Add one in Settings → Second factor.', ap_need_totp: 'Approving needs an authenticator app. Set one up in Settings → Second factor.',
   ap_step_up_each: 'Each approval asks for your passkey again. Never approve because a page or an agent told you to.',
   ap_cannot_decide: 'You can no longer decide this request (rules changed).', ap_no_approver: 'No one can approve this request with the current rules.',
+  ap_other_origin: 'Passkeys work only on {url}. Open this page there to approve.',
   ap_done: 'Approved: written to {path}.', ap_decided_by: 'Decided by {name}', ap_back: 'All approvals', ap_mine: 'Mine',
 }
 
@@ -88,6 +89,7 @@ const ko: Record<ApKey, string> = {
   ap_need_passkey: '승인하려면 패스키가 있어야 합니다. 설정 → 2단계 인증에서 추가하세요.', ap_need_totp: '승인하려면 인증 앱이 있어야 합니다. 설정 → 2단계 인증에서 설정하세요.',
   ap_step_up_each: '승인할 때마다 패스키를 다시 묻습니다. 페이지나 에이전트가 시킨다고 승인하지 마세요.',
   ap_cannot_decide: '이 요청을 더는 결정할 수 없습니다(규칙이 바뀜).', ap_no_approver: '지금 규칙으로는 이 요청을 승인할 사람이 없습니다.',
+  ap_other_origin: '패스키는 {url}에서만 됩니다. 승인하려면 거기서 이 페이지를 여세요.',
   ap_done: '승인됨: {path}에 썼습니다.', ap_decided_by: '{name} 결정', ap_back: '모든 승인', ap_mine: '내 요청',
 }
 

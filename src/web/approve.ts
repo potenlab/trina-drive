@@ -125,7 +125,7 @@ export async function secondFactorChallenge(w: WebCtx, ticket: string, personId:
   const cfg = pkConfig(w)
   const passkey = cfg ? await passkeyAssertionOptions(w.db, cfg, personId, 'login', ticketBinding(ticket)) : null
   const methods = [...(passkey ? ['passkey'] : []), ...(totpEnabled(w.db, personId) ? ['totp'] : []), ...(recoveryRemaining(w.db, personId) ? ['recovery'] : [])]
-  return { ticket, methods, passkey, passkeys_elsewhere: !passkey && passkeysOf(w.db, personId).length > 0 ? (cfg?.origin ?? 'public') : null }
+  return { ticket, methods, passkey, public_url: cfg?.origin ?? null, passkeys_elsewhere: !passkey && passkeysOf(w.db, personId).length > 0 ? (cfg?.origin ?? 'public') : null }
 }
 
 /** Check the second factor of a sign-in ticket. Throws on failure (the caller counts it). */
@@ -221,10 +221,10 @@ export function approvalsView(w: WebCtx, a: Actor) {
 }
 
 /** How this person proves themselves for an approval here: passkey when the install has a public https address, else TOTP. */
-function stepUpMethod(w: WebCtx, personId: number): { method: 'passkey' | 'totp' | null; missing: 'passkey' | 'totp' | null; lan_only: boolean } {
+function stepUpMethod(w: WebCtx, personId: number): { method: 'passkey' | 'totp' | null; missing: 'passkey' | 'totp' | null; lan_only: boolean; public_url: string | null } {
   const cfg = pkConfig(w)
-  if (cfg) return passkeysOf(w.db, personId).some((p) => p.rp_id === cfg.rpId) ? { method: 'passkey', missing: null, lan_only: false } : { method: null, missing: 'passkey', lan_only: false }
-  return totpEnabled(w.db, personId) ? { method: 'totp', missing: null, lan_only: true } : { method: null, missing: 'totp', lan_only: true }
+  if (cfg) return passkeysOf(w.db, personId).some((p) => p.rp_id === cfg.rpId) ? { method: 'passkey', missing: null, lan_only: false, public_url: cfg.origin } : { method: null, missing: 'passkey', lan_only: false, public_url: cfg.origin }
+  return totpEnabled(w.db, personId) ? { method: 'totp', missing: null, lan_only: true, public_url: null } : { method: null, missing: 'totp', lan_only: true, public_url: null }
 }
 
 export function approvalView(w: WebCtx, a: Actor, id: number) {

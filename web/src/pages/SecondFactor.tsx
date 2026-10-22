@@ -8,7 +8,7 @@ import { ErrorLine, Loading, Secret, useAction, useLoad } from '../ui'
 import { at } from './approve-i18n'
 import './approve.css'
 
-export interface SecondFactorChallenge { ticket: string; methods: ('passkey' | 'totp' | 'recovery')[]; passkey: unknown | null; passkeys_elsewhere: string | null }
+export interface SecondFactorChallenge { ticket: string; methods: ('passkey' | 'totp' | 'recovery')[]; passkey: unknown | null; public_url: string | null; passkeys_elsewhere: string | null }
 
 /** After a correct password (or a reset link) for someone with a second factor. */
 export function SecondFactorStep({ challenge }: { challenge: SecondFactorChallenge }) {
@@ -36,7 +36,8 @@ export function SecondFactorStep({ challenge }: { challenge: SecondFactorChallen
           try { await finish({ method: 'passkey', response: await getPasskey(challenge.passkey) }) } catch { setError(at('sf_bad')) }
         }}>{at('sf_passkey')}</button>
       )}
-      {challenge.passkeys_elsewhere && <p className="muted small">{at('sf_elsewhere', { url: challenge.passkeys_elsewhere })}</p>}
+      {(challenge.passkeys_elsewhere || (!!challenge.passkey && !!challenge.public_url && challenge.public_url !== window.location.origin)) &&
+        <p className="muted small">{at('sf_elsewhere', { url: challenge.passkeys_elsewhere ?? challenge.public_url ?? '' })}</p>}
       {codes.length > 0 && (
         <form className="narrow" onSubmit={(e) => { e.preventDefault(); finish({ method, code }) }}>
           <label>{at(method === 'totp' ? 'sf_code' : 'sf_recovery')}
