@@ -10,7 +10,7 @@
 // streaming code simple; the primitives are the same.
 import crypto from 'node:crypto'
 import fs from 'node:fs'
-import { NAME } from '../config'
+import { SECRET_TAG as KEY_TAG } from '../config'
 
 export class BackupError extends Error {
   constructor(readonly code: 'format' | 'wrong-key' | 'tampered' | 'truncated' | 'unsafe' | 'config' | 'io', message: string) {
@@ -57,8 +57,8 @@ export function generateKey(): { secretText: string; publicText: string; key: Se
   return { secretText: formatSecret(secret), publicText: formatPublic(key.publicKey), key }
 }
 
-export const formatSecret = (secret: Uint8Array) => `${NAME}${SECRET_TAG}${b64u(secret)}${checksum(secret)}`
-export const formatPublic = (pub: Uint8Array) => `${NAME}${PUBLIC_TAG}${b64u(pub)}`
+export const formatSecret = (secret: Uint8Array) => `${KEY_TAG}${SECRET_TAG}${b64u(secret)}${checksum(secret)}`
+export const formatPublic = (pub: Uint8Array) => `${KEY_TAG}${PUBLIC_TAG}${b64u(pub)}`
 
 /** Key id: the first 16 bytes of SHA-256(public key). Its first 8 bytes in hex are the fingerprint people compare. */
 export const keyId = (pub: Uint8Array) => sha256(pub).subarray(0, 16)

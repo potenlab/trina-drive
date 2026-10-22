@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/potenlab/trina-drive/blob/main/SECURITY.md
+    about: Please do not open a public issue. Email security@trina.app.
+  - name: Managed hosting, setup and pricing
+    url: https://drive.trina.app/#pricing
+    about: Questions about Team / Business plans or setup help (contact@trina.app).

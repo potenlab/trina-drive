@@ -1,14 +1,13 @@
-// The product name lives here and in package.json only ("shelf" is a temporary codename).
+// Names come from src/brand.ts (one place to rename the product); the version from package.json.
 import pkg from '../package.json'
 import os from 'node:os'
 import path from 'node:path'
+import { ENV_PREFIX, NAME } from './brand'
 
-export const NAME: string = pkg.name
+export { CLI, ENV_PREFIX, NAME, PRODUCT, SECRET_TAG, TOKEN_PREFIX } from './brand'
 export const VERSION: string = pkg.version
-export const TOKEN_PREFIX = `${NAME}_pat_`
-export const ENV_PREFIX = NAME.toUpperCase().replace(/[^A-Z0-9]/g, '_')
 
-/** Data directory: --data, then $<NAME>_HOME, then ~/.<name>. Never inside a registered folder. */
+/** Data directory: --data, then $TDRIVE_HOME, then ~/.trina-drive (src/brand.ts). Never inside a registered folder. */
 export const defaultDataDir = () => process.env[`${ENV_PREFIX}_HOME`] || path.join(os.homedir(), `.${NAME}`)
 
 const envBytes = (k: string, dflt: number): number => {

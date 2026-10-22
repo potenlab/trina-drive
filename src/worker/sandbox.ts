@@ -177,7 +177,7 @@ export function isolationProblem(): string | null {
   return `${(detectProblem ?? 'no sandbox available').replace(/[.\s]+$/, '')}.${hint}`
 }
 
-/** Resolve a dedicated worker user (e.g. `_shelfwork`) to uid/gid, or null if it does not exist. */
+/** Resolve a dedicated worker user (e.g. `_tdrivework`) to uid/gid, or null if it does not exist. */
 export function lookupUser(name: string): { uid: number; gid: number } | null {
   const id = (flag: string) => {
     const r = Bun.spawnSync(['/usr/bin/id', flag, name], { stdout: 'pipe', stderr: 'ignore' })

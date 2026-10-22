@@ -1,6 +1,6 @@
 // `public enable | status | disable` (plan 5.2 "공개 주소"). Settings only: `serve` starts the public listener when the
 // gate passes. Running cloudflared is the operator's step (docs/CONNECT-CLAUDE-AI.md "Public address").
-import { NAME } from '../config'
+import { CLI } from '../config'
 import type { DB } from '../db'
 import { DEFAULT_CLIENT_HOSTS } from '../oauth/config'
 import { readPublicSettings, writePublicSettings, type PublicSettings } from '../oauth/settings'
@@ -65,7 +65,7 @@ export function publicCommand(db: DB, sub: string | undefined, rest: string[], o
       if (s.url && s.url !== origin) out(`warning: the public URL changes from ${s.url} to ${origin}; OAuth tokens issued for ${s.url}/mcp stop working (people connect again)`)
       writePublicSettings(db, next)
       out(statusText(db, next))
-      out(`\nnext: restart \`${NAME} serve\`, then point a Cloudflare tunnel at http://${next.host}:${next.port} (docs/CONNECT-CLAUDE-AI.md)`)
+      out(`\nnext: restart \`${CLI} serve\`, then point a Cloudflare tunnel at http://${next.host}:${next.port} (docs/CONNECT-CLAUDE-AI.md)`)
       return true
     }
     default: return false

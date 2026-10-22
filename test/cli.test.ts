@@ -8,7 +8,7 @@ const CLI = path.resolve(import.meta.dir, '../src/cli.ts')
 let dir: string, tmp: string, kim: string
 
 beforeAll(() => {
-  dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-cli-test-')))
+  dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tdrive-cli-test-')))
   tmp = path.join(dir, 'tmp')
   fs.mkdirSync(tmp)
   const seed = Bun.spawnSync([process.execPath, CLI, '--data', path.join(dir, 'data'), 'demo', 'seed'], { stdout: 'pipe', stderr: 'pipe' })
@@ -32,7 +32,7 @@ async function sh(command: string, env: Record<string, string> = {}) {
   const t0 = performance.now()
   // TMPDIR: the executor's job dirs land under it, so we can check they are all gone afterwards
   const p = Bun.spawn([process.execPath, CLI, '--data', path.join(dir, 'data'), 'sh', '--token', kim, '-c', command], {
-    stdout: 'pipe', stderr: 'pipe', env: { ...process.env, TMPDIR: tmp, SHELF_SHELL: 'isolated', ...env },
+    stdout: 'pipe', stderr: 'pipe', env: { ...process.env, TMPDIR: tmp, TDRIVE_SHELL: 'isolated', ...env },
   })
   const seen = new Set<number>()
   const watch = setInterval(() => { for (const [pid, ppid] of workers()) if (ppid === p.pid) seen.add(pid) }, 25)
@@ -54,7 +54,7 @@ test('cli sh runs the command in an isolated worker, exits promptly and leaves n
   const live = workers()
   for (const pid of r.workers) expect(live.has(pid)).toBe(false)
   // every job dir was removed (that happens only after its worker exited)
-  const roots = fs.readdirSync(tmp).filter((n) => n.startsWith('shelf-work-'))
+  const roots = fs.readdirSync(tmp).filter((n) => n.startsWith('tdrive-work-'))
   for (const root of roots) expect(fs.readdirSync(path.join(tmp, root))).toEqual([])
 })
 

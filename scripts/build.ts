@@ -5,7 +5,7 @@
 //                        [--tools vendor|none|stub] [--daemons server,backup[,worker]] [--accept-tool-drift] [--no-tar]
 //
 // Output, per target: <out>/<name>-<version>-<target>/
-//   bin/<name>                 `bun build --compile` of --entry (the whole app in one Mach-O)
+//   bin/<cli>                  `bun build --compile` of --entry (the whole app in one Mach-O)
 //   tools/bin/rg               ripgrep, official release binary, download pinned by SHA-256 (scripts/tools.json)
 //   tools/bin/pdftotext        poppler from the build host's Homebrew, relinked with its libraries into tools/lib
 //   tools/licenses/<package>/  license files of the bundled tools
@@ -27,9 +27,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import pkg from '../package.json'
+import { CLI, LAUNCHD_LABEL, NAME } from '../src/brand'
 
 const REPO = path.resolve(import.meta.dir, '..')
-const NAME = pkg.name
 export const TARGETS = ['darwin-arm64', 'darwin-x64'] as const
 export type Target = (typeof TARGETS)[number]
 export const MIN_MACOS = '14.0'
@@ -282,14 +282,17 @@ export async function buildRelease(o: BuildOptions): Promise<string> {
   const entry = path.resolve(REPO, o.entry)
   if (!fs.existsSync(entry)) throw new Error(`entry ${o.entry} does not exist (the server CLI is src/cli.ts)`)
   const common = fs.readFileSync(path.join(REPO, 'scripts', 'macos', 'common.sh'), 'utf8')
-  if (/^NAME=(.*)$/m.exec(common)?.[1] !== NAME) throw new Error(`scripts/macos/common.sh NAME differs from package.json name "${NAME}"`)
+  for (const [k, v] of [['NAME', NAME], ['CLI', CLI], ['LABEL', LAUNCHD_LABEL]] as const) {
+    const got = new RegExp(`^${k}=(\\S*)`, 'm').exec(common)?.[1]
+    if (got !== v) throw new Error(`scripts/macos/common.sh ${k}=${got} differs from src/brand.ts "${v}"`)
+  }
   const folder = `${NAME}-${o.version}-${o.target}`
   const rel = path.join(path.resolve(o.out), folder)
   fs.rmSync(rel, { recursive: true, force: true })
   for (const d of ['bin', 'tools/bin', 'macos', 'docs']) fs.mkdirSync(path.join(rel, d), { recursive: true })
 
   log(`[${o.target}] compiling ${o.entry}`)
-  const exe = path.join(rel, 'bin', NAME)
+  const exe = path.join(rel, 'bin', CLI)
   run([process.execPath, 'build', '--compile', `--target=bun-${o.target}`, '--outfile', exe, entry], { cwd: REPO })
   // Bun 1.3.12 leaves a signature that codesign rejects ("not signed at all") and Apple silicon kills the process
   // (SIGKILL, exit 137): replace it with an ad-hoc signature (a Developer ID one replaces that below)

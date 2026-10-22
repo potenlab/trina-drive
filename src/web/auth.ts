@@ -3,11 +3,11 @@
 // Nothing here trusts loopback or "local" requests (plan 7.1).
 import crypto from 'node:crypto'
 import type { DB } from '../db'
-import { NAME } from '../config'
+import { SECRET_TAG } from '../config'
 import { sha256 } from '../store'
 import { ensureWebSchema, metaGet, metaSet } from './schema'
 
-export const SESSION_COOKIE = `${NAME}_session`
+export const SESSION_COOKIE = `${SECRET_TAG}_session` // src/client/mcp.ts reads it too
 export const SESSION_IDLE_MS = 12 * 3600_000
 export const SESSION_MAX_MS = 7 * 86400_000
 export const INVITE_TTL_MS = 7 * 86400_000
@@ -141,7 +141,7 @@ export function consumeLink(db: DB, kind: LinkKind, secret: unknown): number | n
 }
 
 // ---------- the one-time setup token (printed by `init`) ----------
-export const SETUP_PREFIX = `${NAME}_setup_`
+export const SETUP_PREFIX = `${SECRET_TAG}_setup_`
 
 /** Issue (or replace) the setup token. Only possible while no admin can sign in on the web. */
 export function issueSetupToken(db: DB): string | null {

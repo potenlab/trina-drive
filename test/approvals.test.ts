@@ -12,14 +12,14 @@ import { textOf } from './helpers'
 import { SoftAuthenticator } from './soft-authenticator'
 import { PASSWORD, webSetup, type WebEnv } from './web-helpers'
 
-const PUBLIC = 'https://shelf.test'
+const PUBLIC = 'https://drive.test'
 let e: WebEnv
 let rt: NotifyRuntime | null = null
 afterEach(() => { rt = null; e?.cleanup() })
 
 async function env(opts: { publicUrl?: string | null } = {}) {
   e = await webSetup({ publicUrl: opts.publicUrl === null ? undefined : opts.publicUrl ?? PUBLIC, emit: (ev) => rt?.emit(ev) })
-  rt = attachNotify(e.ctx, { cfg: { baseUrl: 'https://shelf.example.test', email: { mode: 'off', from: 'shelf@example.test' }, anchor: { intervalMs: 0, email: false } } })
+  rt = attachNotify(e.ctx, { cfg: { baseUrl: 'https://drive.example.test', email: { mode: 'off', from: 'drive@example.test' }, anchor: { intervalMs: 0, email: false } } })
   e.w.emit = e.ctx.emit
   setPromote(e.db, e.fid('프로젝트'), true, null)
   return e
@@ -315,7 +315,7 @@ describe('approval inbox (R8)', () => {
     const ap = await bossRequest()
     const inbox = e.db.query<{ person_id: number; kind: string; level: string; count: number; link: string }, []>("SELECT person_id, kind, level, count, link FROM notify_inbox WHERE kind = 'approval_pending'").all()
     expect(inbox.map((r) => [r.person_id, r.level, r.count]).sort()).toEqual([[e.pid('boss'), 'detail', 1], [e.pid('kim'), 'count', 1]].sort())
-    expect(new Set(inbox.map((r) => r.link))).toEqual(new Set(['https://shelf.example.test/#/approvals']))
+    expect(new Set(inbox.map((r) => r.link))).toEqual(new Set(['https://drive.example.test/#/approvals']))
     const forbidden = ['경영', '프로젝트', 'pl.md', 'boss', 'kim', '손익', `approvals/${ap.id}`, ap.sha256.slice(0, 8)]
     for (const lang of ['en', 'ko'] as const) for (const lvl of ['detail', 'count'] as const) {
       const p = render('approval_pending', 1, inbox[0]!.link, lang)

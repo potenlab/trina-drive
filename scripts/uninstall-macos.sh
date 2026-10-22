@@ -41,7 +41,7 @@ fi
 
 BASE="/Library/Application Support/$NAME"
 LD=/Library/LaunchDaemons
-BINLINK=/usr/local/bin/$NAME
+BINLINK=/usr/local/bin/$CLI
 NEWSYSLOG=/etc/newsyslog.d/$NAME.conf
 F_BASE="$PREFIX$BASE"
 account_exists() { [ "$DRY" = 0 ] && dscl . -read "/Users/$1" >/dev/null 2>&1; }
@@ -64,12 +64,12 @@ for u in "$SRV_USER" "$WRK_USER"; do
 done
 
 # 2) system entries
-if [ -L "$PREFIX$BINLINK" ] && [ "$(readlink "$PREFIX$BINLINK")" = "$BASE/app/current/bin/$NAME" ]; then rm -f "$PREFIX$BINLINK"; fi
+if [ -L "$PREFIX$BINLINK" ] && [ "$(readlink "$PREFIX$BINLINK")" = "$BASE/app/current/bin/$CLI" ]; then rm -f "$PREFIX$BINLINK"; fi
 rm -f "$PREFIX$NEWSYSLOG"
 FW=/usr/libexec/ApplicationFirewall/socketfilterfw
 for v in "$F_BASE/app/versions/"*; do
   [ -e "$v" ] || continue
-  priv "$FW" --remove "$BASE/app/versions/$(basename "$v")/bin/$NAME" >/dev/null 2>&1 || true
+  priv "$FW" --remove "$BASE/app/versions/$(basename "$v")/bin/$CLI" >/dev/null 2>&1 || true
 done
 for d in mirror backup-staging; do
   [ -e "$F_BASE/$d" ] || continue

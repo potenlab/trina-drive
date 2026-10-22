@@ -1,5 +1,5 @@
 node_modules/
-.shelf/
+.trina-drive/
 *.db
 *.db-wal
 *.db-shm

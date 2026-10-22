@@ -11,8 +11,8 @@ export class ExtractError extends Error {}
 
 /** External tools, found once at startup. */
 export const TOOLS = {
-  rg: envTool('SHELF_RG') ?? findTool('rg'),
-  pdftotext: envTool('SHELF_PDFTOTEXT') ?? findTool('pdftotext'),
+  rg: envTool('TDRIVE_RG') ?? findTool('rg'),
+  pdftotext: envTool('TDRIVE_PDFTOTEXT') ?? findTool('pdftotext'),
 }
 
 /** The installer pins tool paths in the launchd plist; only an absolute, executable path counts. */

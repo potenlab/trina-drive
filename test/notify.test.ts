@@ -6,7 +6,7 @@ import path from 'node:path'
 import { openDb } from '../src/db'
 import { attachNotify } from '../src/notify'
 import { formatMail, SmtpMailer } from '../src/notify/channels'
-import { EVENT_KINDS, type EventKind, type ShelfEvent } from '../src/notify/events'
+import { EVENT_KINDS, type EventKind, type DriveEvent } from '../src/notify/events'
 import { resolveRecipients } from '../src/notify/recipients'
 import { makeCtx } from '../src/session'
 import { addGroup, addMember, addPerson, createToken, folderAt, grantManage, registerFolder, setRule } from '../src/store'
@@ -29,7 +29,7 @@ describe('R11: channel payloads carry kind, count and link only', () => {
       const pick = <T>(xs: readonly T[]) => xs[Math.floor(r() * xs.length)]!
       const used = new Set<string>()
       const name = () => { let s: string; do { s = Array.from({ length: 9 }, () => pick([...ALPHA])).join('') } while (used.has(s)); used.add(s); return s }
-      const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-r11-')))
+      const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tdrive-r11-')))
       const db = openDb(dir)
       cleanups.push(() => { db.close(); fs.rmSync(dir, { recursive: true, force: true }) })
       const ctx = makeCtx(db, dir)
@@ -49,14 +49,14 @@ describe('R11: channel payloads carry kind, count and link only', () => {
         folders.push(top, sub)
       }
       const tokens = people.map((p) => createToken(db, p, { name: name() }))
-      const rt = attachNotify(ctx, { cfg: { baseUrl: 'https://shelf.example.test', email: { mode: 'outbox', from: 'alerts@example.test', outboxDir: path.join(dir, 'outbox') }, perMinute: 1000, anchor: { intervalMs: 0, email: true } } })
+      const rt = attachNotify(ctx, { cfg: { baseUrl: 'https://drive.example.test', email: { mode: 'outbox', from: 'alerts@example.test', outboxDir: path.join(dir, 'outbox') }, perMinute: 1000, anchor: { intervalMs: 0, email: true } } })
       const ids = people.map((p) => db.query<{ id: number }, [string]>('SELECT id FROM people WHERE name = ?').get(p)!.id)
       ids.forEach((id, i) => rt.notifier.setContact(id, { email: `user${i}@example.test`, slack_webhook: slack.url(`/hook/${i}`), lang: i % 2 ? 'ko' : 'en' }))
       const fid = (p: string) => folderAt(db, p).id
       const secrets = [...used]
       for (let i = 0; i < 40; i++) {
         const kind = pick(EVENT_KINDS)
-        const e: ShelfEvent = {
+        const e: DriveEvent = {
           kind, count: 1 + Math.floor(r() * 5), subjectPersonId: pick(ids), tokenId: pick(tokens).id, folderId: fid(pick(folders)),
           sourceFolderIds: [fid(pick(folders)), fid(pick(folders))], targetFolderId: fid(pick(folders)), weakOnly: r() < 0.3,
           detail: { path: `/${pick(secrets)}/${pick(secrets)}.md`, draft: `/drafts/${pick(secrets)}.md`, person: pick(people), provenance: [pick(secrets)], token: pick(secrets) },
@@ -97,7 +97,7 @@ describe('recipients per role (R11, R9, R10)', () => {
     grantManage(e.db, d('프로젝트'), 'park')
     return { e, n, d, f: (rel: string) => folderAt(e.db, d(rel)).id }
   }
-  const byPerson = (e: Env, ev: ShelfEvent) => Object.fromEntries(resolveRecipients(e.db, ev).map((r) => [
+  const byPerson = (e: Env, ev: DriveEvent) => Object.fromEntries(resolveRecipients(e.db, ev).map((r) => [
     e.db.query<{ name: string }, [number]>('SELECT name FROM people WHERE id = ?').get(r.personId)!.name, `${r.level}:${r.count}${r.digest ? ':digest' : ''}`]))
 
   test('widening: source manage gets detail, target manage gets "1 item" only, admin nothing', () => {
@@ -148,14 +148,14 @@ describe('delivery', () => {
     for (let i = 0; i < 3; i++) n.rt.emit({ kind: 'widened_draft', sourceFolderIds: src, targetFolderId: tgt, weakOnly: true })
     n.rt.emit({ kind: 'widened_draft', sourceFolderIds: src, targetFolderId: tgt })
     await n.rt.flush()
-    expect(s.hits.map((h) => (h.body as { text: string }).text)).toEqual(['[shelf] 1 widened draft to review\nDetails after sign-in: https://shelf.example.test/alerts/widened_draft'])
+    expect(s.hits.map((h) => (h.body as { text: string }).text)).toEqual(['[Trina Drive] 1 widened draft to review\nDetails after sign-in: https://drive.example.test/alerts/widened_draft'])
     n.clock.t = new Date(2026, 9, 23, 8, 59).getTime()
     await n.rt.flush()
     expect(s.hits.length).toBe(1)
     n.clock.t = new Date(2026, 9, 23, 9, 0).getTime()
     await n.rt.flush()
     expect(s.hits.length).toBe(2)
-    expect((s.hits[1]!.body as { text: string }).text).toBe('[shelf] Daily summary: 3 widened drafts to review\nDetails after sign-in: https://shelf.example.test/alerts/widened_draft')
+    expect((s.hits[1]!.body as { text: string }).text).toBe('[Trina Drive] Daily summary: 3 widened drafts to review\nDetails after sign-in: https://drive.example.test/alerts/widened_draft')
     // the inbox has them at once, coalesced
     expect(n.rt.notifier.inbox(n.pid('boss')).map((r) => [r.kind, r.count])).toEqual([['widened_draft', 4]])
   })
@@ -172,13 +172,13 @@ describe('delivery', () => {
     expect(r1.sent).toBe(2)
     const texts = () => s.hits.map((h) => (h.body as { text: string }).text.split('\n')[0])
     // urgent first (token_revoked), then the oldest group: ten new_client events in one message
-    expect(texts()).toEqual(['[shelf] 액세스 토큰 1개가 끊겼습니다', '[shelf] 액세스 토큰에 새 클라이언트 연결 10건'])
+    expect(texts()).toEqual(['[Trina Drive] 액세스 토큰 1개가 끊겼습니다', '[Trina Drive] 액세스 토큰에 새 클라이언트 연결 10건'])
     n.rt.emit({ kind: 'bulk_read', subjectPersonId: kim })
     n.clock.t += 30_000
     expect((await n.rt.flush()).sent).toBe(0)
     n.clock.t += 31_000
     await n.rt.flush()
-    expect(texts().slice(2)).toEqual(['[shelf] 대량 읽기 경보 2건', '[shelf] 원본 쓰기 시도 1건 (거부됨)'])
+    expect(texts().slice(2)).toEqual(['[Trina Drive] 대량 읽기 경보 2건', '[Trina Drive] 원본 쓰기 시도 1건 (거부됨)'])
     expect(n.rt.notifier.pendingCount()).toBe(0)
   })
 
@@ -191,7 +191,7 @@ describe('delivery', () => {
     for (const p of ['boss', 'lee']) n.rt.notifier.setContact(n.pid(p), { slack_webhook: s.url('/team') })
     n.rt.emit({ kind: 'quarantine', folderId: folderAt(e.db, path.join(e.root, '경영')).id })
     await n.rt.flush()
-    expect(s.hits.map((h) => (h.body as { text: string }).text.split('\n')[0])).toEqual(['[shelf] 1 folder quarantined'])
+    expect(s.hits.map((h) => (h.body as { text: string }).text.split('\n')[0])).toEqual(['[Trina Drive] 1 folder quarantined'])
   })
 
   test('Slack sink gets JSON {text}; a failing webhook is retried later', async () => {
@@ -208,7 +208,7 @@ describe('delivery', () => {
     expect((await n.rt.flush()).sent).toBe(0) // backing off
     n.clock.t += 61_000
     expect((await n.rt.flush()).sent).toBe(1)
-    expect(s.hits[1]!.body).toEqual({ text: '[shelf] 1 new client used your access token\nDetails after sign-in: https://shelf.example.test/alerts/new_client' })
+    expect(s.hits[1]!.body).toEqual({ text: '[Trina Drive] 1 new client used your access token\nDetails after sign-in: https://drive.example.test/alerts/new_client' })
   })
 
   test('email: file outbox in dev; count-level recipients get the inbox link', async () => {
@@ -220,8 +220,8 @@ describe('delivery', () => {
     await n.rt.flush()
     const mails = readOutbox(n.outbox)
     expect(mails.map((m) => [m.to, m.subject, m.body])).toEqual(expect.arrayContaining([
-      ['admin@example.test', '[shelf] 1 bulk-read alert', '[shelf] 1 bulk-read alert\nDetails after sign-in: https://shelf.example.test/inbox'],
-      ['kim-addr@example.test', '[shelf] 대량 읽기 경보 1건', '[shelf] 대량 읽기 경보 1건\n로그인 뒤 상세 보기: https://shelf.example.test/alerts/bulk_read'],
+      ['admin@example.test', '[Trina Drive] 1 bulk-read alert', '[Trina Drive] 1 bulk-read alert\nDetails after sign-in: https://drive.example.test/inbox'],
+      ['kim-addr@example.test', '[Trina Drive] 대량 읽기 경보 1건', '[Trina Drive] 대량 읽기 경보 1건\n로그인 뒤 상세 보기: https://drive.example.test/alerts/bulk_read'],
     ]))
     expect(mails.length).toBe(2)
   })
@@ -230,12 +230,12 @@ describe('delivery', () => {
     const smtp = await smtpSink()
     cleanups.push(smtp.stop)
     const m = new SmtpMailer({ host: '127.0.0.1', port: smtp.port, user: 'u', pass: 'p' })
-    await m.send({ to: 'admin@example.test', from: 'shelf@example.test', subject: '[shelf] 감사 기준점: 3행', text: 'line\n.starts with a dot' })
+    await m.send({ to: 'admin@example.test', from: 'drive@example.test', subject: '[Trina Drive] 감사 기준점: 3행', text: 'line\n.starts with a dot' })
     expect(smtp.messages.length).toBe(1)
     expect(smtp.messages[0]!.to).toBe('<admin@example.test>')
     expect(smtp.messages[0]!.auth).toBe('\0u\0p')
     const d = decodeMail(smtp.messages[0]!.data)
-    expect(d.subject).toBe('[shelf] 감사 기준점: 3행')
+    expect(d.subject).toBe('[Trina Drive] 감사 기준점: 3행')
     expect(d.body).toBe('line\n.starts with a dot')
     expect(formatMail({ to: 'a@b', from: 'c@d', subject: 's', text: 't' })).toContain('Content-Transfer-Encoding: base64')
   })

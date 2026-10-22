@@ -220,7 +220,7 @@ describe('tokens', () => {
     const kim = await e.as('kim')
     const r = await kim.call('POST', '/api/tokens', { name: 'claude-laptop', scope: [e.fid('프로젝트')], read_only: true, ttl: '7d' })
     expect(r.status).toBe(200)
-    expect(r.data.token).toStartWith('shelf_pat_')
+    expect(r.data.token).toStartWith('tdrive_pat_')
     const t = verifyToken(e.db, r.data.token, 'test')!
     expect(t.read_only).toBe(1)
     const list = (await kim.call('GET', '/api/tokens')).data.tokens

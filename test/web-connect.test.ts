@@ -5,14 +5,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { clientPaths, existingEntries, mcpCommand, type McpIO } from '../src/client/mcp'
-import { NAME, TOKEN_PREFIX } from '../src/config'
-import { CLIENTS, cliName, manualConfig, recommendedCommand, shq, tokenStdinCommand, type ConnectCtx } from '../web/src/connect'
+import { CLI, NAME, TOKEN_PREFIX } from '../src/config'
+import { BRAND_CTX, CLIENTS, manualConfig, recommendedCommand, shq, tokenStdinCommand, type ConnectCtx } from '../web/src/connect'
 
 const TOKEN = `${TOKEN_PREFIX}AbCdEfGhIjKlMnOpQrStUv0123456789`
-const ctx: ConnectCtx = { cli: cliName(NAME), origin: 'https://files.example.lan', login: 'kim', admin: false }
+const ctx: ConnectCtx = { ...BRAND_CTX, origin: 'https://files.example.lan', login: 'kim', admin: false }
 const homes: string[] = []
 afterAll(() => homes.forEach((h) => fs.rmSync(h, { recursive: true, force: true })))
-const tmpHome = () => { const h = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-connect-'))); homes.push(h); return h }
+const tmpHome = () => { const h = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tdrive-connect-'))); homes.push(h); return h }
 
 /** Split a generated command line the way sh would (only plain words and single quotes are generated). */
 const words = (cmd: string) => [...cmd.matchAll(/'((?:[^']|'\\'')*)'|(\S+)/g)].map((m) => m[1] !== undefined ? m[1].replace(/'\\''/g, "'") : m[2]!)
@@ -54,8 +54,7 @@ describe('My tokens: connect commands', () => {
     expect(shq('김민수')).toBe(`'김민수'`)
     expect(shq(`o'neil x`)).toBe(`'o'\\''neil x'`)
     expect(words(recommendedCommand({ ...ctx, login: `o'neil x` }, 'claude')).at(-1)).toBe(`o'neil x`)
-    expect(cliName('Shelf')).toBe('shelf')
-    expect(cliName('')).toBe('shelf')
+    expect(BRAND_CTX).toEqual({ cli: CLI, entry: NAME })
   })
 
   test('manual fallback: each client file holds the token in clear text where mcp add (and the client) look for it', () => {
@@ -67,7 +66,7 @@ describe('My tokens: connect commands', () => {
       fs.mkdirSync(path.dirname(file), { recursive: true })
       fs.writeFileSync(file, m.text)
       const ex = existingEntries(client, { HOME: home }, `${ctx.origin}/mcp`)
-      expect(ex).toEqual([expect.objectContaining({ name: ctx.cli, ref: { kind: 'literal', token: TOKEN } })])
+      expect(ex).toEqual([expect.objectContaining({ name: ctx.entry, ref: { kind: 'literal', token: TOKEN } })])
     }
   })
 })

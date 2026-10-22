@@ -25,7 +25,7 @@ describe('MCP over HTTP', () => {
     const client = new Client({ name: 'test-client', version: '1.0.0' })
     const transport = new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { Authorization: `Bearer ${e.secrets.kim}` } } })
     await client.connect(transport)
-    expect(client.getServerVersion()?.name).toBe('shelf')
+    expect(client.getServerVersion()?.name).toBe('trina-drive')
     const tools = await client.listTools()
     expect(tools.tools.map((t) => t.name).sort()).toEqual(['bash', 'edit', 'history', 'promote', 'read', 'write'])
     const r = await client.callTool({ name: 'bash', arguments: { command: 'ls /' } })

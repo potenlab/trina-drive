@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { api, get, type FolderSummary } from '../api'
 import { useSession } from '../App'
-import { CLIENT_LABEL, CLIENTS, cliName, manualConfig, recommendedCommand, tokenStdinCommand, type Client, type ConnectCtx } from '../connect'
+import { BRAND_CTX, CLIENT_LABEL, CLIENTS, manualConfig, recommendedCommand, tokenStdinCommand, type Client, type ConnectCtx } from '../connect'
 import { fmtDate, t, type Key } from '../i18n'
 import { Badge, ErrorLine, Loading, Page, Secret, useAction, useLoad } from '../ui'
 
@@ -126,7 +126,7 @@ export function Tokens() {
 export function Connect({ token }: { token?: string }) {
   const { me } = useSession()
   const [client, setClient] = useState<Client>('claude')
-  const c: ConnectCtx = { cli: cliName(document.title), origin: window.location.origin, login: me?.name ?? '', admin: !!me?.admin }
+  const c: ConnectCtx = { ...BRAND_CTX, origin: window.location.origin, login: me?.name ?? '', admin: !!me?.admin }
   const manual = token ? manualConfig(c, client, token) : null
   return (
     <div className="connect">

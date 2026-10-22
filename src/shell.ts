@@ -37,9 +37,9 @@ function cap(s: string, max: number, what: string): string {
   return new TextDecoder().decode(b.subarray(0, max)).replace(/�$/, '') + `\n[${what} truncated at ${Math.round(max / 1024)} KB]\n`
 }
 
-/** Shell commands run in an isolated worker (sandbox-exec / bwrap) unless SHELF_SHELL=inprocess (development and tests only). */
+/** Shell commands run in an isolated worker (sandbox-exec / bwrap) unless TDRIVE_SHELL=inprocess (development and tests only). */
 export function shellMode(): 'isolated' | 'inprocess' {
-  return process.env.SHELF_SHELL === 'inprocess' ? 'inprocess' : 'isolated'
+  return process.env.TDRIVE_SHELL === 'inprocess' ? 'inprocess' : 'isolated'
 }
 
 export async function runShell(s: Session, command: string): Promise<ShellResult> {

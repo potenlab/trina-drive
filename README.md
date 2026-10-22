@@ -1,541 +1,270 @@
-# shelf (codename)
+<p align="center">
+  <a href="https://drive.trina.app"><img src="docs/assets/logo.svg" width="96" height="96" alt="Trina Drive logo"></a>
+</p>
 
-> Phase-0 prototype. "shelf" is a temporary name: it lives in `package.json` (`name`) and is read from there by
-> `src/config.ts` (token prefix `shelf_pat_`, data dir `~/.shelf`, env `SHELF_HOME`).
->
-> License: TBD (AGPL-3.0 server planned).
+<h1 align="center">Trina Drive</h1>
 
-A permission-aware **read shell and draft box for AI agents** over a team's existing folders (in-place mode).
-An agent (Claude Code, Codex, Cursor …) connects over remote MCP with a personal access token and gets a `bash`
-tool over a virtual tree that holds **only what that person, narrowed by that token, may read**. Originals are never
-written: agents write to `/drafts/`, every draft carries the folders it was derived from, and every call is in a
-hash-chained audit log. (v0.2: a draft can be **promoted** into a folder that allows it, as a new file — at once when
-that does not widen who reads it, otherwise after a person approves it with a passkey.)
+<p align="center">
+  <b>Give your team's AI agents your company files.</b><br>
+  They only see what each person is allowed to, never touch originals, and everything is logged.
+</p>
 
-Plan: `research/plans/에이전트 팀 스토리지 기획.md` (§4.1 permission model R0–R11, §5.1 v0.1 scope, §11 phase-0
-experiments). This repo is the ★ prototype of §11.
+<p align="center">
+  <a href="#license"><img src="https://img.shields.io/badge/license-to%20be%20announced-lightgrey" alt="License: to be announced"></a>
+  <a href="https://github.com/potenlab/trina-drive/actions/workflows/ci.yml"><img src="https://github.com/potenlab/trina-drive/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="docs/DOCKER.md"><img src="https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white" alt="Docker"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555" alt="Platform: macOS | Linux">
+  <img src="https://img.shields.io/badge/MCP-2025--11--25%20%7C%202026--07--28-6E56CF" alt="MCP protocol versions">
+</p>
+
+<p align="center">
+  <a href="https://drive.trina.app">Website</a> ·
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="docs/ARCHITECTURE.md">Docs</a> ·
+  <a href="docs/SECURITY-MODEL.md">Security model</a> ·
+  <a href="https://drive.trina.app/#pricing">Pricing</a> ·
+  <a href="README.ko.md">한국어</a>
+</p>
+
+---
+
+Trina Drive is an **open-source, self-hosted, permission-aware team file server for AI agents**. Point it at the
+folders your team already has (a NAS share, a shared drive on an office Mac) and connect Claude Code, Codex, Cursor,
+claude.ai or ChatGPT over MCP. Each agent gets a real shell (`ls`, `grep -r`, `cat`, pipes) over a virtual tree that
+holds **only what its person may read**, narrowed further by its token. Originals are read-only; agents write to their
+own draft box. Every call lands in a hash-chained audit log.
+
+<!-- TODO(launch): record a 20-second demo (kim and boss asking the same question in Claude Code) as
+     docs/assets/demo.gif (≤ 5 MB, 1200 px wide) and uncomment the line below.
+<p align="center"><img src="docs/assets/demo.gif" width="800" alt="Trina Drive demo: two people, same question, different answers"></p>
+-->
+
+Same server, same question, two people. `kim` is on the project team; `boss` runs the company:
+
+```console
+$ tdrive sh --token $KIM -c 'ls /'                    # kim's agent: no 경영 (management) folder at all
+drafts
+개인_kim
+공용
+프로젝트
+
+$ tdrive sh --token $KIM -c 'grep -rl 매출 /'          # "revenue": no matches kim may see (exit 1)
+
+$ tdrive sh --token $KIM -c 'ls /경영'
+ls: /경영: No such file or directory                  # hidden looks exactly like missing
+$ tdrive sh --token $KIM -c 'ls /없는폴더'
+ls: /없는폴더: No such file or directory
+
+$ tdrive sh --token $KIM -c 'echo hi > /프로젝트/README.md'
+bash: /프로젝트/README.md: Originals are read-only. Write to /drafts/ and a person will move it.
+
+$ tdrive sh --token $KIM -c 'grep -c 견적 /프로젝트/*.md > /drafts/견적_요약.md && ls /drafts'
+견적_요약.md                                          # drafts remember which folders they came from
+
+$ tdrive sh --token $BOSS -c 'grep -r 매출 /'
+/경영/손익_요약.xlsx:매출	1240000000                   # text inside xlsx, docx, pdf, hwp(x) is greppable
+/경영/손익.csv:매출,1240000000
+
+$ tdrive audit verify
+audit chain ok: 6 rows, head 1539812405509ecb…
+```
+
+Real output from the `tdrive demo seed` sample company, comments added ([try it](#try-it-in-two-minutes)).
+
+## Why
+
+AI agents are at their best with files and a shell. They are also at their most dangerous there: private data,
+untrusted content and a way to send things out add up to what Simon Willison calls the
+[lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/). Today a small team picks one of:
+
+- **Sync the shared drive to every laptop and run Claude Code on it.** A real shell, free, and every agent sees
+  everything its person's laptop has. Nobody knows what it read. HWP and PDF contents are invisible to `grep`.
+- **A cloud drive's MCP connector** (Google Drive, Box). Move everything into their cloud first; no shell; agent
+  controls live in the top enterprise tier.
+- **Enterprise search** (Glean, Dust). Built for large companies and SaaS sources, priced per seat, not your NAS.
+- **Your NAS vendor's MCP** (QNAP MCP Assistant). Gives the AI one NAS account; not per person, no draft box, no
+  provenance.
+
+Trina Drive keeps your files where they are and puts **one permission check and one audit log** in front of every way
+an agent can reach them: the shell, the file tools, search, and the web.
+
+## Features
+
+- 🔒 **Per-person agent permissions.** Agent view = the person's AI rules ∩ the token's scope. Give an intern's Claude
+  Code "this project folder, read-only, for 7 days".
+- 👻 **Hidden means nonexistent.** Same output, error text and exit code as a path that does not exist. No folder
+  names, sizes or counts leak.
+- 🐚 **A real shell for agents.** `ls`, `find`, `grep -r`, `sed`, `awk`, `wc`, pipes, over a virtual tree
+  ([just-bash](https://github.com/vercel-labs/just-bash)); `grep` is ripgrep.
+- 📄 **Search inside documents.** PDF, DOCX, XLSX, PPTX, HWP and HWPX are read as text, in sandboxed workers.
+- ✍️ **Originals stay untouched.** Agents write to `/drafts/`; each draft carries the folders it was derived from.
+  Promoting a draft into a wider folder needs a person with a passkey (v0.2).
+- 🧾 **Everything is logged.** Hash-chained audit of every call, signed anchors sent off the server, alerts for bulk
+  reads, new clients and write attempts, one-click revoke.
+- 🖥️ **Web app for people.** Folders, rules, tokens, approvals, audit, and a read-only file browser (English and Korean).
+- 🔌 **Any MCP client.** Claude Code, Codex and Cursor with personal tokens; claude.ai and ChatGPT with OAuth (v0.2).
+
+## How it works
+
+```mermaid
+flowchart LR
+  A["Claude Code · Codex · Cursor<br/>(personal token)"] -->|MCP| M
+  B["claude.ai · ChatGPT<br/>(OAuth, v0.2)"] -->|MCP via tunnel| M
+  P["People<br/>(web app)"] --> W
+  subgraph S["Trina Drive server (your Mac mini or Linux box)"]
+    M["/mcp<br/>bash · read · write · edit · history · promote"] --> F{{"one permission check<br/>person rules ∩ token scope"}}
+    W["/api"] --> F
+    M --> D[("draft box<br/>with provenance")]
+    M --> L[("hash-chained<br/>audit log")]
+    F --> X["sandboxed workers<br/>shell · PDF/Office/HWP text"]
+  end
+  F -->|read-only| N[("your existing folders<br/>NAS · shared drive")]
+```
+
+More: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quickstart
 
-Needs Bun 1.3, ripgrep and poppler (`brew install ripgrep poppler`).
+### Try it in two minutes
+
+Needs [Bun](https://bun.sh) 1.3, ripgrep and poppler (`brew install ripgrep poppler`, or your distro's packages).
 
 ```sh
-bun install
-bun run src/cli.ts --data ./.shelf demo seed      # sample company + people + rules; prints tokens for kim and boss
-bun run src/cli.ts --data ./.shelf serve --port 8787
+git clone https://github.com/potenlab/trina-drive && cd trina-drive
+bun install && bun run build:web
+alias tdrive="bun run $PWD/src/cli.ts"
+
+tdrive --data ./.trina-drive demo seed     # sample company, people, rules; prints tokens for kim and boss
+tdrive --data ./.trina-drive serve         # web app at http://127.0.0.1:8787/, MCP at /mcp
 ```
 
-Try it without an AI client:
+In another terminal, run the demo above with `tdrive --data ./.trina-drive sh --token <kim token> -c 'ls /'`.
 
-```sh
-bun run src/cli.ts --data ./.shelf sh --token <kim token> -c 'ls /; grep -r 매출 /'     # kim: nothing from 경영
-bun run src/cli.ts --data ./.shelf sh --token <boss token> -c 'grep -r 매출 /'          # boss: 경영/손익.csv, 손익_요약.xlsx
-bun run src/cli.ts --data ./.shelf audit verify
-```
+### Install for a team
 
-Connect an AI client on your own computer: `bun run src/cli.ts mcp add claude|codex|cursor --server http://127.0.0.1:8787
---login kim` (see [Connecting clients](#connecting-clients)).
-
-The demo: people `dion` (admin), `kim` (member, not 경영), `boss` (경영), `lee` (인사), `park` (영업); folders
-`경영`, `프로젝트`, `인사`, `영업`, `공용` and kim's personal folder `개인_kim`, with csv/md plus generated pdf, docx,
-xlsx, hwpx and hwp files. `bun run sim/provenance-day.ts` replays an office day (plan ★8, see below).
-
-Installing for a team: a Mac with `install-macos.sh` ([docs/INSTALL.md](docs/INSTALL.md)), or a Linux box with Docker
-([docs/DOCKER.md](docs/DOCKER.md): `docker compose run --rm shelf demo seed && docker compose up -d`; workers run in bwrap).
-
-## Connecting clients
-
-`mcp add` runs on the person's own computer (it never opens a data directory). It signs in with the person's password
-(`--password-stdin`, `$SHELF_PASSWORD`, or a no-echo prompt), makes a personal token on the server (`POST /api/tokens`:
-default 7 days, all folders the person reads; `--scope 공용,프로젝트`, `--read-only`, `--ttl`; admins must pass `--scope`
-or `--all-folders`, plan 5.1), signs out, and connects the client **in user scope only** — never a repo's `.mcp.json`,
-`.cursor/mcp.json` or `.codex/`. `--token-stdin` takes an existing token instead, from a pipe or, when standard input is
-a terminal, pasted at a prompt that does not echo it (a token argument is refused: shell history). `--dry-run` prints every command and file it would write, with `<token>` in place of the secret, and contacts
-nothing.
-
-The token is kept in the macOS login Keychain (`security -i` on stdin, so it never appears in a process list; service
-`shelf-mcp`, account `<client>:<name>`), or with `--store file` (default off macOS) in `~/.config/shelf/tokens/<client>-<name>`
-(0600). `--store inline` writes it into the client's file in clear text, with a warning (refused when that file is in a
-git work tree, e.g. a dotfiles `$HOME`). Codex and Cursor read it from an environment variable that
-`~/.config/shelf/env.sh` sets (on macOS each line reads the Keychain; no secret in the file): add
-`. ~/.config/shelf/env.sh` to your shell profile once.
-
-| client (checked 2026-10-23) | how it is written | where | token reference |
-|---|---|---|---|
-| Claude Code 2.1.308 | `claude mcp add-json --scope user shelf '{"type":"http","url":…,"headersHelper":…}'` (run in `$HOME`); without the CLI, `mcpServers.shelf` in `~/.claude.json` (`$CLAUDE_CONFIG_DIR` honoured) | user scope | `headersHelper`: a command Claude runs to get `{"Authorization":"Bearer …"}`, here `printf … "$(security find-generic-password … -w)"` |
-| Codex 0.163.0 | `codex mcp add shelf --url …/mcp --bearer-token-env-var SHELF_TOKEN_CODEX`; without the CLI, `[mcp_servers.shelf]` in `~/.codex/config.toml` (`$CODEX_HOME` honoured) | user config | `bearer_token_env_var`. `--auto-approve` adds `default_tools_approval_mode = "approve"` (otherwise `codex exec`, approval policy "never", refuses every call of this server) |
-| Cursor (cursor-agent 2026.09.18) | no `mcp add` command: `mcpServers.shelf` in `~/.cursor/mcp.json` | user scope | `"Authorization": "Bearer ${env:SHELF_TOKEN_CURSOR}"`; enable it in Settings → MCP or `cursor-agent mcp enable shelf` / `--approve-mcps` |
-
-Before writing, it reads that client's existing entries pointing at the same server (any name, Claude's local-scope
-`projects.*` too) and warns (plan M8) when one holds a broader token (all folders where the new one is narrowed, or
-drafts allowed where the new one is read-only — compared through `GET /api/tokens` by the token hint), when one keeps a
-token in clear text, or when its token cannot be read. An entry with the same name is replaced only with `--force`.
-Plain `http://` to a non-loopback address is warned about (password and token cross the network unencrypted).
-
-Checked live with HOME set to a scratch directory: `claude mcp get shelf` → "✔ Connected" through the headersHelper
-(and "✘ Failed to connect" with a wrong token), `codex mcp get shelf --json` shows the streamable HTTP transport with
-`bearer_token_env_var`, and `cursor-agent mcp list-tools shelf` lists the five tools through `${env:…}`.
-
-The web's My tokens page shows these commands per client (tabs: Claude Code, Codex, Cursor): the recommended
-`mcp add <client> --server <its address> --login <you>`, and for a token just made there `mcp add <client> --server …
---token-stdin` (paste it at the hidden prompt). A manual client entry with the token in clear text is offered only
-collapsed and labelled as such; the page never builds a command line that holds a token.
-
-Revoke a token on the web (My tokens) when you stop using it; `claude mcp remove shelf -s user`,
-`codex mcp remove shelf`, or delete the entry from `~/.cursor/mcp.json`, and the Keychain item
-(`security delete-generic-password -s shelf-mcp -a <client>:shelf`).
-
-## claude.ai and ChatGPT: OAuth and the public address (v0.2)
-
-Step-by-step: [docs/CONNECT-CLAUDE-AI.md](docs/CONNECT-CLAUDE-AI.md), [docs/CONNECT-CHATGPT.md](docs/CONNECT-CHATGPT.md).
-
-- **Authorization server** (`src/oauth/`, MCP authorization 2025-11-25 and 2026-07-28): `/.well-known/oauth-protected-resource[/mcp]`
-  (RFC 9728; the 401 on `/mcp` carries `resource_metadata`), `/.well-known/oauth-authorization-server` (RFC 8414),
-  `/oauth/authorize`, `/oauth/token`, `/oauth/revoke` (RFC 7009), `/oauth/register` (RFC 7591, off unless `--allow-dcr`).
-  PKCE S256 only, public clients only (`none`), `resource` bound to `<public url>/mcp` (RFC 8707), `iss` on every
-  authorization response (RFC 9207). It is on when `public enable --url https://…` set an address (the issuer).
-- **Clients**: Client ID Metadata Documents first. The `client_id` URL is fetched under an SSRF guard (`src/oauth/ssrf.ts`:
-  https only, every resolved address must be public — no private, loopback, link-local/metadata, CGNAT, ULA or mapped
-  ranges — and the socket connects to exactly the checked addresses; no redirects; 3 s; 8 KB; JSON), must name itself,
-  must list the redirect URI (loopback ones match without the port), carries no secret, is cached 1 min–24 h. Trusted
-  hosts: `claude.ai`, `chatgpt.com` (more with `--client-host`, or `--any-client`).
-- **Consent** (`#/oauth/<id>` in the web app, decided through `/api/oauth/requests/<id>` with the session and its CSRF
-  token): the app's domain in large type (checked, or "not verified" for self-registered apps), where the answer goes
-  (warning for localhost), folders (admins must pick; nobody gets folders their AI cannot read), read-only by default,
-  expiry 1/7/30/90 days. Audited.
-- **Tokens**: an approval becomes a row in `tokens` with kind `oauth` (person, folder scope, read-only, expiry, client), so
-  `Access.forToken`, provenance, drafts, audit and "No AI" treat it exactly like a PAT, and **My tokens** lists it (marked
-  OAuth · domain) with Revoke. Access tokens (`shelf_oat_`, 1 h) and refresh tokens (`shelf_ort_`, rotated on every use;
-  reuse after a 10 s grace revokes the connection) are stored as sha256 and looked up on every request, so a revoke stops
-  the next call. Codes are single use (a second use revokes what the first made), 60 s, bound to client, redirect URI,
-  PKCE challenge and resource.
-- **Public listener** (`src/web/public.ts`): a second Bun listener (`public enable --port 8788 --host 127.0.0.1`) for a
-  Cloudflare tunnel. Only `/mcp`, `/oauth/*`, `/.well-known/oauth-*`, the app shell and `/assets`, and the sign-in and
-  consent API calls (`GET /api/state`, `POST /api/login`, `POST /api/logout`, `GET /api/session`, `/api/oauth/requests/*`);
-  everything else — admin API, files, drafts, audit, `/health` — is 404. Requests are rebuilt on the public https URL
-  (same-origin checks, Secure cookie, HSTS); `CF-Connecting-IP`/`X-Forwarded-For` are believed only from
-  `--trusted-proxy`. `serve` starts it only when `public status` passes: https public URL, an admin, a second factor for
-  every admin (`requireAdmin2FA`, src/web/mfa.ts, checked live) and the v0.2 security gate (`--confirm-security-gate`).
-  It also serves the approval inbox and one's own passkeys (`/api/approvals*`, `/api/login/second`, `/api/me/2fa`,
-  `/api/me/reauth`, `/api/me/passkeys*`): passkeys use the public host as RP ID, so approvals happen there. `serve`
-  takes the public address as `--public-url` unless one is given.
-
-## Web admin (v0.1)
-
-```sh
-bun run build:web                                   # web/ (Vite + React) -> web/dist, served by `serve` at /
-bun run src/cli.ts --data ./.shelf init             # prints a one-time web setup token (demo seed prints one too)
-bun run src/cli.ts --data ./.shelf serve --port 8787 [--public-url https://files.example.lan]
-open http://127.0.0.1:8787/                         # paste the setup token, create the admin, register folders
-```
-
-One Bun server: `/mcp` (Bearer tokens only), `/api` (people's sessions), the app at `/`. Sessions: argon2id
-passwords, cookie `shelf_session` (HttpOnly, SameSite=Strict, `Path=/api`, Secure on https), a CSRF token per session
-on every change, same-origin `Origin` required from browsers, JSON bodies only, sign-in rate limit per name (5 failures)
-and per address (50 attempts) per 15 minutes, kept in SQLite (`rate_limits`, keys stored as sha256) so a restart does
-not reset them; 429 carries `Retry-After`. First setup only with the setup token from `init` (loopback is not trusted). Invite and reset links are
-one-time and carry their secret in the `#fragment`. Mail is a pluggable `Mailer`; the built-in one appends to
-`<data>/outbox.log`. CSP `default-src 'self'`, `frame-ancestors 'none'`, nosniff, `Referrer-Policy: no-referrer`.
-
-Every handler asks `src/rights.ts` (R5/R7/R9: who may see or change which folder, built on `policy.effectiveLevel`)
-or `src/policy.ts` (drafts, R4 with the session as a full-scope token). What the caller may not see is 404.
-
-| | endpoints (`/api`) |
-|---|---|
-| before sign-in | `GET state`, `POST setup`, `POST login`, `POST links/check`, `POST links/accept` (invite / reset) |
-| session | `GET session`, `POST logout`, `POST me/password`, `GET notices`, `POST notices/read` |
-| people (admin changes) | `GET people`, `POST people` (→ invite link), `PATCH people/:id` (admin, active, email → old address told), `POST people/:id/invite`, `POST people/:id/reset` (link mailed to the person only; their tokens and sessions are cut) |
-| groups (admin) | `POST groups`, `DELETE groups/:id`, `PUT/DELETE groups/:id/members/:pid` |
-| folders | `GET folders`, `POST folders` (admin; templates public/team/management/personal/custom, NAS readers all/same-as-ai/chosen/unknown), `GET folders/:id` (the NAS/AI table), `PATCH folders/:id` (no_ai, inherit_break, quarantine, name), `DELETE folders/:id` (admin), `PUT folders/:id/rules`, `PUT folders/:id/nas`, `PUT folders/:id/owner`, `POST folders/:id/subfolders`, `PUT/DELETE folders/:id/managers/:pid` (admin) |
-| tokens (own only) | `GET tokens`, `POST tokens` (shown once), `DELETE tokens/:id`, `POST tokens/:id/provenance-reset` ("출처 초기화", below) |
-| fresh login | `POST me/reauth` `{password}`: the password typed again counts as a fresh login for 5 minutes (as does signing in) |
-| drafts (own, R4) | `GET drafts` (+ locked count and dates), `GET drafts/:id/download` |
-| files (read only, R1) | `GET files?path=` (list), `GET files/stat`, `GET files/download` (attachment only), `GET files/text` (extracted, 1 MB), `GET files/who`, `GET search?q=&path=` — see "Files on the web" |
-| OAuth consent | `GET oauth/requests/:id`, `POST oauth/requests/:id/approve` `{folders \| all, read_only, ttl}`, `POST oauth/requests/:id/deny` → `{redirect_to}` (src/oauth/consent.ts) |
-| audit | `GET audit?view=mine` · `view=folders` (folders you manage; others' command lines hidden) · `view=summary` (admin: who, which connection, how many; hash-chain check) |
-| second step of sign-in | `POST login` answers `{second_factor: {ticket, methods, passkey}}` (no cookie) for someone with a second factor; `POST login/second` `{ticket, method: passkey\|totp\|recovery, response\|code}` → session. A reset link (`links/accept`) asks for it too |
-| second factors (own) | `GET me/2fa`, `POST me/passkeys/options`, `POST me/passkeys`, `DELETE me/passkeys/:id`, `POST me/totp/setup`, `POST me/totp/confirm`, `DELETE me/totp`, `POST me/recovery-codes` — changes need a fresh login (`POST me/reauth`) |
-| promote | `GET promote/targets`, `POST drafts/:id/promote` `{folder, name, expected_sha256?, note?}`, `PUT folders/:id/promote` `{enabled}` (admin) |
-| approvals (R8) | `GET approvals`, `GET approvals/:id`, `POST approvals/:id/step-up/options` `{sha256}`, `POST approvals/:id/step-up` `{sha256, response\|code}` → `{assertion}`, `POST approvals/:id/approve` `{sha256, assertion}`, `POST approvals/:id/reject` `{reason}` (the requester: cancel) |
-
-R7 as built: a manage holder edits AI readers and "start fresh here" in their folder and below, and can turn
-"No AI" on; NAS readers, "No AI" off, register/unregister, quarantine and manage grants are admin only (personal
-folders: NAS readers and "No AI" belong to the owner; nobody sets rules inside them). R9 notices (kind, count, link
-only) go to the folder's managers and the admin on self-grants (rule, group, manage, NAS readers), "No AI" off,
-personal-folder unregister/owner change, and re-registering a former personal folder.
-
-### Files on the web (plan 5.2, read only)
-
-The **Files** page (파일, `#/files`) is where people who are not admins land: a lazy folder tree, breadcrumb, list or
-grid, sort by name/date/size, search over names and text (snippets), a detail panel (size, modified, who can see,
-"View text", Download) and a "My drafts" entry that opens the drafts page. Arrow keys / Enter / Backspace in the list.
-Code: `src/web/files.ts`, `web/src/pages/Files.tsx`.
-
-- **One decision point.** Every endpoint walks with `Access.forPerson` (`src/policy.ts`): the person's session is a
-  token of their own whose scope is everything (the same rule as the drafts page). Admins get no extra reads here.
-- **"No AI" is for AI only.** A No-AI folder stays open on the web to people whose rules let them read it (plan 5.1
-  "AI 연결 금지(웹의 사람만)"); their agents still see nothing. Quarantine and "widened, waiting" close it on the web too
-  (stricter than the plan's "agents only" for widened copies), as do links, hard links, NAS system folders and NFC
-  collisions.
-- **Hidden == missing**: 404 with the same body and headers on list, stat, download, text, who and search scope.
-  Folders show no size or time (they would move with files you cannot see). A folder you see only as the way to a
-  readable subfolder lists only that child, and its "who can see" is withheld.
-- **Bytes**: opened without following links and re-checked (R1 ⑦) before they leave; downloads are always
-  `Content-Disposition: attachment`, `application/octet-stream`, `nosniff`, `CSP: sandbox`, `no-store` (64 MB cap,
-  read into memory). Nothing a file holds is rendered on this origin: extracted text is a JSON string shown as plain
-  text; a preview needs a separate origin and sandbox (plan 7.1, v0.3).
-- **Search**: walks only what the person may see (≤ 5,000 files, 2,000 folders), fills the text mirror on first use
-  within 15 s, runs ripgrep (fixed string, case-insensitive) over exactly those mirror files, re-checks each file
-  before its snippet leaves; 50 results, 3 snippets each; `partial` when a limit was hit.
-- **Audit, no provenance.** Every call is an audit row (`tool: web`, no token, `files <action> <path>`, files whose
-  content left; failures as `not_found`), and if the row cannot be written nothing is returned. Web reads open **no
-  provenance window** (R3): provenance labels what an agent's token touched so its drafts carry their sources; a person
-  in a browser writes no drafts through this server.
-
-See [Draft promote and approvals](#draft-promote-and-approvals-v02) and [Second factors](#second-factors-passkeys-totp)
-for the last four rows.
-
-Web tables (created on demand by `src/web/schema.ts`, not in `db.ts`): `accounts`, `web_sessions`, `web_links`,
-`notices`, `folder_history`, `web_reauth`; `rate_limits` (src/ratelimit.ts); keys `web_setup_token` and `everyone_group` in `meta`.
-
-## CLI
-
-```
-init | person add <name> [--admin] | group add <name> | group member <group> <person>
-folder register <path> [--name N] [--personal-owner P] [--nas-readers all|unknown|p1,p2]
-folder flag <path> no-ai|quarantine|widened-pending|inherit-break [--off]
-rule set <path> <person|@group> none|read|write [--break]
-manage grant <path> <person>
-token create <person> [--name N] [--scope path1,path2] [--read-only] [--ttl 8h] | token revoke <id>
-audit verify [--against <anchor-file>] | audit anchor [--force] | audit anchors
-connections list [--all] | connections revoke <token-id>
-notify contact <person> [--email E] [--slack URL] [--lang en|ko] | notify inbox <person> [--all] [--read]
-notify show | notify set <key> <json> | notify flush
-demo seed | sh --token <pat> -c <command> | serve [--port] [--host] [--allow-origin]
-audit verify | demo seed | sh --token <pat> -c <command> | serve [--port] [--host] [--allow-origin] [--reconcile-every 5m|--no-reconcile]
-mcp add claude|codex|cursor --server URL [--login N] [--password-stdin|--token-stdin] [--name shelf] [--token-name N]
-        [--ttl 7d] [--scope f1,f2|--all-folders] [--read-only] [--store keychain|file|inline] [--auto-approve] [--force] [--dry-run]
-share add <path> | share list | reconcile once [--json] | reconcile watch [--every 5m] [--no-watch-hint]
-events list [--kind K] | quarantine list [--all] | quarantine release <id> --by <person> | widened list | widened rejudge
-folder promote <path> [--off] | mfa status | mfa reset <person>
-```
-
-## MCP
-
-`POST /mcp`, Streamable HTTP in its stateless JSON form (one JSON-RPC message per POST, `application/json` reply, no
-SSE, no session). Protocol versions `2026-07-28` and `2025-11-25`. `Authorization: Bearer shelf_pat_…` only (cookies
-are never read); foreign `Origin` headers are refused (DNS-rebinding guard); listens on 127.0.0.1 by default.
-
-Rate limits (`src/ratelimit.ts`, `MCP_LIMITS`; plan 7.1): per token 120 requests/min and 4 at once, per source address
-600/min and 16 at once, and 30 requests/min with a missing or wrong bearer token per address (after that the address is
-refused, valid token or not, until the minute ends). Over a limit: HTTP 429, `Retry-After` (seconds) and a JSON-RPC
-error `{code: -32029, message: "rate limit: …", data: {retry_after}}` with the request's id when it was readable.
-`serve` and the web server always install a limiter (in memory: a restart ends every request anyway). Addresses are the
-TCP peer: behind a reverse proxy every client shares one address.
-
-| tool | what |
-|---|---|
-| `bash` | `{command}` → stdout, stderr, exit code. just-bash over the virtual tree; `grep`/`egrep`/`fgrep`/`rg` are ripgrep |
-| `read` | `{path, offset?, limit?}` text (office files: extracted); drafts also return their sha256 |
-| `write` | `{path, content, expected_sha256?}` drafts only |
-| `edit` | `{path, old_string, new_string, replace_all?, expected_sha256?}` own drafts only |
-| `history` | `{path, action: list\|read\|restore, version?}` draft versions |
-| `promote` | `{draft, folder, name, reason?, expected_sha256?}` one of this token's drafts → a NEW file in a team folder; widening → `structuredContent.status: "input_required"` with the approval link (information only; agents cannot approve) |
-
-What the shell sees:
-
-| path / command | sees |
-|---|---|
-| `/<registered folder>/…` | originals the token may read; hidden = nonexistent (same output, error text, exit code), also when the server fails while deciding (fail closed); other unexpected server errors are a fixed `EIO` |
-| `cat head tail grep rg sed awk wc -l`, `read` | extracted text for pdf/docx/xlsx/pptx/hwp/hwpx (stderr notes "(extracted text …)" once) |
-| `ls -l stat du wc -c sha256sum md5sum od base64 file` | original bytes |
-| `/.raw/<path>` | original bytes of any visible file (not listed at `/`) |
-| `/drafts/` | this token's drafts (writable, `.md`/`.csv`/text only); other tokens' visible drafts under `/drafts/@<token>/` (read-only) |
-| any other write | refused: "Originals are read-only. Write to /drafts/ and a person will move it." |
-
-Limits per call and per token (`src/config.ts` `LIMITS`): a file read is at most 64 MB and one call reads at most
-128 MB of files in all (beyond: `EFBIG`, with the reason on stderr; nothing is read into the server first); a draft is
-at most 8 MB; live drafts are at most 500 files / 200 MB per token and 1 GB per person (`EDQUOT`; env
-`SHELF_DRAFT_MAX_FILES`, `SHELF_DRAFT_MAX_BYTES`, `SHELF_DRAFT_PERSON_MAX_BYTES`; writes that do not grow a draft
-always pass); commands run at most 2 per token, 3 per person and CPUs − 2 overall at once (`SHELF_WORKERS_*`, see
-[docs/worker.md](docs/worker.md)).
-
-## Permission model (summary of plan §4.1, as implemented)
-
-`src/policy.ts` is the only place that decides reads; shell, read tool, grep, mirror and drafts all go through it,
-and the token's scope is computed inside it.
-
-- **R0 effective rule**: folders are keyed by filesystem identity (dev+ino, path is only where it was last seen).
-  Rule for person P on folder F = max over P and P's groups of `none < read < write` rules from F up to the nearest
-  break (inclusive); registered folders, personal folders and `--break` folders are breaks. Personal folders: owner
-  only. Flags (`no_ai`, `quarantine`, `widened_pending`) come down from every ancestor and cannot be cleared below.
-- **R1 read**: inside a registered folder ∧ no flag on the path ∧ rule ≥ read ∧ under a token-scope folder ∧ no link
-  anywhere (every step is lstat'ed, files opened with `O_NOFOLLOW`, link count must be 1, XSym link files closed) ∧ not a NAS/OS system entry
-  (`#recycle`, `#snapshot`, `@Recycle`, `@Recently-Snapshot`, `.snapshot`, `~snapshot`, `@eaDir`, `.@__thumb`,
-  `.Trashes`, `$RECYCLE.BIN`, `.TemporaryItems`, `.DS_Store`, `._*`, `~$*`) ∧ re-checked (identity of the file and of
-  every folder up to the mount) after reading, right before content is returned. Names are compared on NFC and opened
-  by their original bytes; two names equal after NFC in one folder are both closed. A folder you cannot read but that
-  holds something you can is shown as a bare path (only that child is listed). Folder stat values are synthetic.
-- **R3 provenance**: per token, a moving 8-hour window of folders touched — strong when content was output, weak when
-  the command only looked (non-matching grep targets, `grep -l/-c/-q`, `ls`, `stat`, `wc`, `sha256sum`, `test`).
-  A draft's sources = union of the writing token's window at each write; they never shrink; reading a draft brings its
-  sources into the reader's window.
-  **Provenance reset** ("출처 초기화", plan 5.1): the person, on the web (My tokens → "Reset provenance") or
-  `POST /api/tokens/:id/provenance-reset` on their own token, after a fresh login (password typed within the last 5
-  minutes: sign-in, `POST /api/me/reauth`, or `password` in the body), empties that token's window (its `touches` rows
-  only — other tokens and every existing draft's sources stay). One audit row on that token; event `provenance_reset`
-  to the admins and the person (kind, count, link; R11).
-- **R4 draft visibility**: same person ∧ the token can read every source folder right now; no sources → only the token
-  that wrote it. Other people and admins never see drafts.
-- **R5/R6 widening** (`isWidening(src, target)`): target readers = rule readers ∪ NAS readers ("unknown" = everyone);
-  source readers = rule readers (none if no-AI/quarantined) ∪ NAS readers ("unknown" = nobody); widening if some target
-  reader is not a reader of some source S ≠ target. Function and tests only; no NAS watcher.
-- **Audit**: every tool call (command line cut at 4 KB + sha256 of the whole, files touched, outcome), hash-chained;
-  secrets in the command line, file names and outcome are redacted before storing (`src/redact.ts`: our tokens keep
-  their 4-character hint, e.g. `shelf_pat_AbCd…[REDACTED:token]`; setup tokens, AWS key ids and secrets, GitHub, GitLab,
-  Slack tokens and webhooks, PEM private keys, `Authorization:`/Bearer/Basic values, JWTs, OpenAI/Stripe/Google keys,
-  URL passwords, `password=`/`token=`-style assignments); the sha256 still covers the whole original line;
-  touches, draft writes and the audit row commit in one transaction, so if the audit row cannot be written the call
-  fails and nothing it wrote is kept.
-
-## Alerts and audit
-
-Plan §4.1 R9/R11, §5.1 "출처와 기록", §7.1 (token leak, audit forgery). Code in `src/notify/`.
-
-**Events** (`src/notify/events.ts`, one `EventBus` per runtime):
-
-| event | emitted by | goes to |
+| | how | guide |
 |---|---|---|
-| `widened_draft` | reconciler (not in this branch): `rt.emit({kind, sourceFolderIds, targetFolderId, weakOnly})` | source-folder `manage` holders (detail); a source with none → admins, count only; target-folder `manage` → "1 item" only. Weak-provenance-only → daily digest |
-| `original_write_attempt` | every committed call whose shell or `edit` tried to write an original | the token owner (detail), admins (count) |
-| `bulk_read` | bulk-read alarm (below) | the token owner (detail), admins (count) |
-| `quarantine` | reconciler: `{kind, folderId}` | admins and the folder's `manage` holders |
-| `new_client` | MCP endpoint / CLI `sh`: first request from a client the token has not used | the token owner |
-| `admin_self_grant` | admin API (not in this branch): `{kind, folderId, subjectPersonId}` | the folder's `manage` holders and the person concerned, at once |
-| `password_reset` | admin API: `{kind, subjectPersonId}` | only that person (their own address) |
-| `token_revoked` | `connections revoke`, `token revoke`, auto-suspend | the token owner |
-| `audit_anchor` | anchor timer, `audit anchor` | admins (email carries the signed anchor) |
-| `provenance_reset` | web: `POST /api/tokens/:id/provenance-reset` | admins (detail) and the person (if it was not them, their password is known) |
-| `approval_pending` | `promote` (MCP or web) that widens | people who may approve it now (R8, detail) ; other managers of the target or a source: count only ("1 pending"). Link: `<baseUrl>/#/approvals` |
-| `approval_decided` | approve / reject, or a request closed because no one can approve | the requester |
+| **macOS** (an office Mac mini, v0.1) | `sudo ./install-macos.sh` from a release folder: service accounts, LaunchDaemons, pinned tools, encrypted daily backups | [docs/INSTALL.md](docs/INSTALL.md) |
+| **Linux + Docker** (v0.2) | `docker compose run --rm trina-drive init && docker compose up -d`; workers isolated with bubblewrap | [docs/DOCKER.md](docs/DOCKER.md) |
 
-`manage` is inherited down (none inside personal folders); inactive people never receive anything.
+Releases and a published image arrive with the public launch; until then build them from source
+(`bun scripts/build.ts`, `docker compose build`).
 
-**Payloads (R11).** Every channel message is rendered from the event kind, a count and a link only
-(`messages.render`): `[shelf] 2 widened drafts to review` / `[shelf] 넓어진 초안 2건 확인 필요` plus
-`<baseUrl>/alerts/<kind>` (detail level) or `<baseUrl>/inbox` (count level). No file, folder or draft names, no
-provenance, no person names, no ids. The one addition: anchor emails carry the signed anchor (hash, row count, time,
-key fingerprint, signature). Event details (ids) are stored in `notify_events` for the logged-in screen only, which must
-apply R7. A property test generates random names for everything and checks no channel or inbox payload contains one.
+### Connect your agent
 
-**Channels.** In-app inbox (`notify_inbox`, one unread row per person × kind, counts add up), Slack incoming webhook
-(`{"text": …}`) and email (`email.mode`: `outbox` = `.eml` files in `<data>/outbox` for development, `smtp` = a
-minimal SMTP client, plain or implicit TLS, AUTH PLAIN; `$SHELF_SMTP_PASS` overrides the stored password, `off`).
-Contacts per person: `notify contact kim --email kim@corp --slack https://hooks.slack.com/… --lang ko`. Delivery:
-pending rows are flushed every `flushMs` (5 s) by `serve`; same kind to the same destination coalesces into one message
-with the summed count; at most `perMinute` (6) messages per destination per minute, the rest waits and coalesces
-further (password reset, self-grant and revocations go first); failures retry with backoff, 5 attempts.
-
-**Bulk-read alarm.** Per token, a sliding window (`bulkRead.windowMs`, 10 min) over committed calls: files whose content
-was output (cat, read, grep matches; `ls`/non-matching grep do not count), their original bytes, distinct folders.
-Thresholds `bulkRead.files` 200, `bulkRead.bytes` 50 MB, `bulkRead.folders` 20 (0 = off); fires once per window.
-`bulkRead.autoSuspend` (off by default) revokes the token when it fires (suspension = revocation; the owner makes a new
-token). Example: `notify set bulkRead.files 500`.
-
-**Connections.** Each authenticated MCP message records token × client: `clientInfo` name/version from `initialize`,
-user-agent product (version stripped, so updates are not new clients) and source IP (`newClientByIp`, default on). CLI
-`sh` records itself as `shelf cli` from `local`. `connections list` shows token, person, client, IP, last used, request
-count; `connections revoke <token-id>` (= `token revoke`) revokes at once. `mcp.ts` checks the token (revoked, expired,
-inactive person) on every request, so the next request fails with 401; a test proves it in-process.
-
-**Audit anchor (principle 6).** An Ed25519 key is made at `init` (or first use) in `<data>/anchor/` (private key 0600).
-Every `anchor.intervalMs` (default daily; nothing is sent if the chain did not change) `serve` signs
-`{count, head hash, time, key fingerprint}`, stores it (`audit anchors`), writes it to `anchor.dir` (put this on
-another disk or a synced folder) and emails it to admins. `audit verify --against <file>` (the `.json` or the saved
-email) checks the anchor's signature, that this install still has the same key, that the chain verifies, and that row
-#count still has the anchored hash: an operator who rewrote or deleted earlier rows and recomputed every hash is caught,
-because the anchor already left the server. Exit code 1 on mismatch. `audit anchor [--force]` anchors now.
-
-**Settings** live in `<data>/notify.json` (`notify show`, `notify set <dotted.key> <json>`): `baseUrl`, `lang`
-(`en`/`ko`), `email`, `perMinute`, `flushMs`, `digestHour` (local hour, 9), `bulkRead`, `newClientByIp`, `anchor`.
-
-## Layout
-
-```
-src/config.ts      name, limits, protocol versions          src/policy.ts   R0 R1 R4 R5 R6 (the one decision point)
-src/db.ts          SQLite schema (bun:sqlite)               src/session.ts  one call: touches, pending drafts, commit+audit
-src/store.ts       people, groups, folders, rules, tokens   src/vfs.ts      just-bash IFileSystem over the policy
-src/names.ts       NFC, system names, office extensions     src/grep.ts     grep/egrep/fgrep/rg → ripgrep --json
-src/mirror.ts      text mirror keyed by content sha256      src/shell.ts    Bash instance, read modes, caps
-src/drafts.ts      draft box, versions, R4                  src/tools.ts    the five MCP tools
-src/audit.ts       hash-chained audit log                   src/mcp.ts      POST /mcp endpoint
-src/extract/       pdf (pdftotext), docx/xlsx/pptx, hwpx, hwp (own CFB reader), zip; run.ts = always in an isolated worker
-src/rights.ts      R5/R7/R9 admin-side decisions            src/web/        REST API, sessions, mail, notices, server
-src/promote.ts     promote (R2 v0.2, R6), approvals (R8)    src/promote-tool.ts  the MCP promote tool's glue
-src/web/mfa.ts     passkeys, TOTP, recovery, step-ups       src/web/totp.ts  RFC 6238   src/web/approve.ts  their HTTP side
-web/               the admin app (Vite + React, en/ko)
-src/samples.ts     generated sample office files            src/demo.ts     demo seed       src/cli.ts  CLI
-src/redact.ts      secrets out of audit rows                src/ratelimit.ts  sign-in (SQLite) and /mcp limits
-src/client/mcp.ts  `mcp add claude|codex|cursor` (runs on the person's computer)
-src/notify/        events, recipients, messages (R11), notifier (inbox, coalescing, rate limit, digest), channels
-                   (Slack, outbox, smtp), bulk-read alarm, connections, audit anchor, its CLI and tables (schema.ts)
-sim/provenance-day.ts   plan ★8 replay                      test/           bun test
-```
-
-## Known limits
-
-- Promote / approvals: a name taken by a file the caller cannot see (a closed link, an NFC twin) is refused as
-  "exists", which shows that something is there (principle 2's documented hole). The link-then-unlink placement leaves
-  the file with two links for a moment (agents see it closed until the unlink); shares without hard links fall back to
-  an exclusive create, where a reader may see a half-written new file. The folder chain is re-checked around the write,
-  not atomically with it. Eligibility is computed per request on every inbox view (fine for a team, not for thousands
-  of requests). Expired requests close lazily (on the next view). The web pages were checked end to end in headless
-  Chrome with a virtual authenticator, not on real devices.
-
-- Shell commands and document text extraction (on demand and in the reconciler's queue) run in the isolated executor
-  (sandboxed worker processes; see [docs/worker.md](docs/worker.md)); without OS isolation both are refused.
-  `SHELF_SHELL=inprocess` / `SHELF_EXTRACT=inprocess` run just-bash / the parsers in the server process (development
-  and tests only). pdftotext runs inside a PDF's extraction worker; ripgrep is a child process of the server with a
-  timeout and output caps but no sandbox.
-- The draft quota is checked when a call writes, against what is committed: two calls of one token running at once
-  can each pass it (by at most what those calls write). just-bash prints every read error as "No such file or
-  directory"; the real reason (too large, cannot extract) is added to stderr as a `shelf:` note.
-- just-bash lets some redirect failures (`echo x > /경영/a`) escape `exec()`; the server reports them like bash does
-  (`bash: <path>: …`) but the rest of that command line does not run.
-- `mkdir` inside `/drafts/` lasts only for the call (drafts are files; folders come from their paths). `/tmp` does not
-  exist (by design: nothing outside `/drafts/` is writable).
-- No NAS watcher, no reconciliation of moved/renamed folders (a registered folder whose identity changed is simply
-  closed), no file-identity index (so R1 ⑤ "same identity at another path" is covered only by `nlink == 1`), no Mac
-  alias/XSym detection, no "widened draft" detection (the notifier takes `widened_draft` events, nothing emits them yet), no `manage` enforcement beyond storing
-- Reconciler (below) is after the fact between passes: a move is closed from the moment an agent walks into it until
-  the next pass judges it, but a brand-new file appears to agents before its first hash/extraction (R6 copy detection
-  runs on the next pass). No notifications (R11; events carry the recipients), no `manage` enforcement beyond storing
-  alias detection (XSym link files are closed), no "widened draft" detection, no notifications (R11), no `manage` enforcement beyond storing
-  grants, no web UI, no trash/purge of drafts (deleted drafts keep their rows and blobs).
-  alias/XSym detection, no "widened draft" detection, no webhook/Slack notifications (web notices + mail only), no trash/purge of drafts (deleted drafts keep their rows and blobs).
-- grep: BRE/ERE are translated to Rust regex (no backreferences/lookaround — refused with ripgrep's message);
-  `sed`/`awk` regexes run in just-bash (it uses re2js, a linear engine, for most of them). Output of `wc` with no flag
-  counts extracted text. Extraction runs on first use (no background queue yet).
-- Timing differences between hidden and nonexistent paths are not equalised. Audit tail truncation after the last anchor is not caught
-  (rows removed since then look like rows never written); the anchor covers everything up to it.
-- macOS and Linux only. On APFS two NFC/NFD spellings cannot coexist, so that case is tested with a simulated listing.
-
-## Draft promote and approvals (v0.2)
-
-Plan 5.2 "초안 반영 + 승인함", 4.1 R2 (v0.2), R6, R8, R11, principle 5. Code: `src/promote.ts` (deciding and writing),
-`src/promote-tool.ts` (MCP), `src/web/approve.ts` (web), `web/src/pages/Approvals.tsx`.
-
-- **Where.** A folder takes promoted drafts when the admin turned **promote** on for it or a folder above it
-  (`PUT /api/folders/:id/promote`, the folder page, or `folder promote <path>`; never inside a personal folder). Decision:
-  admin only for now — R7 lets `manage` change rules, but promote decides where the server's NAS account writes (5.2: that
-  account has write only on promote folders), which is an admin matter. The person's effective rule there must be
-  `write` (R2: in v0.2 `write` marks where a person's drafts may land), and the target must be readable in the caller's
-  view (the token's, for an agent: scope, flags, "No AI"). A hidden target answers like a missing one.
-- **What.** NEW files only (overwrite is v0.3): text names (`.md .markdown .txt .csv .tsv .json .yaml .yml .log`), no
-  path, no hidden/system/temporary name, ≤ 255 bytes; refused when a name equal after NFC and case-folding (or its
-  `._` sidecar) is there; content that looks like an XSym / alias link is refused. `expected_sha256` pins the version.
-- **Not widening** (R6 with S ≠ F on R5 readers; no sources = not widening): written at once. The bytes go to a temp
-  file `~$shelf-promote-….tmp` in the target folder (`O_EXCL|O_NOFOLLOW`, fsync), the folder chain is re-checked
-  (identity, no links), then `link(temp, final)` — which refuses an existing name, so it is a rename that never
-  replaces — and the temp is unlinked; shares without hard links get an exclusive create of the final name. The draft's
-  current version is checked right before (base hash) and the result after (regular file, one link, same bytes). The
-  promotion and its audit row are written in the call's transaction; if that fails the file is removed again. The
-  file's identity is recorded as a **tracked copy** of the draft (`widened`, `match = 'promote'`): whoever reads it
-  inherits Src(d) (R3), and R6 re-judges it when rules change, exactly as with copies the reconciler finds.
-- **Widening**: an approval request (`approvals`), status `pending`, 7 days. The bytes are the content-addressed blob
-  of that version (kept). The agent gets `Pending approval … <public url>/#/approvals/<id> … You cannot approve it`
-  (`structuredContent.status: "input_required"` — information only). The same draft version, target and name again
-  is the same request; at most 20 pending per person. **No eligible approver → `closed`** ("no one can approve") at once.
-- **Who approves (R8, judged at every view and again at the click).** A person with a web sign-in (never a token) who can
-  read every source folder by rule with no flag on it or above (agents' R1 ①–③: "No AI", quarantine, widened-pending
-  all count) **and** manages the target folder **or** every source folder. Their own request only by the second way.
-  Admins are not stand-ins. Sources = Src at request time ∪ what the draft gained since.
-- **What they see.** Eligible approvers: the sources by name, who gains access (count and names), the requester and
-  token, the content as plain text (`<pre>` text, never HTML; 256 KB) and a diff against nothing, and the agent's reason
-  folded away as "Agent's claim (not verified)". The requester: status, their sources (hidden ones counted), no names of
-  other people, cancel. Other managers of the target or a source: only "N pending" on the inbox (R11). Anyone else: 404.
-- **Approve** = `step-up/options` → passkey (`userVerification: required`) → `step-up` returns a random assertion
-  (2 minutes, single use, stored as sha256, bound to session + person + approval id + version hash) → `approve`
-  consumes it, then re-judges everything: R8 for the approver, the draft still at that hash (else the request closes as
-  `stale`), the target still there / not quarantined / promote still on, the requester still with `write`, the name
-  still free (else `failed`). Writes exactly the stored bytes as above; the copy is recorded `confirmed`.
-  **Reject** needs a reason (the requester sees it); no step-up (it writes nothing).
-- **Browser agents (7.1).** Every approve click needs a fresh passkey assertion bound to that request: a browser agent
-  driving a signed-in session cannot produce one. No magic links: notifications carry `<baseUrl>/#/approvals` only.
-  Bearer tokens are never read under `/api`; CSRF + same-origin `Origin` as everywhere.
-- **Passkeys vs LAN.** Passkeys need the public https address (`serve --public-url https://…`; its host is the RP ID).
-  With one, approvals require a passkey (an authenticator code is not accepted). Without one (LAN-only install), approvals
-  step up with the authenticator app (TOTP, each code once) and the page says so. Recovery codes never approve.
-
-## Second factors (passkeys, TOTP)
-
-`src/web/mfa.ts`, `src/web/totp.ts`, Settings → Second factor (`web/src/pages/SecondFactor.tsx`).
-
-- **Passkeys** via `@simplewebauthn/server` (works under Bun): RP ID = host of `--public-url` when it is https (http only
-  on `localhost`); attestation `none`; user verification required; algorithms ES256, EdDSA, RS256; counter kept.
-  Challenges are single use, 5 minutes, bound to what they are for (`session:<hash>`, a sign-in ticket, or
-  `approval:<id>:<sha256>:<session>`).
-- **TOTP** RFC 6238 (SHA-1, 6 digits, 30 s, ±1 step); confirmed with a code before it counts; each step accepted once
-  per person (`last_step`), so a code seen by someone else is useless. The secret is stored in the database (the same
-  disk as everything else; documented).
-- **Recovery codes**: 10, shown once, sha256 stored, single use, sign-in only; made when the first factor is added.
-- **Sign-in**: a correct password of someone with a second factor gives a 5-minute ticket (sha256 stored, ≤ 5 tries),
-  not a session; a reset link does the same (R9: a reset mail is no way around it). Second-step failures are limited per
-  person (5 per 15 min) and per address.
-- Adding or removing a factor needs the password typed within 5 minutes, is audited and tells the person (notice +
-  mail). Lost everything: the operator runs `mfa reset <person>` on the server (audited, sessions end).
-- **Admin 2FA gate** (for the public listener / OAuth): `adminHas2FA(db, personId)` (a passkey or a confirmed TOTP),
-  `allAdminsHave2FA(db)` (every active admin, at least one), `requireAdmin2FA(db)` (throws `MfaError`
-  `admin_2fa_required`, 403, with a count and no names) — all in `src/web/mfa.ts`. `serve` prints whether passkeys
-  are available and warns about admins without a second factor.
-
-Tables (created on demand): `mfa_passkeys`, `mfa_totp`, `mfa_recovery`, `mfa_challenges`, `mfa_tickets`,
-`mfa_stepups` (`src/web/mfa.ts`); `promote_folders`, `approvals`, `promotions` (`src/promote.ts`).
-
-## In-place reconciler (plan 2.2, R1 ⑤–⑦, R6, R10, 11-9)
-
-`src/inplace/`. Walks the registered folders (and `share add` roots: the whole share, identity + hash only) with lstat,
-never following links and skipping NAS system folders; diffs against the last walk by identity (dev+ino, birth time).
-
-| finding | what happens |
-|---|---|
-| rename (same identity, same parent), move that does not widen | rules follow the identity; folder paths updated |
-| move whose new readers (R5 target) are wider than the old location's (R5 source) | identity quarantined (`quarantine` kind `moved`) + event for admins and old-location managers |
-| a rule-bearing folder's identity vanished | its last path stays closed for any other identity (`lost`), rules stay on the lost id |
-| symlink, hard link, identity at 2+ paths, XSym file, Mac alias (data or AppleDouble Finder info), NFC collision | closed (`fs_index.closed`) + one `closed` event per reason per pass |
-| new/changed file | sha256 (small first), text mirror filled (queue, 2 at a time), compared with every draft version: same sha256 or ≥ 30% paragraph overlap → `widened` row; if `isWidening(Src(d), folder)` → `pending` (closed to agents) until the admin or a manager of every source confirms; confirmed/tracked copies pass Src(d) on to readers |
-| any outside change | one `outside-change` row in the audit chain (`~$*`, `.~lock.*#`, `~WRL*.tmp`, `.DS_Store`, `._*` filtered) |
-
-Between passes the policy closes anything the index saw at another path (moved since) and asks for a pass; XSym/alias
-bytes are refused at read time. `serve` reconciles on start, every 5 min (`--reconcile-every`) and on fs.watch hints.
-10k small files on a local SSD: first pass ≈ 0.8 s (identity + sha256), ≈ 4 s with the text mirror; unchanged pass ≈ 0.2 s
-(`bun test test/reconcile-bench.test.ts` prints it).
-
-## Dependencies and licenses (plan ★1)
-
-| | license | how |
-|---|---|---|
-| just-bash 3.6.0 (vercel-labs) | Apache-2.0 | runtime; its runtime tree is MIT/ISC/Apache-2.0/BSD, plus optional native `node-liblzma` (LGPL-3.0) and `@mongodb-js/zstd` |
-| ripgrep | MIT / Unlicense | external binary |
-| poppler `pdftotext` | GPL-2.0/3.0 | external binary, separate process (not linked) |
-| HWP/HWPX extractor | own code (adapted from Team AX `server/src/files/hwp.ts`, same owner) | the CFB reader replaces SheetJS |
-| @modelcontextprotocol/sdk 1.32 | MIT | tests only (as the HTTP client); the server endpoint is hand-written because 1.32 does not know protocol 2026-07-28 |
-| @simplewebauthn/server 13.3.3 | MIT | runtime (passkeys); its tree: @peculiar/* MIT, @hexagon/base64 MIT, @levischuck/tiny-cbor MIT, asn1js BSD-3-Clause, pvtsutils/pvutils MIT, tslib 0BSD, reflect-metadata Apache-2.0, tsyringe MIT |
-| typescript, @types/bun | Apache-2.0, MIT | dev |
-
-## Tests
+On each person's own computer:
 
 ```sh
-bun test                 # SHELF_TEST_HWP=/path/to/real.hwp also checks a Hangul-made file
-SHELF_SHELL=inprocess bun test   # the same with just-bash in-process (the hidden-path suites run both modes anyway)
-bunx tsc --noEmit
-bun run test:fuzz        # path/argument fuzzer, 60 s; --seconds N --seed S (or FUZZ_SECONDS / FUZZ_SEED) for long runs
+tdrive mcp add claude --server http://files.office.lan:8787 --login kim
 ```
 
-`test/security/` (plan 7.1, 7.4; review-permissions 7): `matrix` (entrances × roles × cases from 4.1), `existence`
-(hidden = nonexistent, byte for byte, plus timing p50/p95; `SHELF_TIMING_RUNS`), `fuzz` (canaries in every forbidden
-file, hidden names, originals unchanged, no crash, deadline, no server paths), `resource` (shell attacks bounded; another
-token's `ls` p99 < 200 ms; per-call read caps, draft quota, concurrent command limits), `mcp-protocol`, `links`,
-`tools`. `test/extract-isolation.test.ts`: malicious documents (zip bombs, a parser that never returns, a huge
-allocation) killed in their extraction worker. Parts owned by features not built yet are `test.todo` with the owner in
-the name.
+It signs in, makes a personal token, keeps it in the macOS Keychain (or a 0600 file), and registers the server in
+**user scope** only, never in a repo's `.mcp.json`. `codex` and `cursor` work the same way; `--scope`, `--read-only`
+and `--ttl` narrow the token. Details: [docs/CONNECT-CLIENTS.md](docs/CONNECT-CLIENTS.md).
+
+## Supported clients
+
+| client | how it connects | status |
+|---|---|---|
+| Claude Code | `tdrive mcp add claude` (personal token via `headersHelper`) | ✓ v0.1 |
+| Codex | `tdrive mcp add codex` (`bearer_token_env_var`) | ✓ v0.1 |
+| Cursor | `tdrive mcp add cursor` (`${env:…}` header) | ✓ v0.1 |
+| claude.ai (custom connector) | OAuth 2.1 + public address through a Cloudflare tunnel | ✓ v0.2 · [guide](docs/CONNECT-CLAUDE-AI.md) |
+| ChatGPT (developer mode connector) | OAuth 2.1, same public address | ✓ v0.2 · [guide](docs/CONNECT-CHATGPT.md) |
+| Anything else that speaks MCP over HTTP | `Authorization: Bearer tdrive_pat_…` on `POST /mcp` | ✓ |
+
+## Security model
+
+- **One decision point.** Shell, file tools, search, web downloads and drafts all ask the same function. The token's
+  scope is computed inside it, so names outside the scope never leak.
+- **Agents never exceed their person.** Agent rules are set per folder by admins and folder managers; a token can only
+  narrow them.
+- **Fail closed.** Links, hard links, NAS system folders, Unicode look-alike names and anything moved since the last
+  scan are closed until judged. Without OS isolation, shell commands and document parsing are refused.
+- **Writes are drafts.** Agents cannot write, rename or delete originals through Trina Drive. Promotions create new
+  files; widening ones wait for a passkey approval that a browser agent cannot fake.
+- **Audit you can check.** Hash chain, secrets redacted, signed anchors mailed off the server, `tdrive audit verify`.
+
+What we do *not* promise: that data never leaves (what an agent reads goes to the AI provider its person chose), or
+that copies made outside Trina Drive are caught. The full picture, including known limits:
+**[docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md)**. Found a vulnerability? See [SECURITY.md](SECURITY.md).
+
+## How it compares
+
+| | Trina Drive | Google Drive / Box MCP | Glean / Dust | QNAP MCP Assistant | Sync folder + Claude Code |
+|---|---|---|---|---|---|
+| Open source, on your hardware | ✓ | ✗ | ✗ | on the NAS, closed | ✓ (no server) |
+| Works on your existing folders in place | ✓ any share | move to their cloud | indexes copies | ✓ its own NAS | ✓ |
+| Each person's agent sees only their files | ✓ | ✓ | ✓ | one NAS account per key | ✗ whole laptop |
+| Agent narrower than its person (scope, read-only, expiry) | ✓ | ✗ | partial | read-only switch | ✗ |
+| Real shell (`ls`, `grep -r`, pipes) | ✓ | ✗ | ✗ | ✗ | ✓ |
+| `grep` inside PDF / Office / HWP | ✓ | search index | search index | keyword search | ✗ |
+| Originals protected, agent writes go to drafts | ✓ | ✗ | read-only | read-only switch | ✗ |
+| Widening writes need a human approval | ✓ passkey | top tier (Box) | ✗ | ✗ | ✗ |
+| Audit log the team can see and verify | ✓ hash-chained | enterprise plans | admin only | — | ✗ |
+| Claude Code, Codex, Cursor, claude.ai, ChatGPT | ✓ | ✓ | own app first | MCP clients | Claude Code |
+
+Based on public documentation as of October 2026. Something out of date? Please open an issue.
+
+## Pricing
+
+**Self-hosted Trina Drive is free forever, with every security feature.** We charge for running it for you.
+
+| | price | what |
+|---|---|---|
+| **Community** | $0 | The full product on your hardware. Community support on GitHub. |
+| **Team** (managed) | $99 / month | We install, monitor, update, back up and secure it on your office Mac mini. Up to 10 AI-connected people, unlimited file-only people. |
+| **Business** (managed) | $349 / month | Up to 40 AI-connected people, faster response, quarterly permission and audit review. |
+| **Setup & migration** | from $1,490 | Folder and permission design, NAS / Mac mini setup, client training. |
+
+Details and Korean won prices: **[drive.trina.app/#pricing](https://drive.trina.app/#pricing)**.
+
+## Roadmap
+
+- [x] **v0.1: read shell, draft box, audit.** Per-person permissions over existing folders, MCP for Claude Code /
+  Codex / Cursor, `tdrive mcp add`, web admin, alerts, macOS installer with encrypted backups.
+- [x] **v0.2: any AI, approved promotion.** OAuth 2.1 for claude.ai and ChatGPT, public listener behind a tunnel,
+  passkeys and TOTP, draft promotion with approvals, read-only web file browser, Linux Docker image.
+- [ ] Security gate and public beta (in progress).
+- [ ] **v0.3 (to be decided with users):** overwrite-in-place promotion, file previews on a separate origin, OIDC
+  sign-in (Google, Microsoft), OCR, semantic search, a permission-aware document graph, KakaoTalk notifications,
+  S3-compatible backup targets, managed mode with its own data folder.
+
+## Documentation
+
+| | |
+|---|---|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | components, MCP tools, web API, promotion, reconciler, dependencies |
+| [SECURITY-MODEL.md](docs/SECURITY-MODEL.md) | threat model, permission rules R0–R11, audit, second factors, OAuth, known limits |
+| [CONFIG.md](docs/CONFIG.md) | names, environment variables, data directory, command reference |
+| [CONNECT-CLIENTS.md](docs/CONNECT-CLIENTS.md) · [CONNECT-CLAUDE-AI.md](docs/CONNECT-CLAUDE-AI.md) · [CONNECT-CHATGPT.md](docs/CONNECT-CHATGPT.md) | connecting AI clients |
+| [INSTALL.md](docs/INSTALL.md) · [DOCKER.md](docs/DOCKER.md) · [BACKUP-FORMAT.md](docs/BACKUP-FORMAT.md) | running it for a team |
+| [worker.md](docs/worker.md) | sandboxed workers on macOS and Linux |
+
+## Contributing
+
+Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) (setup, tests, what a good PR
+looks like). The contributor agreement (CLA for server code, DCO for docs and examples) will be settled before the
+public release. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## License
+
+License: to be announced before public release. The plan is AGPL-3.0 for the server and Apache-2.0 for the CLI, SDKs
+and integration examples. Until then, all rights reserved by Trina Inc.
+
+## Star history
+
+<!-- TODO(launch): the chart fills in once the repository is public. -->
+<a href="https://star-history.com/#potenlab/trina-drive&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=potenlab/trina-drive&type=Date&theme=dark">
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=potenlab/trina-drive&type=Date">
+    <img alt="Star history chart" src="https://api.star-history.com/svg?repos=potenlab/trina-drive&type=Date" width="600">
+  </picture>
+</a>
+
+---
+
+<p align="center">
+  Made by <a href="https://drive.trina.app">Trina Inc.</a> (주식회사 트리나) · <a href="mailto:contact@trina.app">contact@trina.app</a>
+</p>

@@ -82,7 +82,7 @@ export interface ExecutorConfig {
   isolation?: Isolation | 'auto'
   /** Refuse to run jobs when no OS isolation is available (default true; plan 6). */
   requireIsolation?: boolean
-  /** Dedicated unprivileged user for workers (e.g. `_shelfwork`). Needs the server to run as root (see docs/worker.md). */
+  /** Dedicated unprivileged user for workers (e.g. `_tdrivework`). Needs the server to run as root (see docs/worker.md). */
   runAs?: string | null
   /** Refuse to run if runAs is set but cannot be applied (default false: run as the server user and report user: null). */
   requireRunAs?: boolean

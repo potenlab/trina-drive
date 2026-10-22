@@ -3,7 +3,7 @@
 // browser, a same-origin Origin. Handlers only parse and route: who may see or change what is decided in rights.ts
 // (admin side) and policy.ts (drafts), reached through ops.ts and views.ts.
 import { appendAudit } from '../audit'
-import { NAME, VERSION } from '../config'
+import { CLI, NAME, PRODUCT, VERSION } from '../config'
 import { StoreError, addPerson } from '../store'
 import type { Actor } from '../rights'
 import {
@@ -78,7 +78,7 @@ const id = (c: Call, k = 'id') => { const v = Number(c.m.groups?.[k]); if (!Numb
 
 const routes: Route[] = [
   // ---------- before sign-in ----------
-  R('GET', '/state', false, ({ w }) => ({ name: NAME, version: VERSION, setup_pending: setupPending(w.db), setup_done: setupDone(w.db) })),
+  R('GET', '/state', false, ({ w }) => ({ name: NAME, product: PRODUCT, cli: CLI, version: VERSION, setup_pending: setupPending(w.db), setup_done: setupDone(w.db) })),
   R('POST', '/setup', false, async ({ w, req, body: b, s, addr }) => {
     if (!w.linkByAddr.hit(`setup:${addr}`)) throw rateLimited(w.linkByAddr.retryAfter(`setup:${addr}`))
     const pw = checkPasswordRules(b.password)

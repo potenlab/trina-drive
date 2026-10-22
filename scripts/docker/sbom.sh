@@ -3,7 +3,7 @@
 # and the binaries syft recognises (bun, rg), in SPDX and CycloneDX JSON, plus a short summary. Runs syft from its own
 # digest-pinned image against `docker save` of the image, so nothing is installed on the host and no registry is used.
 #
-#   scripts/docker/sbom.sh [image]        (default shelf:dev) -> dist/sbom/<name>-<version>.{spdx,cdx}.json
+#   scripts/docker/sbom.sh [image]        (default trina-drive:dev) -> dist/sbom/<name>-<version>.{spdx,cdx}.json
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 NAME=$(sed -n 's/^  "name": "\(.*\)",$/\1/p' package.json)

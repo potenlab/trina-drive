@@ -15,11 +15,11 @@ const HOSTILE = path.join(FIXTURES, 'hostile.ts')
 const MAC_SANDBOX = process.platform === 'darwin' && fs.existsSync('/usr/bin/sandbox-exec')
 const BWRAP = process.platform === 'linux' && detectIsolation() === 'bwrap'
 const SANDBOXED = MAC_SANDBOX || BWRAP
-/** The isolation this machine must report: sandbox-exec on macOS, bwrap where it works; SHELF_EXPECT_ISOLATION
+/** The isolation this machine must report: sandbox-exec on macOS, bwrap where it works; TDRIVE_EXPECT_ISOLATION
  *  (set by scripts/docker-test.sh) makes a missing bwrap a failure instead of a skipped suite. */
-const EXPECTED = process.env.SHELF_EXPECT_ISOLATION || (MAC_SANDBOX ? 'sandbox-exec' : BWRAP ? 'bwrap' : undefined)
+const EXPECTED = process.env.TDRIVE_EXPECT_ISOLATION || (MAC_SANDBOX ? 'sandbox-exec' : BWRAP ? 'bwrap' : undefined)
 
-const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-worker-test-')))
+const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tdrive-worker-test-')))
 const tmpRoot = path.join(scratch, 'jobs')
 fs.mkdirSync(tmpRoot)
 const outside = path.join(scratch, 'outside')
@@ -186,10 +186,10 @@ describe.if(SANDBOXED)(`sandbox (${MAC_SANDBOX ? 'macOS sandbox-exec' : 'Linux b
 
   test('writes outside the job dir are blocked; inside it they work', async () => {
     const target = path.join(outside, 'pwned.txt')
-    const home = path.join(os.homedir(), `.shelf-worker-test-${process.pid}`)
+    const home = path.join(os.homedir(), `.tdrive-worker-test-${process.pid}`)
     const a = await extract('writeTo', target)
     const b = await extract('writeTo', home)
-    const c = await extract('writeTo', '/tmp/shelf-worker-test-pwned')
+    const c = await extract('writeTo', '/tmp/tdrive-worker-test-pwned')
     expect(a.text).toContain('WRITE-BLOCKED')
     expect(b.text).toContain('WRITE-BLOCKED')
     expect(c.text).toContain('WRITE-BLOCKED')
@@ -240,7 +240,7 @@ describe.if(SANDBOXED)(`sandbox (${MAC_SANDBOX ? 'macOS sandbox-exec' : 'Linux b
     // the server's environment is not readable from any /proc/<pid>/environ the worker can open (the canary is put into
     // the test runner's initial environment by scripts/docker-test.sh)
     expect(scan.canary).toBe(false)
-    if (process.env.SHELF_TEST_CANARY) console.log('[worker] canary set in the server environment: not visible in the worker')
+    if (process.env.TDRIVE_TEST_CANARY) console.log('[worker] canary set in the server environment: not visible in the worker')
     // signals reach nothing outside the sandbox: every pid number answers ESRCH except the worker's own threads and
     // bwrap's init (pid numbers are the namespace's own, so the server's pid number may be one of the worker's threads)
     expect((await extract('signalScan', '32768', { timeoutMs: 20_000 })).text).toBe('[]')

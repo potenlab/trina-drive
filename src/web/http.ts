@@ -2,7 +2,7 @@ import type { ServerOptions } from '../mcp'
 import type { OAuthOptions, OAuthRuntime } from '../oauth/config'
 // Shared bits of the web side: the context the handlers get, errors that map to HTTP statuses, JSON replies.
 import type { Ctx } from '../session'
-import type { ShelfEvent } from '../notify/events'
+import type { DriveEvent } from '../notify/events'
 import type { McpLimiter } from '../ratelimit'
 import type { RateLimiter } from './auth'
 import type { Mailer } from './mail'
@@ -20,7 +20,7 @@ export interface WebOptions {
   /** /mcp rate and concurrency limits (default: MCP_LIMITS) */
   mcpLimiter?: McpLimiter
   /** the notify bus (src/notify): events whose channel payloads follow R11 */
-  emit?: (e: ShelfEvent) => void
+  emit?: (e: DriveEvent) => void
   /** the OAuth authorization server (src/oauth): default from `public enable` (meta), null = off */
   oauth?: OAuthOptions | null
 }

@@ -16,7 +16,7 @@ import {
   type AuthenticationResponseJSON, type AuthenticatorTransportFuture, type RegistrationResponseJSON,
 } from '@simplewebauthn/server'
 import type { DB } from '../db'
-import { NAME } from '../config'
+import { NAME, PRODUCT } from '../config'
 import { sha256 } from '../store'
 import { matchTotp, newTotpSecret, otpauthUri } from './totp'
 
@@ -79,7 +79,7 @@ export function passkeyConfig(publicUrl: string | undefined | null): PasskeyConf
   const local = u.hostname === 'localhost' || u.hostname.endsWith('.localhost')
   if (u.protocol !== 'https:' && !(u.protocol === 'http:' && local)) return null
   if (/^\d+\.\d+\.\d+\.\d+$/.test(u.hostname) || u.hostname.startsWith('[')) return null // RP IDs are domains
-  return { rpId: u.hostname, origin: u.origin, rpName: NAME }
+  return { rpId: u.hostname, origin: u.origin, rpName: PRODUCT }
 }
 
 // ---------- who has what ----------
@@ -129,7 +129,7 @@ export function totpBegin(db: DB, personId: number, account: string): { secret: 
   const secret = newTotpSecret()
   db.query('INSERT INTO mfa_totp (person_id, secret, created_at) VALUES (?, ?, ?) ON CONFLICT (person_id) DO UPDATE SET secret = excluded.secret, created_at = excluded.created_at, confirmed_at = NULL, last_step = 0')
     .run(personId, secret, Date.now())
-  return { secret, uri: otpauthUri(NAME, account, secret) }
+  return { secret, uri: otpauthUri(PRODUCT, account, secret) }
 }
 
 /** Check a code against a secret and use its step up (atomically: the same step never passes twice). */

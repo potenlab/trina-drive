@@ -1,6 +1,7 @@
 // Screen text in English and Korean. The browser's language picks the first one; the choice in Settings (or the
 // switch in the header) is kept in this browser. Korean must have every English key (TypeScript checks it).
 import { useSyncExternalStore } from 'react'
+import { NAME } from '../../src/brand'
 
 const en = {
   app_tagline: 'Team folders for AI agents',
@@ -193,7 +194,7 @@ const ko: Record<Key, string> = {
 export type Locale = 'en' | 'ko'
 export const LOCALES: { id: Locale; label: string }[] = [{ id: 'en', label: 'English' }, { id: 'ko', label: '한국어' }]
 const DICTS: Record<Locale, Record<Key, string>> = { en, ko }
-const STORE_KEY = 'shelf.locale'
+const STORE_KEY = `${NAME}.locale`
 
 function initial(): Locale {
   try { const v = localStorage.getItem(STORE_KEY); if (v === 'en' || v === 'ko') return v } catch { /* storage blocked */ }

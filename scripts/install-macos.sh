@@ -9,8 +9,8 @@
 #   --listen ADDR       address the server listens on (default 0.0.0.0 = every interface: office LAN and VPN such as
 #                       Tailscale). v0.1 is for LAN/VPN only: never forward a public port to it.
 #   --port N            HTTP port (default 8787)
-#   --backup-dir DIR    folder for scheduled encrypted backups, on an external disk (e.g. /Volumes/Backup/shelf);
-#                       can be set later with `<name> backup target set`
+#   --backup-dir DIR    folder for scheduled encrypted backups, on an external disk (e.g. /Volumes/Backup/trina-drive);
+#                       can be set later with `tdrive backup target set`
 #   --new-backup-key    make a new backup key even if one exists (older backups keep needing the old secret key)
 #   --no-power          leave sleep and restart-after-power-failure settings alone (laptops, test installs)
 #   --dry-run           change nothing on the system; with --prefix DIR (default: a new temporary folder)
@@ -19,11 +19,11 @@
 #
 # What it does (see docs/INSTALL.md):
 #   1. checks the release (release.json, every file against SHA256SUMS, no unlisted files, CPU type, macOS version)
-#   2. role accounts _shelf (server) and _shelfwork (workers): hidden, no login shell, no password (macos/common.sh)
+#   2. role accounts _tdrive (server) and _tdrivework (workers): hidden, no login shell, no password (macos/common.sh)
 #   3. /Library/Application Support/<name>/: app/ (root), config/ (root, readable by the server), setup/ (root:admin),
 #      db, drafts, mirror, backup-staging, logs (server account, 0700), work/ and run/worker/ (worker account)
 #   4. the app version folder (root-owned, so the server account cannot change what root or admins run) and the CLI
-#      on PATH: /usr/local/bin/<name> -> app/current/bin/<name>
+#      on PATH: /usr/local/bin/<cli> -> app/current/bin/<cli>
 #   5. external tools: the release's pinned ripgrep and pdftotext; Homebrew's only as a fallback (with a warning)
 #   6. the one-time first-setup token (there is no trusted loopback: first setup only with this token), and a backup
 #      key pair whose SECRET half is printed once and never stored
@@ -91,7 +91,7 @@ case "$DAEMONS" in *" server "*) ;; *) die "release.json lists no server daemon"
 (cd "$FROM" && shasum -a 256 -c --quiet SHA256SUMS >/dev/null 2>&1) || die "the release does not match its SHA256SUMS (damaged or changed download); get it again"
 EXTRA=$(cd "$FROM" && find . -type f ! -name SHA256SUMS ! -name .DS_Store | sed 's|^\./||' | sort | comm -23 - <(sed 's/^[0-9a-f]*  //' SHA256SUMS | sort))
 [ -z "$EXTRA" ] || die "files in the release that SHA256SUMS does not list: $(echo "$EXTRA" | tr '\n' ' ')"
-[ -x "$FROM/bin/$NAME" ] || die "$FROM/bin/$NAME missing"
+[ -x "$FROM/bin/$CLI" ] || die "$FROM/bin/$CLI missing"
 if grep -q '"source": "stub"' "$FROM/tools.json" 2>/dev/null; then
   [ "$DRY" = 1 ] || die "this is a test build with placeholder tools (--tools stub); build a real release"
   warn "test build with placeholder tools"
@@ -109,11 +109,11 @@ fi
 # ---- paths: logical (what the system and the files name) and on disk (below PREFIX in a dry run) ----
 BASE="/Library/Application Support/$NAME"
 LD=/Library/LaunchDaemons
-BINLINK=/usr/local/bin/$NAME
+BINLINK=/usr/local/bin/$CLI
 NEWSYSLOG=/etc/newsyslog.d/$NAME.conf
 F_BASE="$PREFIX$BASE" F_LD="$PREFIX$LD" F_BINLINK="$PREFIX$BINLINK" F_NEWSYSLOG="$PREFIX$NEWSYSLOG"
 APP_CUR="$BASE/app/current"
-ENVP=$(printf '%s' "$NAME" | tr 'a-z-' 'A-Z_')
+ENVP=$(printf '%s' "$CLI" | tr 'a-z-' 'A-Z_')
 SAFE_ROOTS=("$F_BASE" "$F_LD" "$PREFIX/usr/local/bin" "$PREFIX/etc/newsyslog.d")
 say "installing $NAME $VERSION ($TARGET) from $FROM$([ "$DRY" = 1 ] && echo " -- DRY RUN into $PREFIX")"
 
@@ -207,7 +207,7 @@ rm -rf "$DEST.partial"; mkdir -p "$DEST.partial"
 for p in bin tools release.json tools.json docs; do [ -e "$FROM/$p" ] && cp -R "$FROM/$p" "$DEST.partial/"; done
 find "$DEST.partial" -type d -exec chmod 755 {} +
 find "$DEST.partial" -type f -exec chmod 644 {} +
-chmod 755 "$DEST.partial/bin/$NAME"
+chmod 755 "$DEST.partial/bin/$CLI"
 [ -d "$DEST.partial/tools/bin" ] && chmod 755 "$DEST.partial/tools/bin/"*
 if [ "$DRY" = 1 ]; then priv chown -R root:wheel "$BASE/app/versions/$VERSION"; else chown -R root:wheel "$DEST.partial"; fi
 rm -rf "$DEST"; mv "$DEST.partial" "$DEST"
@@ -221,7 +221,7 @@ for v in "$F_BASE/app/versions/"*; do
   [ "$b" = "$VERSION" ] || [ "versions/$b" = "$PREV" ] || rm -rf "$v"
 done
 [ -n "$PREV" ] && [ "$PREV" != "versions/$VERSION" ] && say "switched ${PREV#versions/} -> $VERSION (${PREV#versions/} kept in app/versions)"
-APP_BIN="$F_BASE/app/versions/$VERSION/bin/$NAME"
+APP_BIN="$F_BASE/app/versions/$VERSION/bin/$CLI"
 
 # ---- external tools: bundled (pinned, verified above) or Homebrew's as a fallback ----
 TOOL=""
@@ -259,7 +259,7 @@ EOF
 plutil -convert xml1 -o /dev/null "$ITMP/server.json" || die "server.json does not parse" # (plutil reads JSON)
 put "$ITMP/server.json" root "$SRV_GRP" 640 "$F_BASE/config/server.json"
 
-# ---- backup target (optional now; `<name> backup target set` later) ----
+# ---- backup target (optional now; `tdrive backup target set` later) ----
 if [ -n "$BACKUP_DIR" ]; then
   case "$BACKUP_DIR" in /*) ;; *) die "--backup-dir must be an absolute path" ;; esac
   case "$BACKUP_DIR" in *'"'*|*\\*) die "--backup-dir may not contain quotes or backslashes" ;; esac
@@ -282,7 +282,7 @@ if [ ! -f "$F_BASE/db/store.db" ] || [ -f "$F_BASE/db/setup-token.sha256" ]; the
   if [ -f "$F_BASE/setup/first-setup-token" ] && [ -f "$F_BASE/db/setup-token.sha256" ]; then
     say "first setup still pending: the token made earlier stays valid ($BASE/setup/first-setup-token)"
   else
-    NEW_SETUP_TOKEN="${NAME}_setup_$(openssl rand -hex 24)"
+    NEW_SETUP_TOKEN="${CLI}_setup_$(openssl rand -hex 24)"
     (umask 077 && printf '%s\n' "$NEW_SETUP_TOKEN" > "$ITMP/token")
     printf '%s' "$NEW_SETUP_TOKEN" | shasum -a 256 | awk '{print $1}' > "$ITMP/token.sha256"
     put "$ITMP/token" root admin 640 "$F_BASE/setup/first-setup-token"
@@ -302,7 +302,7 @@ if [ ! -f "$F_BASE/config/backup-recipient" ] || [ "$NEW_BACKUP_KEY" = 1 ]; then
     [ -n "$BACKUP_SECRET" ] || die "backup keygen printed no secret key"
     put "$ITMP/recipient" root "$SRV_GRP" 644 "$F_BASE/config/backup-recipient"
   else
-    warn "could not make the backup key ($(head -c 300 "$ITMP/keygen.err" 2>/dev/null)); later: sudo $NAME --data \"$BASE\" backup keygen --set"
+    warn "could not make the backup key ($(head -c 300 "$ITMP/keygen.err" 2>/dev/null)); later: sudo $CLI --data \"$BASE\" backup keygen --set"
   fi
   rm -f "$ITMP/recipient" "$ITMP/keygen.err"
   unset OUT
@@ -353,7 +353,7 @@ write_plist server "$SRV_USER" "$SRV_GRP" "$BASE/logs/server.log" \
   <key>WorkingDirectory</key><string>$(xml "$BASE/db")</string>
 $LIMITS" \
   "$(plist_env "${COMMON_ENV[@]}" "HOME=$BASE/db")" \
-  "$APP_CUR/bin/$NAME" --data "$BASE" serve --host "$LISTEN" --port "$PORT"
+  "$APP_CUR/bin/$CLI" --data "$BASE" serve --host "$LISTEN" --port "$PORT"
 # backup: once a day; does nothing until a target and a key are configured
 if [[ "$DAEMONS" == *" backup "* ]]; then
   write_plist backup "$SRV_USER" "$SRV_GRP" "$BASE/logs/backup.log" \
@@ -365,7 +365,7 @@ if [[ "$DAEMONS" == *" backup "* ]]; then
   <key>Nice</key><integer>10</integer>
   <key>WorkingDirectory</key><string>$(xml "$BASE/db")</string>" \
     "$(plist_env "${COMMON_ENV[@]}" "HOME=$BASE/db")" \
-    "$APP_CUR/bin/$NAME" --data "$BASE" backup run --if-configured
+    "$APP_CUR/bin/$CLI" --data "$BASE" backup run --if-configured
 fi
 # worker (only when the release has it): extraction and shell commands, sandboxed, as the worker account
 if [[ "$DAEMONS" == *" worker "* ]]; then
@@ -378,7 +378,7 @@ if [[ "$DAEMONS" == *" worker "* ]]; then
   <key>WorkingDirectory</key><string>$(xml "$BASE/work")</string>
 $LIMITS" \
     "$(plist_env "PATH=/usr/bin:/bin" "HOME=$BASE/work" "TMPDIR=$BASE/work/" "${ENVP}_RG=$RG" "${ENVP}_PDFTOTEXT=$PDFTOTEXT" "LANG=en_US.UTF-8")" \
-    "$APP_CUR/bin/$NAME" worker --socket "$BASE/run/worker/worker.sock"
+    "$APP_CUR/bin/$CLI" worker --socket "$BASE/run/worker/worker.sock"
 else
   rm -f "$F_LD/$LABEL.worker.plist"
 fi
@@ -396,9 +396,9 @@ put "$ITMP/newsyslog.conf" root wheel 644 "$F_NEWSYSLOG"
 # ---- the CLI on PATH ----
 mkdir -p "$(dirname "$F_BINLINK")"
 if [ -e "$F_BINLINK" ] || [ -L "$F_BINLINK" ]; then
-  [ -L "$F_BINLINK" ] && [ "$(readlink "$F_BINLINK")" = "$APP_CUR/bin/$NAME" ] || die "$BINLINK exists and is not this installer's link; move it away first"
+  [ -L "$F_BINLINK" ] && [ "$(readlink "$F_BINLINK")" = "$APP_CUR/bin/$CLI" ] || die "$BINLINK exists and is not this installer's link; move it away first"
 fi
-ln -sfn "$APP_CUR/bin/$NAME" "$ITMP/cli-link"
+ln -sfn "$APP_CUR/bin/$CLI" "$ITMP/cli-link"
 mv -f "$ITMP/cli-link" "$F_BINLINK"
 [ "$DRY" = 1 ] && printf 'root\twheel\tlink\t%s\n' "$BINLINK" >> "$PLAN_DIR/owners.tsv"
 
@@ -406,7 +406,7 @@ mv -f "$ITMP/cli-link" "$F_BINLINK"
 for d in mirror backup-staging; do priv tmutil addexclusion -p "$BASE/$d" >/dev/null 2>&1 || warn "Time Machine exclusion of $d failed"; done
 if [ "$POWER" = 1 ]; then priv pmset -a sleep 0 autorestart 1 >/dev/null 2>&1 || warn "pmset failed (sleep / restart after power failure unchanged)"; fi
 FW=/usr/libexec/ApplicationFirewall/socketfilterfw
-REAL_BIN="$BASE/app/versions/$VERSION/bin/$NAME"
+REAL_BIN="$BASE/app/versions/$VERSION/bin/$CLI"
 if [ "$DRY" = 1 ]; then
   priv "$FW --add '$REAL_BIN' && $FW --unblockapp '$REAL_BIN'  # only when the firewall is on"
 elif "$FW" --getglobalstate 2>/dev/null | grep -qi enabled; then
@@ -454,7 +454,7 @@ if [ -n "$BACKUP_DIR" ]; then
 else
   echo "  3. Backups are on but have no target yet. Connect an external disk, then:"
   echo "        sudo mkdir -p /Volumes/<disk>/$NAME-backup && sudo chown $SRV_USER /Volumes/<disk>/$NAME-backup"
-  echo "        sudo -H -u $SRV_USER $NAME --data \"$BASE\" backup target set /Volumes/<disk>/$NAME-backup"
+  echo "        sudo -H -u $SRV_USER $CLI --data \"$BASE\" backup target set /Volumes/<disk>/$NAME-backup"
 fi
 echo "     NOT backed up by $NAME: the original files in your registered folders (NAS shares). Use the NAS's own"
 echo "     backup (e.g. Synology Hyper Backup / snapshots) for those."

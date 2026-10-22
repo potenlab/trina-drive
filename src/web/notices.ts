@@ -1,7 +1,7 @@
 // Notices (R9, R11): kind, count and a link only — never file, folder, draft or person names. Stored for the web
 // (shown after sign-in) and mailed to the person's address right away.
 import type { DB } from '../db'
-import { NAME } from '../config'
+import { NAME, PRODUCT } from '../config'
 import { ensureWebSchema } from './schema'
 import type { Mailer } from './mail'
 
@@ -43,7 +43,7 @@ export async function notify(n: NoticeCtx, personIds: Iterable<number>, kind: No
     n.db.query('INSERT INTO notices (person_id, kind, count, link, created_at) VALUES (?, ?, ?, ?, ?)').run(id, kind, count, link, Date.now())
     const to = opts.to ?? n.db.query<{ email: string }, [number]>('SELECT email FROM accounts WHERE person_id = ?').get(id)?.email
     if (!to || opts.mail === false) continue
-    await n.mailer.send({ to, subject: `[${NAME}] ${SUBJECT[kind]}`, text: `${SUBJECT[kind]} (${count}).\n\nDetails after sign-in: ${url}\n` })
+    await n.mailer.send({ to, subject: `[${PRODUCT}] ${SUBJECT[kind]}`, text: `${SUBJECT[kind]} (${count}).\n\nDetails after sign-in: ${url}\n` })
       .catch((e) => console.error(`[${NAME}] mail failed:`, e))
   }
 }

@@ -47,7 +47,7 @@ export interface NotifyConfig {
 export const DEFAULT_NOTIFY: NotifyConfig = {
   baseUrl: 'http://127.0.0.1:8787',
   lang: 'en',
-  email: { mode: 'outbox', from: 'shelf@localhost' },
+  email: { mode: 'outbox', from: 'tdrive@localhost' },
   perMinute: 6,
   flushMs: 5_000,
   digestHour: 9,

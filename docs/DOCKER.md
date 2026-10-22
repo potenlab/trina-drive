@@ -1,6 +1,6 @@
 # Running the server in Docker on Linux
 
-`shelf` is a temporary codename (it comes from `package.json`). Plan 5.2: "리눅스 Docker" is the v0.2 way to self-host
+Names (image `trina-drive`, command `tdrive`, `TDRIVE_*` variables) come from `src/brand.ts`. Plan 5.2: "리눅스 Docker" is the v0.2 way to self-host
 on a Linux machine. The native macOS install (docs/INSTALL.md) stays the v0.1 path.
 
 **Supported:** a Linux machine you control (a small server, a VM, a mini PC) with Docker Engine, x86-64 or arm64.
@@ -21,9 +21,9 @@ read-only into it (below).
 
 ## 2. What runs
 
-One container, image `shelf:<version>` (built from `Dockerfile`, section 9):
+One container, image `trina-drive:<version>` (built from `Dockerfile`, section 9):
 
-- `/usr/bin/tini` (PID 1) → `shelf serve` (Bun 1.3.12 running the TypeScript sources in `/app`) as **uid 10001**, no
+- `/usr/bin/tini` (PID 1) → `tdrive serve` (Bun 1.3.12 running the TypeScript sources in `/app`) as **uid 10001**, no
   capabilities, read-only root file system.
 - Each bash command and each document extraction runs in a **worker** process inside a **bubblewrap (bwrap) sandbox**
   started by the server (src/worker/sandbox.ts): new user, mount, pid, network, IPC, UTS and cgroup namespaces; no
@@ -42,28 +42,28 @@ One container, image `shelf:<version>` (built from `Dockerfile`, section 9):
 | `/tmp` | worker job folders | tmpfs, 256 MB, `noexec` |
 | `/app` | code, `web/dist`, `node_modules`, `SHA256SUMS` | in the image, read-only |
 
-Environment (all optional): `TZ` (default UTC; set your office's, e.g. `Asia/Seoul`), `SHELF_WORKERS_GLOBAL`,
-`_PER_TOKEN`, `_PER_PERSON`, `_QUEUE`, `SHELF_WORKERS_WARM`, `SHELF_EXTRACT_*` (docs/worker.md, Configuration),
-`SHELF_DRAFT_MAX_FILES` / `_MAX_BYTES` / `_PERSON_MAX_BYTES`. Set by the image, do not change: `SHELF_HOME=/data`,
-`SHELF_LAYOUT=installed`, `SHELF_RG`, `SHELF_PDFTOTEXT`, `SHELF_CONTAINER=docker`.
+Environment (all optional): `TZ` (default UTC; set your office's, e.g. `Asia/Seoul`), `TDRIVE_WORKERS_GLOBAL`,
+`_PER_TOKEN`, `_PER_PERSON`, `_QUEUE`, `TDRIVE_WORKERS_WARM`, `TDRIVE_EXTRACT_*` (docs/worker.md, Configuration),
+`TDRIVE_DRAFT_MAX_FILES` / `_MAX_BYTES` / `_PERSON_MAX_BYTES`. Set by the image, do not change: `TDRIVE_HOME=/data`,
+`TDRIVE_LAYOUT=installed`, `TDRIVE_RG`, `TDRIVE_PDFTOTEXT`, `TDRIVE_CONTAINER=docker`.
 
 ## 3. Install
 
 ```sh
-git clone https://github.com/potenlab/shelf && cd shelf      # (no published image yet; build locally)
+git clone https://github.com/potenlab/trina-drive && cd trina-drive      # (no published image yet; build locally)
 
 # 1) AppArmor hosts only (check: `docker info | grep apparmor`): load the worker profile, once per boot.
-#    To keep it across reboots, also: sudo cp docker/apparmor-shelf-bwrap /etc/apparmor.d/
-sudo apparmor_parser -r docker/apparmor-shelf-bwrap
+#    To keep it across reboots, also: sudo cp docker/apparmor-trina-drive-bwrap /etc/apparmor.d/
+sudo apparmor_parser -r docker/apparmor-trina-drive-bwrap
 
 # 2) build and create the data directory; prints the one-time web setup token
 docker compose build
-docker compose run --rm shelf init
+docker compose run --rm trina-drive init
 
 # 3) start; check that it is healthy and that workers are isolated
 docker compose up -d
 docker compose ps                                   # STATUS ... (healthy)
-docker compose logs shelf | grep isolation          # worker isolation: bwrap
+docker compose logs trina-drive | grep isolation          # worker isolation: bwrap
 ```
 
 If the log says `worker isolation: none` and `ERROR: bash commands and document text extraction are refused`, the
@@ -74,13 +74,13 @@ Then open `http://<host>:8787/setup` (see section 7 for which address to publish
 run in the container:
 
 ```sh
-alias shelfadm='docker compose exec shelf shelf'
-shelfadm folder register /data/shares/projects --name 프로젝트 --nas-readers all
-shelfadm rule set /data/shares/projects @전체 read
-shelfadm audit verify
+alias tdriveadm='docker compose exec trina-drive tdrive'
+tdriveadm folder register /data/shares/projects --name 프로젝트 --nas-readers all
+tdriveadm rule set /data/shares/projects @전체 read
+tdriveadm audit verify
 ```
 
-Try it with sample data instead: `docker compose run --rm shelf demo seed` on a fresh volume (people, rules, tokens
+Try it with sample data instead: `docker compose run --rm trina-drive demo seed` on a fresh volume (people, rules, tokens
 for kim and boss), then `docker compose up -d`.
 
 ## 4. Registered folders (NAS shares)
@@ -90,12 +90,12 @@ read-only, one line per share, in `docker-compose.yml`:
 
 ```yaml
     volumes:
-      - shelf-data:/data
+      - trina-drive-data:/data
       - /srv/share:/data/shares/share:ro
       - /mnt/nas/경영:/data/shares/management:ro
 ```
 
-then `shelfadm folder register /data/shares/share`. The database refers to folders by path and file identity, so keep
+then `tdriveadm folder register /data/shares/share`. The database refers to folders by path and file identity, so keep
 the container paths the same across restarts and upgrades. The NAS account used for the host mount is in effect the
 server's account (plan 7.1): give it read access to the registered shares only. `docker compose restart` after
 adding a bind.
@@ -107,34 +107,34 @@ backed up by this program.
 
 ```sh
 # a backup disk on the host, writable by the container user
-sudo mkdir -p /mnt/backup/shelf && sudo chown 10001:10001 /mnt/backup/shelf && sudo chmod 700 /mnt/backup/shelf
-# add to docker-compose.yml volumes:  - /mnt/backup/shelf:/backup      then: docker compose up -d
-shelfadm backup keygen --set              # prints the SECRET key once: store it away from the server
-shelfadm backup target set /backup --keep 14
-shelfadm backup run
-shelfadm backup list
+sudo mkdir -p /mnt/backup/trina-drive && sudo chown 10001:10001 /mnt/backup/trina-drive && sudo chmod 700 /mnt/backup/trina-drive
+# add to docker-compose.yml volumes:  - /mnt/backup/trina-drive:/backup      then: docker compose up -d
+tdriveadm backup keygen --set              # prints the SECRET key once: store it away from the server
+tdriveadm backup target set /backup --keep 14
+tdriveadm backup run
+tdriveadm backup list
 ```
 
 There is no scheduler in the container. Run the daily backup from the host, e.g. a crontab line of root or of a user
 in the docker group:
 
 ```
-17 3 * * *  cd /opt/shelf && docker compose exec -T shelf shelf backup run --if-configured >> /var/log/shelf-backup.log 2>&1
+17 3 * * *  cd /opt/trina-drive && docker compose exec -T trina-drive tdrive backup run --if-configured >> /var/log/trina-drive-backup.log 2>&1
 ```
 
 A target on the same disk as `/data` is refused (`--allow-same-disk` exists for tests). Verify monthly, on a computer
-you trust with the secret key: `shelf backup verify <archive> --key-file -` (any install, or
-`docker run --rm -i -v /mnt/backup/shelf:/backup:ro shelf:<version> backup verify /backup/<archive> --key-file -`).
+you trust with the secret key: `tdrive backup verify <archive> --key-file -` (any install, or
+`docker run --rm -i -v /mnt/backup/trina-drive:/backup:ro trina-drive:<version> backup verify /backup/<archive> --key-file -`).
 
 Restore into a new volume, then switch to it:
 
 ```sh
 docker compose down
-docker volume create shelf_shelf-data-restored
-docker run --rm -i -v shelf_shelf-data-restored:/data -v /mnt/backup/shelf:/backup:ro shelf:<version> \
-  backup restore /backup/shelf-20261022T031700Z.bkp --into /data --key-file -      # paste the secret key, Ctrl-D
-# point docker-compose.yml at the restored volume (volumes: shelf-data: {external: true, name: shelf_shelf-data-restored})
-docker compose up -d && shelfadm backup target set /backup     # the target setting is not part of a backup
+docker volume create trina-drive_trina-drive-data-restored
+docker run --rm -i -v trina-drive_trina-drive-data-restored:/data -v /mnt/backup/trina-drive:/backup:ro trina-drive:<version> \
+  backup restore /backup/trina-drive-20261022T031700Z.bkp --into /data --key-file -      # paste the secret key, Ctrl-D
+# point docker-compose.yml at the restored volume (volumes: trina-drive-data: {external: true, name: trina-drive_trina-drive-data-restored})
+docker compose up -d && tdriveadm backup target set /backup     # the target setting is not part of a backup
 ```
 
 (A new, empty named volume mounted at `/data` takes the image's empty, uid-10001 `/data`, which is why the restore
@@ -152,7 +152,7 @@ by scripts/docker-test.sh).
 | Setting | Needed for | Without it |
 |---|---|---|
 | `seccomp=./docker/seccomp-bwrap.json` | Docker's default profile (moby/profiles v0.1.0, Docker 29) **plus**: `clone` and `unshare` **only with `CLONE_NEWUSER`** in the flags, and `mount`, `umount2`, `pivot_root` | `bwrap: No permissions to create a new namespace` |
-| `apparmor=shelf-bwrap` | Docker's `docker-default` rules **plus** `userns`, `mount`, `pivot_root` (docker/apparmor-shelf-bwrap) | docker-default: `Failed to make / slave: Permission denied`; `apparmor=unconfined` on Ubuntu 23.10+: `setting up uid map: Permission denied` (Ubuntu's `apparmor_restrict_unprivileged_userns`) |
+| `apparmor=trina-drive-bwrap` | Docker's `docker-default` rules **plus** `userns`, `mount`, `pivot_root` (docker/apparmor-trina-drive-bwrap) | docker-default: `Failed to make / slave: Permission denied`; `apparmor=unconfined` on Ubuntu 23.10+: `setting up uid map: Permission denied` (Ubuntu's `apparmor_restrict_unprivileged_userns`) |
 | `systempaths=unconfined` | the kernel lets a user namespace mount a new `/proc` only if the container's `/proc` is not partly hidden; Docker hides `/proc/kcore`, `/proc/keys`, `/proc/timer_list` … with bind mounts | `bwrap: Can't mount proc on /proc: Operation not permitted` |
 | `cap_drop: [ALL]`, `no-new-privileges:true`, `read_only: true`, tmpfs `/tmp` `noexec,nosuid,nodev` | hardening (not needed by bwrap, kept on) | |
 
@@ -213,13 +213,13 @@ quadratic-regex docx are killed per worker while another token's commands stay f
 ## 8. Upgrade and roll back
 
 ```sh
-shelfadm backup run                                  # first
+tdriveadm backup run                                  # first
 git pull && docker compose build                     # or: a new release tag
 docker compose up -d                                 # recreates the container; the data volume stays
-docker compose logs shelf | grep -E 'isolation|ERROR'
+docker compose logs trina-drive | grep -E 'isolation|ERROR'
 ```
 
-Roll back by building/running the previous tag with the same volume (`image: shelf:<previous>`). There are no
+Roll back by building/running the previous tag with the same volume (`image: trina-drive:<previous>`). There are no
 down-migrations: if the previous version does not accept the data, restore the backup taken before the upgrade
 (section 5). Base image
 updates (security fixes in Debian packages) arrive by rebuilding; rebuild monthly and when Debian announces a fix in
@@ -228,10 +228,10 @@ updates (security fixes in Debian packages) arrive by rebuilding; rebuild monthl
 ## 9. Building, supply chain
 
 ```sh
-docker build -t shelf:dev .                                             # this machine's CPU
-docker buildx build --platform linux/amd64,linux/arm64 -t shelf:dev .   # both (amd64 under emulation on arm64 is slow)
-scripts/docker/sbom.sh shelf:dev                                        # SBOM: dist/sbom/shelf-<version>.{spdx,cdx}.json
-docker run --rm --entrypoint sh shelf:dev -c 'cd /app && sha256sum -c --quiet SHA256SUMS && echo ok'
+docker build -t trina-drive:dev .                                             # this machine's CPU
+docker buildx build --platform linux/amd64,linux/arm64 -t trina-drive:dev .   # both (amd64 under emulation on arm64 is slow)
+scripts/docker/sbom.sh trina-drive:dev                                        # SBOM: dist/sbom/trina-drive-<version>.{spdx,cdx}.json
+docker run --rm --entrypoint sh trina-drive:dev -c 'cd /app && sha256sum -c --quiet SHA256SUMS && echo ok'
 ```
 
 - **Pinned:** base images by digest (`BUN_IMAGE`, `DEBIAN_IMAGE` in the Dockerfile; multi-arch indexes), npm packages by
@@ -239,16 +239,16 @@ docker run --rm --entrypoint sh shelf:dev -c 'cd /app && sha256sum -c --quiet SH
   targets, checked by scripts/docker/tools.ts through scripts/build.ts `vendorDownload`), the seccomp profile's
   upstream by SHA-256 (scripts/docker/seccomp.ts regenerates it).
 - **Not pinned:** Debian packages (bubblewrap, poppler-utils, tini, tzdata, ca-certificates) come from Debian 13 with
-  the security updates current at build time, on purpose. The exact versions are in `/usr/share/shelf/packages.txt`
+  the security updates current at build time, on purpose. The exact versions are in `/usr/share/trina-drive/packages.txt`
   and in the SBOM.
-- **In the image:** `/usr/share/shelf/tools.json` (ripgrep origin URL, pinned archive SHA-256, SHA-256 of the installed
-  binary), `/usr/share/shelf/licenses/` (ripgrep's license files; Debian packages keep theirs in
+- **In the image:** `/usr/share/trina-drive/tools.json` (ripgrep origin URL, pinned archive SHA-256, SHA-256 of the installed
+  binary), `/usr/share/trina-drive/licenses/` (ripgrep's license files; Debian packages keep theirs in
   `/usr/share/doc/<package>/copyright`), `/app/SHA256SUMS` (every file of `/app`, same format and code as the macOS
   release manifest, scripts/build.ts `writeChecksums`). There is no single compiled binary: workers start
   `bun src/worker/entry.ts` inside bwrap, so the image ships the sources.
 - **SBOM** (`scripts/docker/sbom.sh`, syft 1.54.1): 157 Debian packages, 77 npm packages and the Bun binary for the
   arm64 image. syft does not recognise the static ripgrep binary (a Rust build without embedded dependency data);
-  its origin and hashes are in `/usr/share/shelf/tools.json`.
+  its origin and hashes are in `/usr/share/trina-drive/tools.json`.
 - **Labels:** `org.opencontainers.image.version`, `.revision` (git commit, `--build-arg REVISION=…`), `.created`,
   `.source`, `.licenses` (`NOASSERTION` until the license is decided; AGPL-3.0 planned), `.base.name`.
 - **Not yet:** a published image, image signatures (cosign) and provenance attestations; they come with the first
@@ -266,7 +266,7 @@ docker run --rm --entrypoint sh shelf:dev -c 'cd /app && sha256sum -c --quiet SH
 2. **Refusal** with Docker's default security settings on a fresh volume: the start-up `ERROR` names the compose
    settings, the bash tool answers "commands cannot run", a docx read answers "cannot extract text".
 3. **`bun test`** (the whole suite) inside the test image under the compose security settings, with
-   `SHELF_EXPECT_ISOLATION=bwrap` (a missing sandbox fails the suite instead of skipping it) and a canary in the test
+   `TDRIVE_EXPECT_ISOLATION=bwrap` (a missing sandbox fails the suite instead of skipping it) and a canary in the test
    runner's environment. The log is kept in `dist/docker-test.log`.
 
 Platform-specific tests: the macOS installer, Homebrew vendoring and `sandbox-exec` profile tests skip on Linux; the

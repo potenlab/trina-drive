@@ -5,7 +5,7 @@ import { Database } from 'bun:sqlite'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { NAME, VERSION } from '../config'
+import { CLI, NAME, VERSION } from '../config'
 import { detectLayout, layoutFor, type Layout, type LayoutKind } from '../layout'
 import { ArchiveWriter, readArchive, type InfoRecord } from './archive'
 import { BackupError, decryptFile, Encryptor, parsePublic, type SecretKey } from './crypto'
@@ -186,9 +186,9 @@ export async function runConfigured(dataDir: string, over: { target?: string; re
   const layout = detectLayout(dataDir)
   const cfg = readConfig(layout)
   const recipient = over.recipient ?? readRecipient(layout)
-  if (!recipient) throw new BackupError('config', `no backup key: ${layout.backupRecipient} is missing (make one with \`${NAME} backup keygen --set\`)`)
+  if (!recipient) throw new BackupError('config', `no backup key: ${layout.backupRecipient} is missing (make one with \`${CLI} backup keygen --set\`)`)
   const spec = over.target ?? cfg.target
-  if (!spec) throw new BackupError('config', `no backup target (set one with \`${NAME} backup target set /Volumes/<disk>/${NAME}-backup\`)`)
+  if (!spec) throw new BackupError('config', `no backup target (set one with \`${CLI} backup target set /Volumes/<disk>/${NAME}-backup\`)`)
   const target = parseTarget(spec, { dataDir: layout.dataDir, allowSameDisk: over.allowSameDisk ?? cfg.allowSameDisk })
   return runBackup({ dataDir, target, recipient, keep: over.keep ?? cfg.keep, now: over.now })
 }

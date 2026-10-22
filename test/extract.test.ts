@@ -28,8 +28,8 @@ describe('text extraction', () => {
     expect(c.get('S/x')!.length).toBe(5000)
     expect(c.get('y')![4095]).toBe(1)
   })
-  // a real Hangul-made file exercises the CFB mini stream: SHELF_TEST_HWP=/path/to/file.hwp bun test
-  const real = process.env.SHELF_TEST_HWP ?? ''
+  // a real Hangul-made file exercises the CFB mini stream: TDRIVE_TEST_HWP=/path/to/file.hwp bun test
+  const real = process.env.TDRIVE_TEST_HWP ?? ''
   test.skipIf(!fs.existsSync(real))('a real .hwp file', async () => {
     expect((await extractText('x.hwp', fs.readFileSync(real))).length).toBeGreaterThan(100)
   })

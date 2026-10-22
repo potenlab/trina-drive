@@ -81,7 +81,7 @@ export function withNotify(e: Env, cfg: Partial<NotifyConfig> = {}, opts: Attach
   const clock = { t: new Date(2026, 9, 22, 14, 0, 0).getTime() }
   e.ctx.now = () => clock.t
   const outbox = path.join(e.dir, 'outbox')
-  const rt = attachNotify(e.ctx, { cfg: { baseUrl: 'https://shelf.example.test', email: { mode: 'outbox', from: 'shelf@example.test', outboxDir: outbox }, perMinute: 100, anchor: { intervalMs: 0, email: true }, ...cfg }, ...opts })
+  const rt = attachNotify(e.ctx, { cfg: { baseUrl: 'https://drive.example.test', email: { mode: 'outbox', from: 'drive@example.test', outboxDir: outbox }, perMinute: 100, anchor: { intervalMs: 0, email: true }, ...cfg }, ...opts })
   const pid = (name: string) => e.db.query<{ id: number }, [string]>('SELECT id FROM people WHERE name = ?').get(name)!.id
   return { rt, clock, outbox, pid }
 }

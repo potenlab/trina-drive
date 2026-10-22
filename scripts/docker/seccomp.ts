@@ -29,10 +29,10 @@ if (sha !== UPSTREAM_SHA256) throw new Error(`${UPSTREAM}: SHA-256 ${sha}, pinne
 const profile = JSON.parse(text) as { syscalls: unknown[] }
 const newUser = (index: number) => [{ index, value: CLONE_NEWUSER, valueTwo: CLONE_NEWUSER, op: 'SCMP_CMP_MASKED_EQ' }]
 profile.syscalls.push(
-  { names: ['clone'], action: 'SCMP_ACT_ALLOW', args: newUser(0), excludes: { arches: ['s390', 's390x'] }, comment: 'shelf: bubblewrap, namespaces only with a new user namespace' },
-  { names: ['clone'], action: 'SCMP_ACT_ALLOW', args: newUser(1), includes: { arches: ['s390', 's390x'] }, comment: 'shelf: bubblewrap (s390 swaps the clone arguments)' },
-  { names: ['unshare'], action: 'SCMP_ACT_ALLOW', args: newUser(0), comment: 'shelf: bubblewrap, namespaces only with a new user namespace' },
-  { names: ['mount', 'umount2', 'pivot_root'], action: 'SCMP_ACT_ALLOW', comment: 'shelf: bubblewrap builds the sandbox root; the kernel refuses these outside a user namespace the caller owns' },
+  { names: ['clone'], action: 'SCMP_ACT_ALLOW', args: newUser(0), excludes: { arches: ['s390', 's390x'] }, comment: 'trina-drive: bubblewrap, namespaces only with a new user namespace' },
+  { names: ['clone'], action: 'SCMP_ACT_ALLOW', args: newUser(1), includes: { arches: ['s390', 's390x'] }, comment: 'trina-drive: bubblewrap (s390 swaps the clone arguments)' },
+  { names: ['unshare'], action: 'SCMP_ACT_ALLOW', args: newUser(0), comment: 'trina-drive: bubblewrap, namespaces only with a new user namespace' },
+  { names: ['mount', 'umount2', 'pivot_root'], action: 'SCMP_ACT_ALLOW', comment: 'trina-drive: bubblewrap builds the sandbox root; the kernel refuses these outside a user namespace the caller owns' },
 )
 const out = path.join(import.meta.dir, '..', '..', 'docker', 'seccomp-bwrap.json')
 fs.writeFileSync(out, JSON.stringify(profile, null, 1) + '\n')

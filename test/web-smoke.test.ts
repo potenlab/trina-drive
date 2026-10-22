@@ -48,7 +48,7 @@ test('sign in, use the API with the session, make a token, use it on /mcp; the c
   const login = await fetch(base + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ login: 'kim', password: PASSWORD }) })
   expect(login.status).toBe(200)
   const { csrf } = await login.json() as { csrf: string }
-  const cookie = /shelf_session=[^;]+/.exec(login.headers.get('set-cookie')!)![0]
+  const cookie = /tdrive_session=[^;]+/.exec(login.headers.get('set-cookie')!)![0]
   const h = { cookie, origin: base, 'content-type': 'application/json', 'x-csrf-token': csrf }
 
   const folders = await (await fetch(base + '/api/folders', { headers: { cookie } })).json() as { folders: { name: string }[] }

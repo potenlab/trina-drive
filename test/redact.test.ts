@@ -10,8 +10,8 @@ import { setup } from './helpers'
 const j = (...p: string[]) => p.join('')
 const PAT = j(TOKEN_PREFIX, 'AbCd', 'x'.repeat(28))
 const SECRETS: [string, string][] = [
-  ['shelf pat', PAT],
-  ['shelf setup', j('shelf_setup_', 'Q'.repeat(32))],
+  ['tdrive pat', PAT],
+  ['tdrive setup', j('tdrive_setup_', 'Q'.repeat(32))],
   ['AWS key id', j('AKIA', 'IOSFODNN7EXAMPLE')],
   ['AWS secret', j('aws_secret_access_key=', 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY')],
   ['GitHub classic', j('ghp_', 'a1B2'.repeat(9))],

@@ -9,14 +9,14 @@
 // exactly like a personal access token.
 import crypto from 'node:crypto'
 import type { DB } from '../db'
-import { NAME } from '../config'
+import { SECRET_TAG } from '../config'
 import { sha256, type TokenRow } from '../store'
 import { canonicalUrl, CODE_TTL_MS, type OAuthRuntime } from './config'
 import { OAuthError, type Client } from './clients'
 
-export const CODE_PREFIX = `${NAME}_oac_`
-export const ACCESS_PREFIX = `${NAME}_oat_`
-export const REFRESH_PREFIX = `${NAME}_ort_`
+export const CODE_PREFIX = `${SECRET_TAG}_oac_`
+export const ACCESS_PREFIX = `${SECRET_TAG}_oat_`
+export const REFRESH_PREFIX = `${SECRET_TAG}_ort_`
 const secret = (prefix: string) => prefix + crypto.randomBytes(32).toString('base64url')
 
 /** PKCE S256: BASE64URL(SHA256(verifier)) === challenge; verifier 43–128 unreserved characters (RFC 7636 4.1). */

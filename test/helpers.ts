@@ -12,7 +12,7 @@ export type Who = 'kim' | 'boss' | 'bossNarrow' | string
 
 /** A fresh data dir with the demo company seeded. */
 export function setup() {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-test-')))
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tdrive-test-')))
   const db = openDb(dir)
   const { root, tokens } = seedDemo(db, dir)
   const ctx = makeCtx(db, dir)
@@ -45,13 +45,13 @@ export const textOf = (r: { content: { text: string }[] }) => r.content.map((c) 
 export type ShellMode = 'isolated' | 'inprocess'
 export const SHELL_MODES: ShellMode[] = ['isolated', 'inprocess']
 
-/** Runs `fn` with shell commands in the given mode (src/shell.ts reads SHELF_SHELL on every command). */
+/** Runs `fn` with shell commands in the given mode (src/shell.ts reads TDRIVE_SHELL on every command). */
 export async function withShellMode<T>(mode: ShellMode, fn: () => Promise<T>): Promise<T> {
-  const before = process.env.SHELF_SHELL
-  process.env.SHELF_SHELL = mode
+  const before = process.env.TDRIVE_SHELL
+  process.env.TDRIVE_SHELL = mode
   try { return await fn() } finally {
-    if (before === undefined) delete process.env.SHELF_SHELL
-    else process.env.SHELF_SHELL = before
+    if (before === undefined) delete process.env.TDRIVE_SHELL
+    else process.env.TDRIVE_SHELL = before
   }
 }
 

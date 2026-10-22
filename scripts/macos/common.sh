@@ -1,11 +1,12 @@
 # Shared by install-macos.sh and uninstall-macos.sh (bash 3.2, sourced). Every name the installation uses is here.
 # shellcheck shell=bash disable=SC2034,SC2154
 # (names are used by the scripts that source this; SCRIPT, PREFIX, PLAN_DIR, SAFE_ROOTS, ITMP come from them)
-# NAME must equal "name" in package.json (scripts/build.ts checks it); it is a temporary codename.
-NAME=shelf
-SRV_USER=_shelf            # runs the server (HTTP, database, drafts, backups); owns the data folders
-WRK_USER=_shelfwork        # runs extraction and shell workers in a sandbox; sees no data folder and no NAS mount
-LABEL="app.treesoop.$NAME" # LaunchDaemons: $LABEL.server, $LABEL.backup, $LABEL.worker
+# NAME, CLI and LABEL must equal NAME, CLI and LAUNCHD_LABEL in src/brand.ts (scripts/build.ts checks them).
+NAME=trina-drive           # data folder /Library/Application Support/$NAME, newsyslog file, release folder names
+CLI=tdrive                 # the command: bin/$CLI in a release, /usr/local/bin/$CLI; also TDRIVE_* and tdrive_setup_
+SRV_USER=_tdrive           # runs the server (HTTP, database, drafts, backups); owns the data folders
+WRK_USER=_tdrivework       # runs extraction and shell workers in a sandbox; sees no data folder and no NAS mount
+LABEL=app.trina.drive      # LaunchDaemons: $LABEL.server, $LABEL.backup, $LABEL.worker
 DEFAULT_PORT=8787
 UID_MIN=450                # role accounts take the first free UID/GID in this range (hidden, no login)
 UID_MAX=499
