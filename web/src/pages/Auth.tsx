@@ -7,21 +7,23 @@ import { ErrorLine, useAction } from '../ui'
 import { RegisterForm } from './RegisterForm'
 import { SecondFactorStep, type SecondFactorChallenge } from './SecondFactor'
 
-export function Login() {
+/** `onDone`: where to go after signing in (default: the admin's folders or the person's files). */
+export function Login({ onDone }: { onDone?: () => void } = {}) {
   const { setMe } = useSession()
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [second, setSecond] = useState<SecondFactorChallenge | null>(null)
-  if (second) return <SecondFactorStep challenge={second} />
+  if (second) return <SecondFactorStep challenge={second} onDone={onDone} />
   return (
     <form className="card narrow" onSubmit={async (e) => {
       e.preventDefault(); setBusy(true); setError(null)
       try {
         const r = await api<{ me: Me; csrf: string; second_factor?: SecondFactorChallenge }>('POST', '/login', { login, password })
         if (r.second_factor) { setSecond(r.second_factor); return }
-        setCsrf(r.csrf); setMe(r.me); go(r.me.admin ? '/folders' : '/files')
+        setCsrf(r.csrf); setMe(r.me)
+        if (onDone) onDone(); else go(r.me.admin ? '/folders' : '/files')
       } catch (err) {
         setError(err instanceof ApiError && err.status === 429 ? t('login_rate') : t('login_bad'))
       } finally { setBusy(false) }

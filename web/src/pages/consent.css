@@ -1,0 +1,10 @@
+/* OAuth consent page (Consent.tsx): the app's domain is the biggest thing on the page (names can be faked, the domain
+   its metadata was fetched from cannot). */
+.consent { display: grid; gap: .6rem; }
+.consent p { margin: 0; }
+.consent h1 { font-size: 1.25rem; margin: 0; }
+.consent h2 { font-size: 1rem; margin: .75rem 0 0; }
+.consent-domain { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+.consent-domain .domain { font-size: 1.6rem; letter-spacing: .01em; word-break: break-all; }
+.consent fieldset { border: 1px solid var(--line); border-radius: var(--radius); padding: .6rem .75rem; display: grid; gap: .5rem; }
+.consent .row-actions { display: flex; gap: .6rem; }

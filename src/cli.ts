@@ -19,6 +19,9 @@ import { addGroup, addMember, addPerson, createToken, grantManage, LEVELS, parse
 import { notifyCommand, NOTIFY_HELP } from './notify/cli'
 import { MCP_HELP, mcpCommand, ttyPassword } from './client/mcp'
 import { attachNotify } from './notify'
+import { readPublicSettings } from './oauth/settings'
+import { PUBLIC_HELP, publicCommand } from './web/public-cli'
+import { publicBanner, startPublicListener } from './web/public'
 import { mfaCommand, MFA_HELP, mfaServeNotice } from './web/mfa-cli'
 
 const HELP = `${NAME} ${VERSION} — permission-aware read shell and draft box for AI agents (phase-0 prototype)
@@ -42,6 +45,7 @@ ${NOTIFY_HELP}
   sh --token <pat> -c <command>          run one shell command as that token (audited)
   serve [--port 8787] [--host 127.0.0.1] [--allow-origin URL] [--public-url URL]   web admin at /, MCP at /mcp
   backup …                 (encrypted backups; see: backup help)
+${PUBLIC_HELP}
 
 on your own computer (talks to the server; writes only user-scope client settings):
 ${MCP_HELP}
@@ -204,20 +208,28 @@ async function main(argv: string[]) {
       const port = Number(takeFlag(rest, '--port') ?? 8787)
       const host = takeFlag(rest, '--host') ?? '127.0.0.1'
       const origin = takeFlag(rest, '--allow-origin')
-      const publicUrl = takeFlag(rest, '--public-url')
+      // the public address (`public enable --url`) is also the passkeys' RP ID and the base of mailed links, unless given here
+      const configuredPublic = readPublicSettings(db).url ?? undefined
+      const publicUrl = takeFlag(rest, '--public-url') ?? configuredPublic
+      if (configuredPublic && publicUrl !== configuredPublic) console.error(`warning: --public-url ${publicUrl} differs from the public address ${configuredPublic} (OAuth issuer); passkeys made on one do not work on the other`)
       if (!TOOLS.rg) throw new StoreError('ripgrep (rg) is required: brew install ripgrep')
       if (!TOOLS.pdftotext) console.error('warning: pdftotext not found (brew install poppler); PDFs will not be readable')
       const ctx = makeCtx(db, dataDir)
       const notify = attachNotify(ctx)
       notify.start()
-      const { server } = serveWeb(ctx, port, host, { allowedOrigins: origin ? [origin] : [], publicUrl, onRequest: notify.onMcpRequest, emit: notify.emit })
+      const { server, w } = serveWeb(ctx, port, host, { allowedOrigins: origin ? [origin] : [], publicUrl, onRequest: notify.onMcpRequest, emit: notify.emit })
       console.log(`${NAME} ${VERSION} web: http://${host}:${server.port}/   MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
+      // the public listener (plan 5.2): a separate port for the tunnel, only when `public enable` was run and the gate passes
+      const pub = startPublicListener(w)
+      if (pub.server) console.log(publicBanner(readPublicSettings(db), pub.server.port ?? 0))
+      else if (readPublicSettings(db).enabled) console.error(`public listener NOT started (gate):\n${pub.gate.checks.filter((c) => !c.ok && c.required).map((c) => `  - ${c.text}`).join('\n')}\n(see: public status)`)
       console.log(`tools: rg=${TOOLS.rg} pdftotext=${TOOLS.pdftotext ?? 'missing'}`)
       mfaServeNotice(db, publicUrl)
       if (!noReconcile) startReconciler(db, { dataDir, intervalMs: every ? parseDuration(every) : undefined })
       return new Promise(() => {})
     }
     default:
+      if (cmd === 'public' && publicCommand(db, sub, rest)) return
       if (mfaCommand(db, `${cmd} ${sub ?? ''}`.trim(), rest)) return
       if (await notifyCommand(db, dataDir, `${cmd} ${sub ?? ''}`.trim(), rest)) return
       console.error(`unknown command: ${args.join(' ')}\n\n${HELP}`)

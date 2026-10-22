@@ -11,7 +11,8 @@ import './approve.css'
 export interface SecondFactorChallenge { ticket: string; methods: ('passkey' | 'totp' | 'recovery')[]; passkey: unknown | null; public_url: string | null; passkeys_elsewhere: string | null }
 
 /** After a correct password (or a reset link) for someone with a second factor. */
-export function SecondFactorStep({ challenge }: { challenge: SecondFactorChallenge }) {
+/** `onDone`: where to go after the second step (default: the admin's folders or the person's files; OAuth consent stays put). */
+export function SecondFactorStep({ challenge, onDone }: { challenge: SecondFactorChallenge; onDone?: () => void }) {
   const { setMe } = useSession()
   const [method, setMethod] = useState<'totp' | 'recovery'>(challenge.methods.includes('totp') ? 'totp' : 'recovery')
   const [code, setCode] = useState('')
@@ -21,7 +22,8 @@ export function SecondFactorStep({ challenge }: { challenge: SecondFactorChallen
     setBusy(true); setError(null)
     try {
       const r = await api<{ me: Me; csrf: string }>('POST', '/login/second', { ticket: challenge.ticket, ...body })
-      setCsrf(r.csrf); setMe(r.me); go(r.me.admin ? '/folders' : '/files')
+      setCsrf(r.csrf); setMe(r.me)
+      if (onDone) onDone(); else go(r.me.admin ? '/folders' : '/files')
     } catch (e) {
       setError(e instanceof ApiError && e.status === 429 ? t('login_rate') : e instanceof ApiError && e.code === 'bad_ticket' ? t('login_bad') : at('sf_bad'))
     } finally { setBusy(false) }

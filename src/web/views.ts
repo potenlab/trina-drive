@@ -148,10 +148,14 @@ export function draftForDownload(w: WebCtx, a: Actor, id: unknown): Draft {
 // ---------- tokens ----------
 export function tokensView(w: WebCtx, a: Actor) {
   const r = new Rights(w.db)
-  const rows = w.db.query<TokenRow & { last_client: string | null }, [number]>('SELECT * FROM tokens WHERE person_id = ? ORDER BY created_at DESC').all(a.personId)
+  const rows = w.db.query<TokenRow & { last_client: string | null; client_name: string | null; client_domain: string | null; client_kind: string | null }, [number]>(
+    `SELECT t.*, c.name AS client_name, c.domain AS client_domain, c.kind AS client_kind FROM tokens t LEFT JOIN oauth_clients c ON c.client_id = t.client_id
+     WHERE t.person_id = ? ORDER BY t.created_at DESC`).all(a.personId)
   const t = Date.now()
   return rows.map((x) => ({
     id: x.id, name: x.name, hint: x.hint, read_only: !!x.read_only, created_at: x.created_at, expires_at: x.expires_at,
+    // 'oauth': a connection approved on the consent page (claude.ai, ChatGPT …); revoking it cuts its access and refresh tokens
+    kind: x.kind ?? 'pat', client: x.kind === 'oauth' ? { name: x.client_name, domain: x.client_domain, verified: x.client_kind === 'cimd' } : null,
     revoked_at: x.revoked_at, last_used_at: x.last_used_at, last_client: x.last_client,
     status: x.revoked_at != null ? 'revoked' : x.expires_at != null && x.expires_at <= t ? 'expired' : 'active',
     scope: x.scope ? (JSON.parse(x.scope) as number[]).map((id) => { const f = r.folders.get(id); return { id, vpath: f ? r.vpath(f) : null } }) : null,
