@@ -1,6 +1,7 @@
 // Who hears about an event (plan 4.1 R11, R9, R10). Decides only person ids and a level:
 //   detail = may open the detail screen (still behind login and R7), count = gets the count and a generic link.
 import type { DB } from '../db'
+import { approvalById, countOnlyManagers, eligibleApprovers } from '../promote'
 import type { FolderRow } from '../store'
 import type { ShelfEvent } from './events'
 import type { Level } from './messages'
@@ -72,6 +73,17 @@ export function resolveRecipients(db: DB, e: ShelfEvent): Recipient[] {
       break
     case 'provenance_reset': // 5.1: the admin is told; the person too (if it was not them, their password is known)
       admins('detail')
+      subject()
+      break
+    case 'approval_pending': { // R8/R11: eligible approvers (detail, behind sign-in + step-up); other managers "1 pending" only
+      const a = e.approvalId != null ? approvalById(db, e.approvalId) : null
+      if (!a) break
+      const eligible = eligibleApprovers(db, a)
+      eligible.forEach((id) => add(id, 'detail', n))
+      countOnlyManagers(db, a, eligible).forEach((id) => add(id, 'count', 1))
+      break
+    }
+    case 'approval_decided': // the requester hears that it was decided (what, after sign-in)
       subject()
       break
   }

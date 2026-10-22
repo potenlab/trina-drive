@@ -8,6 +8,7 @@ import { detectLayout } from './layout'
 import { inheritedSources } from './inplace/closures'
 import { Mirror } from './mirror'
 import { Access, type FileEntry, type Node } from './policy'
+import type { ShelfEvent } from './notify/events'
 import { ensureFolder, identityKey, type TokenRow } from './store'
 
 /** A free draft path next to `rel` for a hidden draft moved out of the way: "a/b.md" -> "a/b (earlier 12).md". */
@@ -27,6 +28,10 @@ export interface Ctx {
   db: DB; dataDir: string; mirror: Mirror; blobs: Blobs; now: () => number
   /** after a call is committed (notify: bulk-read alarm, original-write attempts); errors are logged, never fail the call */
   onCommit?: (s: Session, tool: string, outcome: string) => void
+  /** the notify bus (src/notify attaches it): events whose channel payloads follow R11 */
+  emit?: (e: ShelfEvent) => void
+  /** the server's public web address, for links handed to agents (approval pages) */
+  publicUrl?: string
 }
 
 export function makeCtx(db: DB, dataDir: string): Ctx {
@@ -49,6 +54,10 @@ export class Session {
   /** own draft path -> new content, or null = deleted */
   readonly pending = new Map<string, Uint8Array | null>()
   readonly pendingDirs = new Set<string>()
+  /** run inside the commit transaction, before the audit row (records that must stand or fall with it) */
+  readonly inCommit: ((db: DB) => void)[] = []
+  /** run when the commit failed (undo what the call did outside the database, e.g. a file it placed) */
+  readonly onAbort: (() => void)[] = []
   private stored: Draft[] | null = null
   private inherited: Map<string, Map<number, boolean>> | null = null
 
@@ -185,6 +194,7 @@ export class Session {
           }
         }
       }
+      for (const f of this.inCommit) f(db)
       appendAudit(db, { personId: this.token.person_id, tokenId: this.token.id, tool, command, files: [...this.files], outcome })
     })()
     try { this.ctx.onCommit?.(this, tool, outcome) } catch (e) { console.error('[onCommit] failed:', e) }

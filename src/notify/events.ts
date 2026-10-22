@@ -3,6 +3,7 @@
 export const EVENT_KINDS = [
   'widened_draft', 'original_write_attempt', 'bulk_read', 'quarantine', 'new_client',
   'admin_self_grant', 'password_reset', 'token_revoked', 'audit_anchor', 'provenance_reset',
+  'approval_pending', 'approval_decided',
 ] as const
 export type EventKind = (typeof EVENT_KINDS)[number]
 
@@ -33,6 +34,8 @@ export interface ShelfEvent {
   targetFolderId?: number
   /** widened_draft: widened only because of weak provenance (→ daily digest) */
   weakOnly?: boolean
+  /** approval_pending / approval_decided: the promote request (recipients are judged from it, R8/R11) */
+  approvalId?: number
   /** audit_anchor */
   anchor?: SignedAnchor
   /** anything else for the detail screen (stored, never rendered into a channel) */
