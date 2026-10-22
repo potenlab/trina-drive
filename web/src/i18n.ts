@@ -65,6 +65,8 @@ const en = {
   token_last_used: 'Last used', token_never_used: 'Never used', token_revoke: 'Revoke', token_revoke_confirm: 'Revoke {name}? The client stops at its next request.',
   token_status_active: 'Active', token_status_revoked: 'Revoked', token_status_expired: 'Expired', created: 'Created', expires: 'Expires', never: 'Never',
   ttl_8h: '8 hours', ttl_1d: '1 day', ttl_7d: '7 days', ttl_30d: '30 days', ttl_90d: '90 days', all_folders: 'All folders',
+  token_reset_prov: 'Reset provenance', token_reset_prov_help: 'Forget which folders this token touched in the last 8 hours, so new drafts start without sources. Drafts already written keep theirs. Type your password; the admin is told.',
+  token_reset_prov_go: 'Reset', token_reset_prov_done: 'Provenance reset: {n} folders cleared.',
   // drafts
   drafts_title: 'My drafts', drafts_intro: 'What your agents wrote to /drafts/. You see a draft here while you can still read every folder it came from.',
   drafts_empty: 'No drafts you can see.', contains_from: 'Contains content from {folders}', looked_at: 'Looked at {folders}', no_sources: 'No folder content',
@@ -146,6 +148,8 @@ const ko: Record<Key, string> = {
   token_last_used: '마지막 사용', token_never_used: '쓴 적 없음', token_revoke: '끊기', token_revoke_confirm: '{name} 토큰을 끊을까요? 다음 요청부터 막힙니다.',
   token_status_active: '사용 중', token_status_revoked: '끊김', token_status_expired: '만료', created: '만든 때', expires: '만료', never: '없음',
   ttl_8h: '8시간', ttl_1d: '1일', ttl_7d: '7일', ttl_30d: '30일', ttl_90d: '90일', all_folders: '모든 폴더',
+  token_reset_prov: '출처 초기화', token_reset_prov_help: '이 토큰이 지난 8시간 동안 닿은 폴더를 잊어서 새 초안이 출처 없이 시작합니다. 이미 쓴 초안의 출처는 그대로입니다. 비밀번호를 넣으세요. 관리자에게 알림이 갑니다.',
+  token_reset_prov_go: '초기화', token_reset_prov_done: '출처 초기화: 폴더 {n}개를 지웠습니다.',
   drafts_title: '내 초안', drafts_intro: '에이전트가 /drafts/에 쓴 것입니다. 초안이 나온 폴더를 지금도 모두 읽을 수 있을 때만 여기에 보입니다.',
   drafts_empty: '볼 수 있는 초안이 없습니다.', contains_from: '{folders} 내용 포함', looked_at: '{folders} 훑어봄', no_sources: '폴더 내용 없음',
   download: '내려받기', version: 'v{n}', via_token: '{token}에서',

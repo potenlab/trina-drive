@@ -3,10 +3,14 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import fs from 'node:fs'
 import path from 'node:path'
+import { verifyAudit } from '../../src/audit'
 import { LIMITS } from '../../src/config'
-import { grantManage, registerFolder, setFlag, setRule } from '../../src/store'
+import { attachNotify } from '../../src/notify'
+import { render } from '../../src/notify/messages'
+import { grantManage, registerFolder, setFlag, setRule, sha256 } from '../../src/store'
 import { MSG } from '../../src/vfs'
 import { textOf } from '../helpers'
+import { PASSWORD, webSetup } from '../web-helpers'
 import { ALL_CASES, ROLES, securitySetup, type Role, type SecEnv } from './fixture'
 
 let e: SecEnv
@@ -411,6 +415,61 @@ describe('more rule computation (review §7 axis 1) and window edges (axis 4)', 
     } finally { env.cleanup() }
   })
 
-  test.todo('"출처 초기화" (provenance reset) needs a fresh login, is audited and notifies the admin (5.1) [owner: admin REST / notifications]', () => {})
+  test('"출처 초기화" (provenance reset) needs a fresh login, clears only that token\'s window, is audited and notifies the admin (5.1, R3, R11)', async () => {
+    let rt: ReturnType<typeof attachNotify> | null = null
+    const env = await webSetup({ emit: (ev) => rt!.emit(ev) })
+    try {
+      rt = attachNotify(env.ctx, { cfg: { email: { mode: 'off' } as never } })
+      const mgmt = env.folderId('경영')
+      env.addToken('bossOther', 'boss', { name: 'boss-other' })
+      await env.sh('boss', 'cat /경영/손익.csv > /dev/null')
+      await env.sh('bossOther', 'cat /경영/손익.csv > /dev/null')
+      await env.tool('boss', 'write', { path: '/drafts/before.md', content: 'x' })
+      expect(env.draftSrc('boss', 'before.md').get(mgmt)).toBe(true)
+      const bossTok = env.tok('boss').id
+      const b = await env.as('boss')
+      const path = `/api/tokens/${bossTok}/provenance-reset`
+      // not fresh: signed in more than 5 minutes ago and no password typed since
+      env.db.query('UPDATE web_sessions SET created_at = created_at - 600000 WHERE id_hash = ?').run(sha256(b.cookie!))
+      expect((await b.call('POST', path, {})).data.error).toBe('reauth_required')
+      expect((await b.call('POST', path, { password: 'not my password' })).status).toBe(400)
+      // someone else's token is not found; no CSRF token is refused
+      expect((await (await env.as('kim')).call('POST', path, { password: PASSWORD })).status).toBe(404)
+      expect((await b.call('POST', path, { password: PASSWORD }, { 'x-csrf-token': '' })).status).toBe(403)
+      expect(env.db.query('SELECT count(*) AS n FROM touches WHERE token_id = ?').get(bossTok)).toEqual({ n: expect.any(Number) })
+      const auditBefore = (env.db.query('SELECT count(*) AS n FROM audit').get() as { n: number }).n
+
+      const ok = await b.call('POST', path, { password: PASSWORD })
+      expect(ok.status).toBe(200)
+      expect(ok.data.cleared).toBeGreaterThanOrEqual(1)
+      // the window is empty: a new draft has no sources; the old draft keeps its sources, also when written again
+      await env.tool('boss', 'write', { path: '/drafts/after.md', content: 'y' })
+      expect(env.draftSrc('boss', 'after.md').size).toBe(0)
+      await env.tool('boss', 'edit', { path: '/drafts/before.md', old_string: 'x', new_string: 'z' })
+      expect(env.draftSrc('boss', 'before.md').get(mgmt)).toBe(true)
+      // only that token: the other token of the same person keeps its window
+      await env.tool('bossOther', 'write', { path: '/drafts/other.md', content: 'o' })
+      expect(env.draftSrc('bossOther', 'other.md').get(mgmt)).toBe(true)
+
+      // audited (one row for the reset, on that token), chain intact
+      const row = env.db.query<{ tool: string; token_id: number; command: string }, [number]>('SELECT tool, token_id, command FROM audit WHERE id > ? AND tool = \'web\' ORDER BY id').all(auditBefore).find((r) => r.command.startsWith('provenance reset'))!
+      expect(row).toMatchObject({ tool: 'web', token_id: bossTok })
+      expect(verifyAudit(env.db).ok).toBe(true)
+
+      // admin notified (and the person); payload is kind + count + link only (R11)
+      const inbox = env.db.query<{ person_id: number; kind: string; level: string; link: string }, []>("SELECT person_id, kind, level, link FROM notify_inbox WHERE kind = 'provenance_reset'").all()
+      expect(inbox.map((r) => r.person_id).sort()).toEqual([env.pid('boss'), env.pid('dion')].sort())
+      for (const r of inbox) { expect(r.link).toEndWith('/alerts/provenance_reset'); expect(r.link).not.toMatch(/boss|경영|before/) }
+      const msg = render('provenance_reset', 1, inbox[0]!.link, 'ko')
+      expect(msg.text).not.toMatch(/boss|경영|before|token-/)
+
+      // a password typed again via /me/reauth counts for 5 minutes, then expires
+      env.db.query('UPDATE web_sessions SET created_at = created_at - 600000 WHERE id_hash = ?').run(sha256(b.cookie!))
+      expect((await b.call('POST', '/api/me/reauth', { password: PASSWORD })).status).toBe(200)
+      expect((await b.call('POST', path, {})).status).toBe(200)
+      env.db.query('UPDATE web_reauth SET at = at - 301000').run()
+      expect((await b.call('POST', path, {})).data.error).toBe('reauth_required')
+    } finally { env.cleanup() }
+  })
   test.todo('after a widened copy is confirmed, reading it brings Src(d) into the reader\'s window (R6) [owner: reconciler]', () => {})
 })

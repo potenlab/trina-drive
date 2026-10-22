@@ -16,6 +16,7 @@ const LINES: Record<EventKind, Record<Lang, (n: number) => string>> = {
   password_reset: { en: (n) => `${n} password reset${n === 1 ? '' : 's'} on your account; your tokens and sessions were ended`, ko: (n) => `계정 비밀번호 재설정 ${n}건, 토큰과 세션이 끊겼습니다` },
   token_revoked: { en: (n) => `${n} access token${n === 1 ? '' : 's'} revoked`, ko: (n) => `액세스 토큰 ${n}개가 끊겼습니다` },
   audit_anchor: { en: (n) => `Audit anchor: ${n} rows`, ko: (n) => `감사 기준점: ${n}행` },
+  provenance_reset: { en: (n) => `${n} provenance reset${n === 1 ? '' : 's'} on an access token`, ko: (n) => `액세스 토큰 출처 초기화 ${n}건` },
 }
 const DIGEST: Record<Lang, string> = { en: 'Daily summary: ', ko: '하루 요약: ' }
 const FOOT: Record<Lang, string> = { en: 'Details after sign-in:', ko: '로그인 뒤 상세 보기:' }

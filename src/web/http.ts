@@ -1,6 +1,7 @@
 import type { ServerOptions } from '../mcp'
 // Shared bits of the web side: the context the handlers get, errors that map to HTTP statuses, JSON replies.
 import type { Ctx } from '../session'
+import type { ShelfEvent } from '../notify/events'
 import type { McpLimiter } from '../ratelimit'
 import type { RateLimiter } from './auth'
 import type { Mailer } from './mail'
@@ -17,6 +18,8 @@ export interface WebOptions {
   onRequest?: ServerOptions['onRequest']
   /** /mcp rate and concurrency limits (default: MCP_LIMITS) */
   mcpLimiter?: McpLimiter
+  /** the notify bus (src/notify): events whose channel payloads follow R11 */
+  emit?: (e: ShelfEvent) => void
 }
 
 export interface WebCtx extends Ctx {

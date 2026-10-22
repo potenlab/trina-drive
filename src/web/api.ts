@@ -170,6 +170,8 @@ const routes: Route[] = [
   R('GET', '/tokens', true, ({ w, actor }) => ({ tokens: views.tokensView(w, actor) })),
   R('POST', '/tokens', true, ({ op, body: b }) => ops.createOwnToken(op, b)),
   R('DELETE', '/tokens/:id', true, (c) => ops.revokeOwnToken(c.op, id(c))),
+  R('POST', '/me/reauth', true, ({ op, s, body: b }) => ops.reauth(op, s!.idHash, b)),
+  R('POST', '/tokens/:id/provenance-reset', true, (c) => ops.resetProvenance(c.op, c.s!.idHash, id(c), c.body)),
 
   R('GET', '/drafts', true, ({ w, actor }) => views.draftsView(w, actor)),
   R('GET', '/drafts/:id/download', true, (c) => {

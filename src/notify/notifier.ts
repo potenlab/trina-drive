@@ -10,7 +10,7 @@ import { resolveRecipients } from './recipients'
 import { ensureNotifySchema } from './schema'
 
 /** Sent first when the rate limit forces a choice (R9: "right away"). */
-const URGENT = new Set<EventKind>(['password_reset', 'admin_self_grant', 'token_revoked'])
+const URGENT = new Set<EventKind>(['password_reset', 'admin_self_grant', 'token_revoked', 'provenance_reset'])
 /** Each one is its own message (an anchor must not be merged away). */
 const NO_COALESCE = new Set<EventKind>(['audit_anchor'])
 const MAX_ATTEMPTS = 5

@@ -201,7 +201,7 @@ async function main(argv: string[]) {
       const ctx = makeCtx(db, dataDir)
       const notify = attachNotify(ctx)
       notify.start()
-      const { server } = serveWeb(ctx, port, host, { allowedOrigins: origin ? [origin] : [], publicUrl, onRequest: notify.onMcpRequest })
+      const { server } = serveWeb(ctx, port, host, { allowedOrigins: origin ? [origin] : [], publicUrl, onRequest: notify.onMcpRequest, emit: notify.emit })
       console.log(`${NAME} ${VERSION} web: http://${host}:${server.port}/   MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
       console.log(`tools: rg=${TOOLS.rg} pdftotext=${TOOLS.pdftotext ?? 'missing'}`)
       if (!noReconcile) startReconciler(db, { dataDir, intervalMs: every ? parseDuration(every) : undefined })

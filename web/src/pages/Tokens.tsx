@@ -20,6 +20,9 @@ export function Tokens() {
   const [some, setSome] = useState(false)
   const [scope, setScope] = useState<number[]>([])
   const [made, setMade] = useState<{ token: string; name: string } | null>(null)
+  const [resetFor, setResetFor] = useState<number | null>(null)
+  const [pw, setPw] = useState('')
+  const [resetDone, setResetDone] = useState<string | null>(null)
   const readable = (folders.data?.folders ?? []).filter((f) => f.mine.ai)
   const mcpName = (document.title || 'shelf').toLowerCase().replace(/[^a-z0-9_-]/g, '')
   const snippet = made ? `claude mcp add --scope user --transport http ${mcpName} ${window.location.origin}/mcp --header "Authorization: Bearer ${made.token}"` : ''
@@ -82,8 +85,22 @@ export function Tokens() {
               </div>
               {x.status === 'active' && (
                 <div className="row-actions">
+                  <button className="btn small ghost" disabled={a.busy} onClick={() => { setResetFor(resetFor === x.id ? null : x.id); setPw(''); setResetDone(null) }}>{t('token_reset_prov')}</button>
                   <button className="btn small danger" disabled={a.busy} onClick={() => { if (confirm(t('token_revoke_confirm', { name: x.name }))) a.run(() => api('DELETE', `/tokens/${x.id}`)).then((r) => { if (r) reload() }) }}>{t('token_revoke')}</button>
                 </div>
+              )}
+              {resetFor === x.id && (
+                <form className="card" onSubmit={async (e) => {
+                  e.preventDefault()
+                  // a fresh login: the password is typed again for this (plan 5.1 "출처 초기화")
+                  const r = await a.run(() => api<{ cleared: number }>('POST', `/tokens/${x.id}/provenance-reset`, { password: pw }))
+                  setPw('')
+                  if (r) setResetDone(t('token_reset_prov_done', { n: String(r.cleared) }))
+                }}>
+                  <p className="muted small">{t('token_reset_prov_help')}</p>
+                  <label>{t('password')}<input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} required /></label>
+                  {resetDone ? <p className="small">{resetDone}</p> : <button className="btn small primary" disabled={a.busy || !pw}>{t('token_reset_prov_go')}</button>}
+                </form>
               )}
             </li>
           ))}
