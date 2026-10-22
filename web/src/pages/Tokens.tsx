@@ -1,6 +1,9 @@
-// My tokens: make one per computer/client (shown once, with the `claude mcp add` line), see last use, revoke.
+// My tokens: connect an AI client with `<cli> mcp add claude|codex|cursor` (src/client/mcp.ts; no token on a command
+// line or in a client file), or make one here per computer/client (shown once), see last use, revoke.
 import { useState } from 'react'
 import { api, get, type FolderSummary } from '../api'
+import { useSession } from '../App'
+import { CLIENT_LABEL, CLIENTS, cliName, manualConfig, recommendedCommand, tokenStdinCommand, type Client, type ConnectCtx } from '../connect'
 import { fmtDate, t, type Key } from '../i18n'
 import { Badge, ErrorLine, Loading, Page, Secret, useAction, useLoad } from '../ui'
 
@@ -24,20 +27,22 @@ export function Tokens() {
   const [pw, setPw] = useState('')
   const [resetDone, setResetDone] = useState<string | null>(null)
   const readable = (folders.data?.folders ?? []).filter((f) => f.mine.ai)
-  const mcpName = (document.title || 'shelf').toLowerCase().replace(/[^a-z0-9_-]/g, '')
-  const snippet = made ? `claude mcp add --scope user --transport http ${mcpName} ${window.location.origin}/mcp --header "Authorization: Bearer ${made.token}"` : ''
 
   return (
     <Page title={t('tokens_title')}>
       <p className="muted">{t('tokens_intro')}</p>
-      {made && (
+      {made ? (
         <div className="card highlight">
           <h2>{made.name}</h2>
           <p className="warn">{t('token_once')}</p>
           <Secret text={made.token} />
-          <p className="small">{t('token_snippet')}</p>
-          <Secret text={snippet} />
+          <Connect token={made.token} />
           <button className="btn small ghost" onClick={() => setMade(null)}>{t('close')}</button>
+        </div>
+      ) : (
+        <div className="card">
+          <h2>{t('connect_title')}</h2>
+          <Connect />
         </div>
       )}
       <form className="card" onSubmit={async (e) => {
@@ -107,5 +112,43 @@ export function Tokens() {
         </ul>
       )}
     </Page>
+  )
+}
+
+/**
+ * How to connect a client, per client (tabs). Without a token: the recommended command (the CLI signs in and makes
+ * and stores its own token). With a token just made here: the --token-stdin command (pasted at a hidden prompt) and,
+ * collapsed, the manual client configuration that keeps the token in clear text.
+ */
+export function Connect({ token }: { token?: string }) {
+  const { me } = useSession()
+  const [client, setClient] = useState<Client>('claude')
+  const c: ConnectCtx = { cli: cliName(document.title), origin: window.location.origin, login: me?.name ?? '', admin: !!me?.admin }
+  const manual = token ? manualConfig(c, client, token) : null
+  return (
+    <div className="connect">
+      <div className="tabs" role="tablist">
+        {CLIENTS.map((x) => <button key={x} type="button" role="tab" aria-selected={x === client} className={x === client ? 'on' : ''} onClick={() => setClient(x)}>{CLIENT_LABEL[x]}</button>)}
+      </div>
+      {token ? <>
+        <p className="small">{t('connect_with_token', { cli: c.cli })}</p>
+        <Secret text={tokenStdinCommand(c, client)} />
+        <p className="muted small">{t('connect_with_token_help')}</p>
+      </> : <>
+        <p className="small">{t('connect_recommended', { cli: c.cli })}</p>
+        <Secret text={recommendedCommand(c, client)} />
+        <p className="muted small">{t('connect_recommended_help')}</p>
+        {c.admin && <p className="muted small">{t('connect_admin_scope')}</p>}
+      </>}
+      {client !== 'claude' && <p className="muted small">{t('connect_env')} <code>. ~/.config/{c.cli}/env.sh</code></p>}
+      {client === 'cursor' && <p className="muted small">{t('connect_cursor_enable')}</p>}
+      {manual && (
+        <details className="manual">
+          <summary>{t('connect_manual')}</summary>
+          <p className="warn small">{t('connect_manual_warn', { file: manual.file })}</p>
+          <Secret text={manual.text} />
+        </details>
+      )}
+    </div>
   )
 }

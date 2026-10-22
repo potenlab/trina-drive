@@ -72,6 +72,11 @@ Checked live with HOME set to a scratch directory: `claude mcp get shelf` → "�
 (and "✘ Failed to connect" with a wrong token), `codex mcp get shelf --json` shows the streamable HTTP transport with
 `bearer_token_env_var`, and `cursor-agent mcp list-tools shelf` lists the five tools through `${env:…}`.
 
+The web's My tokens page shows these commands per client (tabs: Claude Code, Codex, Cursor): the recommended
+`mcp add <client> --server <its address> --login <you>`, and for a token just made there `mcp add <client> --server …
+--token-stdin` (paste it at the hidden prompt). A manual client entry with the token in clear text is offered only
+collapsed and labelled as such; the page never builds a command line that holds a token.
+
 Revoke a token on the web (My tokens) when you stop using it; `claude mcp remove shelf -s user`,
 `codex mcp remove shelf`, or delete the entry from `~/.cursor/mcp.json`, and the Keychain item
 (`security delete-generic-password -s shelf-mcp -a <client>:shelf`).
