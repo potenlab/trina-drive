@@ -216,7 +216,7 @@ const en = {
         seats: 10,
         cta: 'Start a 14-day trial',
         ctaPay: 'Start a 14-day trial',
-        ctaKrw: 'Ask for a bank-transfer quote',
+        ctaKrw: 'Pay by bank transfer',
         ctaKind: 'checkout',
         featured: true,
       },
@@ -246,7 +246,7 @@ const en = {
         seats: 40,
         cta: 'Talk to us',
         ctaPay: 'Get Business',
-        ctaKrw: 'Ask for a bank-transfer quote',
+        ctaKrw: 'Pay by bank transfer',
         ctaKind: 'checkout',
       },
       {
