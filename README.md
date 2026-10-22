@@ -81,6 +81,39 @@ Revoke a token on the web (My tokens) when you stop using it; `claude mcp remove
 `codex mcp remove shelf`, or delete the entry from `~/.cursor/mcp.json`, and the Keychain item
 (`security delete-generic-password -s shelf-mcp -a <client>:shelf`).
 
+## claude.ai and ChatGPT: OAuth and the public address (v0.2)
+
+Step-by-step: [docs/CONNECT-CLAUDE-AI.md](docs/CONNECT-CLAUDE-AI.md), [docs/CONNECT-CHATGPT.md](docs/CONNECT-CHATGPT.md).
+
+- **Authorization server** (`src/oauth/`, MCP authorization 2025-11-25 and 2026-07-28): `/.well-known/oauth-protected-resource[/mcp]`
+  (RFC 9728; the 401 on `/mcp` carries `resource_metadata`), `/.well-known/oauth-authorization-server` (RFC 8414),
+  `/oauth/authorize`, `/oauth/token`, `/oauth/revoke` (RFC 7009), `/oauth/register` (RFC 7591, off unless `--allow-dcr`).
+  PKCE S256 only, public clients only (`none`), `resource` bound to `<public url>/mcp` (RFC 8707), `iss` on every
+  authorization response (RFC 9207). It is on when `public enable --url https://…` set an address (the issuer).
+- **Clients**: Client ID Metadata Documents first. The `client_id` URL is fetched under an SSRF guard (`src/oauth/ssrf.ts`:
+  https only, every resolved address must be public — no private, loopback, link-local/metadata, CGNAT, ULA or mapped
+  ranges — and the socket connects to exactly the checked addresses; no redirects; 3 s; 8 KB; JSON), must name itself,
+  must list the redirect URI (loopback ones match without the port), carries no secret, is cached 1 min–24 h. Trusted
+  hosts: `claude.ai`, `chatgpt.com` (more with `--client-host`, or `--any-client`).
+- **Consent** (`#/oauth/<id>` in the web app, decided through `/api/oauth/requests/<id>` with the session and its CSRF
+  token): the app's domain in large type (checked, or "not verified" for self-registered apps), where the answer goes
+  (warning for localhost), folders (admins must pick; nobody gets folders their AI cannot read), read-only by default,
+  expiry 1/7/30/90 days. Audited.
+- **Tokens**: an approval becomes a row in `tokens` with kind `oauth` (person, folder scope, read-only, expiry, client), so
+  `Access.forToken`, provenance, drafts, audit and "No AI" treat it exactly like a PAT, and **My tokens** lists it (marked
+  OAuth · domain) with Revoke. Access tokens (`shelf_oat_`, 1 h) and refresh tokens (`shelf_ort_`, rotated on every use;
+  reuse after a 10 s grace revokes the connection) are stored as sha256 and looked up on every request, so a revoke stops
+  the next call. Codes are single use (a second use revokes what the first made), 60 s, bound to client, redirect URI,
+  PKCE challenge and resource.
+- **Public listener** (`src/web/public.ts`): a second Bun listener (`public enable --port 8788 --host 127.0.0.1`) for a
+  Cloudflare tunnel. Only `/mcp`, `/oauth/*`, `/.well-known/oauth-*`, the app shell and `/assets`, and the sign-in and
+  consent API calls (`GET /api/state`, `POST /api/login`, `POST /api/logout`, `GET /api/session`, `/api/oauth/requests/*`);
+  everything else — admin API, files, drafts, audit, `/health` — is 404. Requests are rebuilt on the public https URL
+  (same-origin checks, Secure cookie, HSTS); `CF-Connecting-IP`/`X-Forwarded-For` are believed only from
+  `--trusted-proxy`. `serve` starts it only when `public status` passes: https public URL, an admin, admin 2FA
+  (`requireAdmin2FA()`, a TODO hook that reads `--confirm-admin-2fa` until the web records second factors) and the v0.2
+  security gate (`--confirm-security-gate`).
+
 ## Web admin (v0.1)
 
 ```sh
@@ -112,6 +145,7 @@ or `src/policy.ts` (drafts, R4 with the session as a full-scope token). What the
 | fresh login | `POST me/reauth` `{password}`: the password typed again counts as a fresh login for 5 minutes (as does signing in) |
 | drafts (own, R4) | `GET drafts` (+ locked count and dates), `GET drafts/:id/download` |
 | files (read only, R1) | `GET files?path=` (list), `GET files/stat`, `GET files/download` (attachment only), `GET files/text` (extracted, 1 MB), `GET files/who`, `GET search?q=&path=` — see "Files on the web" |
+| OAuth consent | `GET oauth/requests/:id`, `POST oauth/requests/:id/approve` `{folders \| all, read_only, ttl}`, `POST oauth/requests/:id/deny` → `{redirect_to}` (src/oauth/consent.ts) |
 | audit | `GET audit?view=mine` · `view=folders` (folders you manage; others' command lines hidden) · `view=summary` (admin: who, which connection, how many; hash-chain check) |
 
 R7 as built: a manage holder edits AI readers and "start fresh here" in their folder and below, and can turn
