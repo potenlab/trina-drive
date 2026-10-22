@@ -8,7 +8,9 @@ import { TOOLS } from './extract'
 import { serve } from './mcp'
 import { makeCtx, Session } from './session'
 import { runShell } from './shell'
-import { addGroup, addMember, addPerson, createToken, grantManage, LEVELS, parseDuration, registerFolder, revokeToken, setFlag, setRule, StoreError, verifyToken, type LevelName, type NasReaders } from './store'
+import { addGroup, addMember, addPerson, createToken, grantManage, LEVELS, parseDuration, registerFolder, setFlag, setRule, StoreError, verifyToken, type LevelName, type NasReaders } from './store'
+import { notifyCommand, NOTIFY_HELP } from './notify/cli'
+import { attachNotify } from './notify'
 
 const HELP = `${NAME} ${VERSION} — permission-aware read shell and draft box for AI agents (phase-0 prototype)
 
@@ -23,8 +25,9 @@ usage: ${NAME} [--data DIR] <command>
   rule set <path> <person|@group> none|read|write [--break]
   manage grant <path> <person>
   token create <person> [--name N] [--scope path1,path2] [--read-only] [--ttl 8h]
-  token revoke <id>
+  token revoke <id>                      (same as connections revoke)
   audit verify
+${NOTIFY_HELP}
   demo seed                              sample company tree, people, rules and tokens
   sh --token <pat> -c <command>          run one shell command as that token (audited)
   serve [--port 8787] [--host 127.0.0.1] [--allow-origin URL]
@@ -56,7 +59,7 @@ async function main(argv: string[]) {
   const need = (v: string | undefined, what: string) => { if (!v) throw new StoreError(`missing ${what}`); return v }
 
   switch (single ? cmd : `${cmd} ${sub ?? ''}`.trim()) {
-    case 'init': return console.log(`data directory ready: ${dataDir}`)
+    case 'init': attachNotify(makeCtx(db, dataDir)); return console.log(`data directory ready: ${dataDir}`)
     case 'person add': { const admin = takeBool(rest, '--admin'); addPerson(db, need(rest[0], 'name'), admin); return console.log(`added ${rest[0]}${admin ? ' (admin)' : ''}`) }
     case 'group add': addGroup(db, need(rest[0], 'group name')); return console.log(`added group ${rest[0]}`)
     case 'group member': addMember(db, need(rest[0], 'group'), need(rest[1], 'person')); return console.log(`${rest[1]} is in ${rest[0]}`)
@@ -88,8 +91,9 @@ async function main(argv: string[]) {
       console.error(`token ${t.id} for ${rest[0]}${scope ? ` (scope: ${scope})` : ''}${readOnly ? ' read-only' : ''}${ttl ? ` expires in ${ttl}` : ''}; shown once:`)
       return console.log(t.token)
     }
-    case 'token revoke': revokeToken(db, Number(need(rest[0], 'token id'))); return console.log(`revoked token ${rest[0]}`)
+    case 'token revoke': return notifyCommand(db, dataDir, 'connections revoke', rest)
     case 'audit verify': {
+      if (rest.includes('--against')) return notifyCommand(db, dataDir, 'audit verify', rest)
       const r = verifyAudit(db)
       console.log(r.ok ? `audit chain ok: ${r.rows} rows, head ${r.head}` : `AUDIT CHAIN BROKEN at row ${r.brokenAt} (after ${r.rows} good rows)`)
       process.exitCode = r.ok ? 0 : 1
@@ -109,9 +113,12 @@ async function main(argv: string[]) {
       const c = need(takeFlag(rest, '-c'), '-c <command>')
       const token = verifyToken(db, pat, 'cli')
       if (!token) throw new StoreError('invalid, expired or revoked token')
-      const s = new Session(makeCtx(db, dataDir), token)
+      const ctx = makeCtx(db, dataDir)
+      const notify = attachNotify(ctx)
+      const s = new Session(ctx, token)
       const r = await runShell(s, c)
       s.commit('bash', c, `exit ${r.exitCode}`)
+      await notify.flush()
       process.stdout.write(r.stdout)
       process.stderr.write(r.stderr)
       process.exitCode = r.exitCode
@@ -123,12 +130,16 @@ async function main(argv: string[]) {
       const origin = takeFlag(rest, '--allow-origin')
       if (!TOOLS.rg) throw new StoreError('ripgrep (rg) is required: brew install ripgrep')
       if (!TOOLS.pdftotext) console.error('warning: pdftotext not found (brew install poppler); PDFs will not be readable')
-      const server = serve(makeCtx(db, dataDir), port, host, { allowedOrigins: origin ? [origin] : [] })
+      const ctx = makeCtx(db, dataDir)
+      const notify = attachNotify(ctx)
+      notify.start()
+      const server = serve(ctx, port, host, { allowedOrigins: origin ? [origin] : [], onRequest: notify.onMcpRequest })
       console.log(`${NAME} ${VERSION} MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
       console.log(`tools: rg=${TOOLS.rg} pdftotext=${TOOLS.pdftotext ?? 'missing'}`)
       return new Promise(() => {})
     }
     default:
+      if (await notifyCommand(db, dataDir, `${cmd} ${sub ?? ''}`.trim(), rest)) return
       console.error(`unknown command: ${args.join(' ')}\n\n${HELP}`)
       process.exitCode = 2
   }
