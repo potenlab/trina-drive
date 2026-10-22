@@ -1,7 +1,8 @@
 // R3 provenance and R4 draft visibility.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import path from 'node:path'
-import { setFlag } from '../src/store'
+import fs from 'node:fs'
+import { setFlag, setRule } from '../src/store'
 import { setup, textOf, type Env } from './helpers'
 
 let e: Env
@@ -95,5 +96,16 @@ describe('draft visibility (R4)', () => {
     expect((await e.sh('boss3', 'echo x >> /drafts/@boss-desk/n.md')).exitCode).not.toBe(0)
     await e.sh('boss3', 'rm /drafts/from-desk.md')
     expect((await e.sh('boss3', 'ls /drafts')).stdout).not.toContain('from-desk')
+  })
+
+  test('passing through a folder shown only as a path does not put it into the window', async () => {
+    fs.mkdirSync(path.join(e.root, '경영/공개'))
+    fs.writeFileSync(path.join(e.root, '경영/공개/요약.md'), '공개 요약\n')
+    setRule(e.db, path.join(e.root, '경영/공개'), '@전체', 'read')
+    expect((await e.sh('kim', 'ls /경영; grep -r 요약 /경영')).stdout).toContain('공개')
+    await e.sh('kim', 'echo memo > /drafts/after-bare.md')
+    expect(e.draftSrc('kim', 'after-bare.md').has(e.folderId('경영'))).toBe(false)
+    expect(e.draftSrc('kim', 'after-bare.md').get(e.folderId('경영/공개'))).toBe(true)
+    expect((await e.sh('kim', 'cat /drafts/after-bare.md')).stdout).toBe('memo\n')
   })
 })

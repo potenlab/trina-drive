@@ -37,6 +37,8 @@ export class Session {
 
   // ---------- provenance (R3) ----------
   touchNode(node: Node, strong: boolean) {
+    // a folder shown only as a path to something readable below it gives nothing away about itself
+    if (!this.access.canRead(node)) return
     const k = identityKey(node.dev, node.ino)
     const t = this.folderTouches.get(k)
     if (!t || (strong && !t.strong)) this.folderTouches.set(k, { node, strong: strong || !!t?.strong })

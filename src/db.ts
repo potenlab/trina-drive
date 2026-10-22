@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS tokens (
   id INTEGER PRIMARY KEY, person_id INTEGER NOT NULL REFERENCES people(id), name TEXT NOT NULL,
   hash TEXT NOT NULL UNIQUE, hint TEXT NOT NULL, scope TEXT, read_only INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL, expires_at INTEGER, revoked_at INTEGER, last_used_at INTEGER, last_client TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS tokens_name ON tokens (person_id, name);
 -- provenance window: the last time each token touched each folder, strongly (content out) or weakly
 CREATE TABLE IF NOT EXISTS touches (
   token_id INTEGER NOT NULL, folder_id INTEGER NOT NULL, strong_at INTEGER, weak_at INTEGER,
