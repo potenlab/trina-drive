@@ -89,7 +89,7 @@ and the token's scope is computed inside it.
   break (inclusive); registered folders, personal folders and `--break` folders are breaks. Personal folders: owner
   only. Flags (`no_ai`, `quarantine`, `widened_pending`) come down from every ancestor and cannot be cleared below.
 - **R1 read**: inside a registered folder ∧ no flag on the path ∧ rule ≥ read ∧ under a token-scope folder ∧ no link
-  anywhere (every step is lstat'ed, files opened with `O_NOFOLLOW`, link count must be 1) ∧ not a NAS/OS system entry
+  anywhere (every step is lstat'ed, files opened with `O_NOFOLLOW`, link count must be 1, XSym link files closed) ∧ not a NAS/OS system entry
   (`#recycle`, `#snapshot`, `@Recycle`, `@Recently-Snapshot`, `.snapshot`, `~snapshot`, `@eaDir`, `.@__thumb`,
   `.Trashes`, `$RECYCLE.BIN`, `.TemporaryItems`, `.DS_Store`, `._*`, `~$*`) ∧ re-checked (identity of the file and of
   every folder up to the mount) after reading, right before content is returned. Names are compared on NFC and opened
@@ -135,7 +135,7 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
   exist (by design: nothing outside `/drafts/` is writable).
 - No NAS watcher, no reconciliation of moved/renamed folders (a registered folder whose identity changed is simply
   closed), no file-identity index (so R1 ⑤ "same identity at another path" is covered only by `nlink == 1`), no Mac
-  alias/XSym detection, no "widened draft" detection, no notifications (R11), no `manage` enforcement beyond storing
+  alias detection (XSym link files are closed), no "widened draft" detection, no notifications (R11), no `manage` enforcement beyond storing
   grants, no web UI, no trash/purge of drafts (deleted drafts keep their rows and blobs).
 - grep: BRE/ERE are translated to Rust regex (no backreferences/lookaround — refused with ripgrep's message);
   `sed`/`awk` regexes run in just-bash (it uses re2js, a linear engine, for most of them). Output of `wc` with no flag

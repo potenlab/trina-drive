@@ -29,6 +29,21 @@ type Readdir = (real: string) => string[]
 
 const FLAGGED = (r: FolderRow) => r.no_ai || r.quarantine || r.widened_pending
 
+/** A Minshall-French symlink ("XSym") as macOS smbfs stores links on SMB shares: 1067 bytes, "XSym\n" + 4-digit length. */
+const XSYM_SIZE = 1067
+const isXSymHeader = (b: Uint8Array) => b.length >= 10 && Buffer.from(b.subarray(0, 10)).toString('latin1').match(/^XSym\n\d{4}\n$/) !== null
+
+/** R1 ⑤: a regular file that is really a link written by a Mac (XSym). Read without following, from the exact entry. */
+function isXSymFile(real: string, size: bigint): boolean {
+  if (size !== BigInt(XSYM_SIZE)) return false
+  let fd: number
+  try { fd = fs.openSync(real, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK) } catch { return true }
+  try {
+    const b = Buffer.alloc(10)
+    return isXSymHeader(b.subarray(0, fs.readSync(fd, b, 0, 10, 0)))
+  } catch { return true } finally { fs.closeSync(fd) }
+}
+
 /** R0: max over the person and their groups of the rules from F up to the nearest break (inclusive). */
 export function effectiveLevel(rows: FolderRow[], personId: number, groups: Set<number>, rules: Map<number, RuleRow[]>): number {
   let best = 0
@@ -145,7 +160,7 @@ export class Access {
       const row = this.byIdentity.get(identityKey(st.dev, st.ino))
       return { kind: 'dir', node: { real, vpath, dev: st.dev, ino: st.ino, rows: row ? [...parent.rows, row] : parent.rows, parent } }
     }
-    if (!st.isFile() || st.nlink !== 1n) return null
+    if (!st.isFile() || st.nlink !== 1n || isXSymFile(real, st.size)) return null
     return { kind: 'file', parent, name, real, vpath, dev: st.dev, ino: st.ino, size: Number(st.size), mtimeMs: Number(st.mtimeMs), mtimeNs: st.mtimeNs }
   }
 
@@ -204,6 +219,7 @@ export class Access {
       const buf = Buffer.alloc(Number(st.size))
       let off = 0
       while (off < buf.length) { const n = fs.readSync(fd, buf, off, buf.length - off, off); if (n <= 0) break; off += n }
+      if (off === XSYM_SIZE && isXSymHeader(buf)) throw new Closed()
       this.recheck(f)
       return buf.subarray(0, off)
     } finally { fs.closeSync(fd) }
