@@ -95,6 +95,7 @@ const en = {
   kind_rules_changed: 'AI readers changed', kind_manage_changed: 'Management changed', kind_personal_folder_changed: 'Your personal folder changed',
   kind_former_personal_registered: 'A former personal folder was registered', kind_password_reset: 'Password reset started; tokens cut',
   kind_email_changed: 'Sign-in address changed', kind_home_registered: 'A folder that may be your NAS home was registered',
+  kind_second_factor_changed: 'Your second factor changed',
   promise: 'Storage, permission decisions and the record stay on your server. What an agent reads goes to the AI company that runs that agent; mark folders that must not go there "No AI". The person who runs the server can see its disk.',
 }
 
@@ -185,6 +186,7 @@ const ko: Record<Key, string> = {
   kind_rules_changed: 'AI 독자가 바뀌었습니다', kind_manage_changed: '관리 권한이 바뀌었습니다', kind_personal_folder_changed: '내 개인 폴더가 바뀌었습니다',
   kind_former_personal_registered: '예전 개인 폴더가 일반 폴더로 등록됐습니다', kind_password_reset: '비밀번호 재설정 시작, 토큰 끊김',
   kind_email_changed: '로그인 메일 주소가 바뀌었습니다', kind_home_registered: '내 NAS 홈 폴더일 수 있는 폴더가 등록됐습니다',
+  kind_second_factor_changed: '2단계 인증이 바뀌었습니다',
   promise: '저장, 권한 판단, 기록은 여러분 서버에 있습니다. 에이전트가 읽은 내용은 그 에이전트를 만든 AI 회사로 갑니다. 그러면 안 되는 폴더는 "AI 연결 금지"로 두세요. 서버를 운영하는 사람은 디스크를 볼 수 있습니다.',
 }
 

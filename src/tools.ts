@@ -1,6 +1,7 @@
 // The five agent tools. Each call: one Session (policy view + provenance), the work, then one commit with the audit
 // row. If the commit (audit) fails the call fails and nothing it wrote is kept.
 import { draftVersions, sourcesFor, sourcesLine } from './drafts'
+import { promoteByAgent } from './promote-tool'
 import { Access } from './policy'
 import { type Ctx, Session } from './session'
 import { runShell } from './shell'
@@ -23,6 +24,8 @@ export const TOOL_DEFS = [
     inputSchema: { type: 'object', properties: { path: str, old_string: str, new_string: str, replace_all: { type: 'boolean' }, expected_sha256: str }, required: ['path', 'old_string', 'new_string'], additionalProperties: false } },
   { name: 'history', description: 'Older versions of a draft: action "list", "read" (with version) or "restore" (with version; your own drafts only).',
     inputSchema: { type: 'object', properties: { path: str, action: { type: 'string', enum: ['list', 'read', 'restore'] }, version: { type: 'integer', minimum: 1 } }, required: ['path', 'action'], additionalProperties: false } },
+  { name: 'promote', description: 'Put one of your drafts into a team folder as a NEW file (never an overwrite): draft = /drafts/… path, folder = target folder path (e.g. /프로젝트/2026), name = new file name (.md, .txt, .csv …). The folder must allow promote and your rule there must be write. If the folder\'s readers are wider than the draft\'s sources, nothing is written: a person must approve it on the web with a passkey (this returns the link; you cannot approve). reason is shown to the approver as your claim. Pass expected_sha256 to promote only the version you read.',
+    inputSchema: { type: 'object', properties: { draft: str, folder: str, name: str, reason: str, expected_sha256: str }, required: ['draft', 'folder', 'name'], additionalProperties: false } },
 ] as const
 
 const text = (t: string, extra?: Partial<ToolResult>): ToolResult => ({ content: [{ type: 'text', text: t }], ...extra })
@@ -57,6 +60,7 @@ export async function callTool(ctx: Ctx, token: TokenRow, name: string, args: Re
   let audit = name
   let outcome = 'ok'
   let wrote: string | null = null
+  let finish: (() => void) | undefined
   try {
     switch (name) {
       case 'bash': {
@@ -146,6 +150,23 @@ export async function callTool(ctx: Ctx, token: TokenRow, name: string, args: Re
         result = text(`Restored ${p} to v${v.version} as a new version.`)
         break
       }
+      case 'promote': {
+        const dp = vfs.resolvePath('/', arg('draft'))
+        const folder = arg('folder'), target = arg('name')
+        audit = `promote ${dp} -> ${folder.replace(/\/+$/, '')}/${target}`
+        if (token.read_only) throw new Refuse(MSG.tokenReadOnly)
+        const h = vfs.resolve(dp)
+        if (!h || h.t !== 'draft' || !h.item.draft || h.item.pending) { result = fail(`No such draft: ${dp}`); outcome = 'not found'; break }
+        if (!h.item.own) { result = fail('Only drafts this token wrote can be promoted.'); outcome = 'refused'; break }
+        const r = promoteByAgent(ctx, s, h.item.draft, folder, target, args.reason, args.expected_sha256)
+        result = text(r.text, { isError: r.isError || undefined, structuredContent: r.structured })
+        outcome = r.outcome
+        if (r.finish) {
+          const res = result
+          finish = () => { r.finish!(); res.content = [{ type: 'text', text: r.text }]; res.structuredContent = r.structured; if (r.isError) res.isError = true; else delete res.isError }
+        }
+        break
+      }
       default:
         throw new Refuse(`unknown tool ${name}`)
     }
@@ -155,10 +176,12 @@ export async function callTool(ctx: Ctx, token: TokenRow, name: string, args: Re
     outcome = 'refused'
   }
   try { s.commit(name, audit, outcome) } catch (e) {
+    for (const undo of s.onAbort) { try { undo() } catch (u) { console.error('[tools] undo failed:', u) } }
     // nothing of this call is recorded (touches included), so no worker that saw it may serve this token again
     await discardKept(String(token.id), String(token.person_id))
     throw new AuditFailure(`The call could not be recorded in the audit log, so it was not completed (${(e as Error).message}).`)
   }
+  finish?.()
   if (wrote !== null) {
     result.content.push({ type: 'text', text: sourcesOf(ctx, token, wrote) })
   }

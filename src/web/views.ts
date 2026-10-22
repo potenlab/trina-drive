@@ -5,7 +5,9 @@ import { canSeeDraft, liveDrafts, sourcesFor, type Draft } from '../drafts'
 import { Access } from '../policy'
 import { Rights, type Actor } from '../rights'
 import type { FolderRow, TokenRow } from '../store'
+import { decidableCount, promoteFolderIds, promoteOn } from '../promote'
 import { accountOf } from './auth'
+import { has2FA } from './mfa'
 import { forbidden, notFound, type WebCtx } from './http'
 import { visibleFolder, type Op } from './ops'
 import { ensureWebSchema } from './schema'
@@ -16,7 +18,8 @@ const groups = (w: WebCtx) => w.db.query<{ id: number; name: string }, []>('SELE
 export function me(w: WebCtx, a: Actor) {
   const p = w.db.query<{ id: number; name: string; admin: number }, [number]>('SELECT id, name, admin FROM people WHERE id = ?').get(a.personId)!
   const unread = w.db.query<{ n: number }, [number]>('SELECT count(*) AS n FROM notices WHERE person_id = ? AND read_at IS NULL').get(a.personId)!.n
-  return { id: p.id, name: p.name, admin: !!p.admin, email: accountOf(w.db, a.personId)?.email ?? null, unread_notices: unread }
+  return { id: p.id, name: p.name, admin: !!p.admin, email: accountOf(w.db, a.personId)?.email ?? null, unread_notices: unread,
+    approvals: decidableCount(w.db, a.personId), second_factor: has2FA(w.db, a.personId) }
 }
 
 /** Names are not secret inside the team; addresses and sign-in state are for admins (and yourself). */
@@ -46,6 +49,7 @@ function folderSummary(w: WebCtx, r: Rights, a: Actor, f: FolderRow) {
     personal_owner: r.personal(f)?.personal_owner ?? null,
     no_ai: !!f.no_ai, quarantine: !!f.quarantine, widened_pending: !!f.widened_pending, inherit_break: !!f.inherit_break || !!f.registered,
     blocked: r.flagged(f), nas_mode: nas, status: folderStatus(w, f),
+    promote: promoteOn(promoteFolderIds(w.db), r.chain(f)), promote_here: promoteFolderIds(w.db).has(f.id),
     mine: { ai: r.aiLevel(a.personId, f) >= 1 && !r.flagged(f), nas: r.nasReader(a.personId, f), manage: r.manages(a.personId, f) },
     can: {
       edit_rules: r.canEditRules(a, f), no_ai_on: r.canSetNoAi(a, f, true), no_ai_off: r.canSetNoAi(a, f, false),

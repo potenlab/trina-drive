@@ -27,7 +27,7 @@ describe('MCP over HTTP', () => {
     await client.connect(transport)
     expect(client.getServerVersion()?.name).toBe('shelf')
     const tools = await client.listTools()
-    expect(tools.tools.map((t) => t.name).sort()).toEqual(['bash', 'edit', 'history', 'read', 'write'])
+    expect(tools.tools.map((t) => t.name).sort()).toEqual(['bash', 'edit', 'history', 'promote', 'read', 'write'])
     const r = await client.callTool({ name: 'bash', arguments: { command: 'ls /' } })
     const text = (r.content as { text: string }[])[0]!.text
     expect(text).toContain('프로젝트')

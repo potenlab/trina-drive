@@ -10,7 +10,9 @@ import {
   accountByLogin, AuthError, checkPasswordRules, consumeLink, consumeSetupToken, createSession, csrfOk, hashPassword, lookupSession,
   peekLink, revokeSession, SESSION_COOKIE, SESSION_MAX_MS, setPassword, setupDone, setupPending, verifyPassword, type WebSession,
 } from './auth'
+import * as approve from './approve'
 import * as files from './files'
+import { consumeTicket, createTicket, has2FA, ticketFailed, ticketPerson } from './mfa'
 import { ApiError, bad, json, notFound, rateLimited, type WebCtx } from './http'
 import { markNoticesRead, noticesOf } from './notices'
 import * as ops from './ops'
@@ -112,8 +114,30 @@ const routes: Route[] = [
       throw new ApiError(401, 'bad_login', 'wrong name or password')
     }
     w.loginByName.reset(login)
+    // a second factor when the person has one: a 5-minute ticket now, the session after the factor (POST /login/second)
+    if (has2FA(w.db, acc.person_id)) return { second_factor: await approve.secondFactorChallenge(w, createTicket(w.db, acc.person_id), acc.person_id) }
     const ss = startSession(w, req, acc.person_id, s)
     return json({ me: views.me(w, { personId: acc.person_id, admin: !!acc.admin }), csrf: ss.csrf }, 200, { 'set-cookie': ss.cookie })
+  }),
+  R('POST', '/login/second', false, async ({ w, req, body: b, s, addr }) => {
+    if (!w.loginByAddr.hit(addr)) throw rateLimited(w.loginByAddr.retryAfter(addr))
+    const ticket = typeof b.ticket === 'string' ? b.ticket : ''
+    const pid = ticketPerson(w.db, ticket)
+    if (pid == null) throw new ApiError(401, 'bad_ticket', 'sign in again')
+    const key = `mfa:${pid}`
+    if (w.loginByName.blocked(key)) throw rateLimited(w.loginByName.retryAfter(key))
+    let method: string
+    try { method = await approve.checkSecondFactor(w, ticket, pid, b) } catch (e) {
+      ticketFailed(w.db, ticket)
+      w.loginByName.hit(key)
+      throw e
+    }
+    const p = w.db.query<{ admin: number; active: number }, [number]>('SELECT admin, active FROM people WHERE id = ?').get(pid)
+    if (!p?.active || !consumeTicket(w.db, ticket)) throw new ApiError(401, 'bad_ticket', 'sign in again')
+    w.loginByName.reset(key)
+    if (method === 'recovery') appendAudit(w.db, { personId: pid, tokenId: null, tool: 'web', command: 'signed in with a recovery code', files: [], outcome: 'ok' })
+    const ss = startSession(w, req, pid, s)
+    return json({ me: views.me(w, { personId: pid, admin: !!p.admin }), csrf: ss.csrf }, 200, { 'set-cookie': ss.cookie })
   }),
   R('POST', '/logout', true, ({ w, req, s }) => {
     revokeSession(w.db, s!.idHash)
@@ -136,6 +160,8 @@ const routes: Route[] = [
     appendAudit(w.db, { personId: pid, tokenId: null, tool: 'web', command: kind === 'invite' ? 'invite accepted' : 'password reset completed', files: [], outcome: 'ok' })
     const p = w.db.query<{ admin: number; active: number }, [number]>('SELECT admin, active FROM people WHERE id = ?').get(pid)!
     if (!p.active) return { ok: true }
+    // a reset link does not skip the second factor (R9: a reset mail must not be a way around it)
+    if (has2FA(w.db, pid)) return { second_factor: await approve.secondFactorChallenge(w, createTicket(w.db, pid), pid) }
     const ss = startSession(w, req, pid, s)
     return json({ me: views.me(w, { personId: pid, admin: !!p.admin }), csrf: ss.csrf }, 200, { 'set-cookie': ss.cookie })
   }),
@@ -173,6 +199,27 @@ const routes: Route[] = [
   R('DELETE', '/tokens/:id', true, (c) => ops.revokeOwnToken(c.op, id(c))),
   R('POST', '/me/reauth', true, ({ op, s, body: b }) => ops.reauth(op, s!.idHash, b)),
   R('POST', '/tokens/:id/provenance-reset', true, (c) => ops.resetProvenance(c.op, c.s!.idHash, id(c), c.body)),
+
+  // second factors (own only; changes need the password typed within 5 minutes)
+  R('GET', '/me/2fa', true, ({ w, actor }) => approve.factorsView(w, actor.personId)),
+  R('POST', '/me/passkeys/options', true, ({ op, s }) => approve.passkeyOptions(op, s!.idHash)),
+  R('POST', '/me/passkeys', true, ({ op, s, body: b }) => approve.passkeyAdd(op, s!.idHash, b)),
+  R('DELETE', '/me/passkeys/:id', true, (c) => approve.passkeyDelete(c.op, c.s!.idHash, id(c))),
+  R('POST', '/me/totp/setup', true, ({ op, s }) => approve.totpSetup(op, s!.idHash)),
+  R('POST', '/me/totp/confirm', true, ({ op, body: b }) => approve.totpEnable(op, b)),
+  R('DELETE', '/me/totp', true, ({ op, s }) => approve.totpDisable(op, s!.idHash)),
+  R('POST', '/me/recovery-codes', true, ({ op, s }) => approve.newRecoveryCodes(op, s!.idHash)),
+
+  // draft promote (plan 5.2) and the approval inbox (R8): sessions only, every approval click needs its own step-up
+  R('GET', '/promote/targets', true, ({ w, actor }) => approve.promoteTargetsView(w, actor)),
+  R('POST', '/drafts/:id/promote', true, (c) => approve.promoteFromWeb(c.op, id(c), c.body)),
+  R('PUT', '/folders/:id/promote', true, (c) => approve.setFolderPromote(c.op, id(c), c.body)),
+  R('GET', '/approvals', true, ({ w, actor }) => approve.approvalsView(w, actor)),
+  R('GET', '/approvals/:id', true, (c) => approve.approvalView(c.w, c.actor, id(c))),
+  R('POST', '/approvals/:id/step-up/options', true, (c) => approve.stepUpOptions(c.op, c.s!.idHash, id(c), c.body)),
+  R('POST', '/approvals/:id/step-up', true, (c) => approve.stepUp(c.op, c.s!.idHash, id(c), c.body)),
+  R('POST', '/approvals/:id/approve', true, (c) => approve.approveRequest(c.op, c.s!.idHash, id(c), c.body)),
+  R('POST', '/approvals/:id/reject', true, (c) => approve.rejectRequest(c.op, id(c), c.body)),
 
   R('GET', '/drafts', true, ({ w, actor }) => views.draftsView(w, actor)),
   R('GET', '/drafts/:id/download', true, (c) => {

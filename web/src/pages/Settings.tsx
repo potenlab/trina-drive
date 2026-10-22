@@ -4,6 +4,7 @@ import { api, get } from '../api'
 import { useSession } from '../App'
 import { fmtDate, LOCALES, setLocale, t, useLocale, type Key } from '../i18n'
 import { ErrorLine, Loading, Page, useAction, useLoad } from '../ui'
+import { SecondFactorSettings } from './SecondFactor'
 
 interface Notice { id: number; kind: string; count: number; link: string; created_at: number; read_at: number | null }
 
@@ -30,6 +31,7 @@ export function Settings() {
           {(me?.unread_notices ?? 0) > 0 && <button className="btn small" onClick={() => api('POST', '/notices/read').then(() => { notices.reload(); refresh() })}>{t('mark_read')}</button>}
         </>}
       </section>
+      <SecondFactorSettings />
       <section className="card">
         <h2>{t('language')}</h2>
         <select value={locale} onChange={(e) => setLocale(e.target.value as 'en' | 'ko')}>{LOCALES.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}</select>

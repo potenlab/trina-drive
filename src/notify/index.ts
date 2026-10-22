@@ -89,5 +89,6 @@ export function attachNotify(ctx: Ctx, opts: AttachOptions = {}): NotifyRuntime 
     },
   }
   ctx.onCommit = (s, tool, outcome) => rt.onCommit(s, tool, outcome)
+  ctx.emit = rt.emit
   return rt
 }
