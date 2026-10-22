@@ -45,6 +45,11 @@ type Readdir = (real: string) => string[]
 const onSystemPath = (real: string) => real.split(path.sep).some((n) => n !== '' && isSystemName(n))
 
 const FLAGGED = (r: FolderRow) => r.no_ai || r.quarantine || r.widened_pending
+/** People on the web: "No AI" closes AI connections only (plan 5.1 "AI 연결 금지(웹의 사람만)"); the other flags still close. */
+const FLAGGED_FOR_PEOPLE = (r: FolderRow) => r.quarantine || r.widened_pending
+
+/** Who is reading: an agent through a token (the default), or a person in their own web session (no token scope). */
+export type Audience = 'agent' | 'person'
 
 /** A Minshall-French symlink ("XSym") as macOS smbfs stores links on SMB shares: 1067 bytes, "XSym\n" + 4-digit length. */
 const XSYM_SIZE = 1067
@@ -99,6 +104,7 @@ export class Access {
   readonly personId: number
   readonly groups: Set<number>
   readonly scope: Set<number> | null
+  readonly audience: Audience
   private readonly byIdentity = new Map<string, FolderRow>()
   private readonly byId = new Map<number, FolderRow>()
   private readonly rules = new Map<number, RuleRow[]>()
@@ -109,8 +115,9 @@ export class Access {
   private readonly closures: Closures
   private readonly indexedAt: (dev: bigint, ino: bigint) => { path: string }[]
 
-  constructor(readonly db: DB, principal: { personId: number; token?: TokenRow }, private readonly readdir: Readdir = (p) => fs.readdirSync(p)) {
+  constructor(readonly db: DB, principal: { personId: number; token?: TokenRow; audience?: Audience }, private readonly readdir: Readdir = (p) => fs.readdirSync(p)) {
     this.personId = principal.personId
+    this.audience = principal.audience ?? 'agent'
     this.groups = new Set(db.query<{ group_id: number }, [number]>('SELECT group_id FROM memberships WHERE person_id = ?').all(this.personId).map((g) => g.group_id))
     const scope = principal.token?.scope
     this.scope = scope ? new Set(JSON.parse(scope) as number[]) : null
@@ -122,10 +129,12 @@ export class Access {
   }
 
   static forToken(db: DB, token: TokenRow, readdir?: Readdir) { return new Access(db, { personId: token.person_id, token }, readdir) }
+  /** A person on the web: a full-scope "token" of their own; "No AI" does not apply (it closes AI connections only). */
+  static forPerson(db: DB, personId: number, readdir?: Readdir) { return new Access(db, { personId, audience: 'person' }, readdir) }
 
   // ---------- R0 / R1 on a folder node ----------
   level(node: Node, personId = this.personId, groups = this.groups) { return effectiveLevel(node.rows, personId, groups, this.rules) }
-  flagged(node: Node) { return node.rows.some(FLAGGED) }
+  flagged(node: Node) { return node.rows.some(this.audience === 'person' ? FLAGGED_FOR_PEOPLE : FLAGGED) }
   inScope(node: Node) { return this.scope === null || node.rows.some((r) => this.scope!.has(r.id)) }
   /** R1 ①–④ for files directly in this folder (① holds for every node: walks start at a registered folder) */
   canRead(node: Node) { return !this.flagged(node) && this.level(node) >= 1 && this.inScope(node) }

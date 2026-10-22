@@ -195,11 +195,11 @@ function relTo(absDir: string, vpath: string, shown: string) {
   return shown.replace(/\/+$/, '') + '/' + rest
 }
 
-interface RgEvent { type: string; data: { path?: { text?: string }; lines?: { text?: string; bytes?: string }; line_number?: number; submatches?: { match: { text?: string; bytes?: string } }[] } }
-const evText = (x?: { text?: string; bytes?: string }) => x?.text ?? (x?.bytes ? Buffer.from(x.bytes, 'base64').toString('utf8') : '')
+export interface RgEvent { type: string; data: { path?: { text?: string }; lines?: { text?: string; bytes?: string }; line_number?: number; submatches?: { match: { text?: string; bytes?: string } }[] } }
+export const evText = (x?: { text?: string; bytes?: string }) => x?.text ?? (x?.bytes ? Buffer.from(x.bytes, 'base64').toString('utf8') : '')
 
 /** Run ripgrep with --json over explicit files (or stdin). Events grouped by path. */
-async function runRg(args: string[], files: string[], stdin: string | null, quietStop: boolean): Promise<{ events: Map<string, RgEvent[]>; code: number; stderr: string; timedOut: boolean }> {
+export async function runRg(args: string[], files: string[], stdin: string | null, quietStop: boolean): Promise<{ events: Map<string, RgEvent[]>; code: number; stderr: string; timedOut: boolean }> {
   const p = Bun.spawn([TOOLS.rg!, ...args, '--', ...(stdin === null ? files : ['-'])], {
     cwd: '/', stdin: stdin === null ? 'ignore' : new TextEncoder().encode(stdin), stdout: 'pipe', stderr: 'pipe',
     env: { PATH: '/usr/bin:/bin', RIPGREP_CONFIG_PATH: '' },
