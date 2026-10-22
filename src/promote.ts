@@ -65,7 +65,7 @@ export class PromoteError extends Error {
 }
 
 /** Test hooks (race simulation). Never set in production. */
-export const promoteHooks: { beforePlace?: (finalPath: string) => void } = {}
+export const promoteHooks: { beforePlace?: (finalPath: string) => void; noHardLinks?: boolean } = {}
 
 // ---------- the promote flag (admin only, inherited down, not inside personal folders) ----------
 export function promoteFolderIds(db: DB): Set<number> {
@@ -197,6 +197,7 @@ export function placeNewFile(node: Node, name: string, bytes: Uint8Array): Place
     recheckDir(node)
     promoteHooks.beforePlace?.(final)
     try {
+      if (promoteHooks.noHardLinks) throw Object.assign(new Error('simulated share without hard links'), { code: 'ENOTSUP' })
       fs.linkSync(tmp, final)
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code ?? ''

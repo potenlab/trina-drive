@@ -9,7 +9,7 @@ import { TOOL_DEFS } from '../src/tools'
 import { setup, textOf, type Env } from './helpers'
 
 let e: Env
-afterEach(() => { promoteHooks.beforePlace = undefined; e?.cleanup() })
+afterEach(() => { promoteHooks.beforePlace = undefined; promoteHooks.noHardLinks = undefined; e?.cleanup() })
 
 function env() {
   e = setup()
@@ -82,6 +82,20 @@ describe('promote: not widening → written at once', () => {
     expect(fs.readFileSync(path.join(e.root, '프로젝트', 'race.md'), 'utf8')).toBe('someone else was first')
     expect(nasFiles('프로젝트').filter((n) => n.includes('promote'))).toEqual([]) // temp removed
     expect(e.db.query('SELECT 1 FROM promotions').get()).toBeNull()
+  })
+
+  test('a share without hard links: exclusive create of the final name, still never replacing', async () => {
+    env()
+    promoteHooks.noHardLinks = true
+    const content = await draftFrom('kim', ['/프로젝트/README.md'], 'r.md')
+    const before = nasFiles('프로젝트')
+    expect((await promote('kim', { draft: '/drafts/r.md', folder: '/프로젝트', name: 'nolink.md' })).isError).toBeFalsy()
+    expect(fs.readFileSync(path.join(e.root, '프로젝트', 'nolink.md'), 'utf8')).toBe(content)
+    expect(nasFiles('프로젝트')).toEqual([...before, 'nolink.md'].sort())
+    promoteHooks.beforePlace = (final) => fs.writeFileSync(final, 'first')
+    expect(textOf(await promote('kim', { draft: '/drafts/r.md', folder: '/프로젝트', name: 'late.md' }))).toContain('already exists')
+    expect(fs.readFileSync(path.join(e.root, '프로젝트', 'late.md'), 'utf8')).toBe('first')
+    expect(nasFiles('프로젝트').filter((n) => n.includes('promote'))).toEqual([])
   })
 
   test('bad names, link-looking content, other tokens\' drafts, read-only tokens, a stale expected_sha256', async () => {
