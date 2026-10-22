@@ -311,6 +311,7 @@ describe('identity cases that exist on main', () => {
   test.todo('a file whose identity appears at another path in the index is closed (R1 ⑤ file-identity index) [owner: reconciler]', () => {})
   test.todo('unregister + re-register: old draft sources lock / count as widening (review §7 axis 2) [owner: admin REST]', () => {})
   test.todo('a Mac alias file (bookmark data / FinderInfo "alis") is closed like a link (R1 ⑤) [owner: reconciler]', () => {})
+  test.todo('the text mirror is keyed by (dev, ino, size, mtime): a file rewritten in place with the same size and a reset mtime serves its old text; key by content or re-hash on identity reuse [owner: reconciler / file-identity index]', () => {})
 })
 
 describe('NAS system folders (R1 ⑥) on the registered path itself', () => {
