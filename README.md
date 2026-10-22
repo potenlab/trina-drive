@@ -70,6 +70,7 @@ or `src/policy.ts` (drafts, R4 with the session as a full-scope token). What the
 | folders | `GET folders`, `POST folders` (admin; templates public/team/management/personal/custom, NAS readers all/same-as-ai/chosen/unknown), `GET folders/:id` (the NAS/AI table), `PATCH folders/:id` (no_ai, inherit_break, quarantine, name), `DELETE folders/:id` (admin), `PUT folders/:id/rules`, `PUT folders/:id/nas`, `PUT folders/:id/owner`, `POST folders/:id/subfolders`, `PUT/DELETE folders/:id/managers/:pid` (admin) |
 | tokens (own only) | `GET tokens`, `POST tokens` (shown once), `DELETE tokens/:id` |
 | drafts (own, R4) | `GET drafts` (+ locked count and dates), `GET drafts/:id/download` |
+| files (read only, R1) | `GET files?path=` (list), `GET files/stat`, `GET files/download` (attachment only), `GET files/text` (extracted, 1 MB), `GET files/who`, `GET search?q=&path=` — see "Files on the web" |
 | audit | `GET audit?view=mine` · `view=folders` (folders you manage; others' command lines hidden) · `view=summary` (admin: who, which connection, how many; hash-chain check) |
 
 R7 as built: a manage holder edits AI readers and "start fresh here" in their folder and below, and can turn
@@ -77,6 +78,34 @@ R7 as built: a manage holder edits AI readers and "start fresh here" in their fo
 folders: NAS readers and "No AI" belong to the owner; nobody sets rules inside them). R9 notices (kind, count, link
 only) go to the folder's managers and the admin on self-grants (rule, group, manage, NAS readers), "No AI" off,
 personal-folder unregister/owner change, and re-registering a former personal folder.
+
+### Files on the web (plan 5.2, read only)
+
+The **Files** page (파일, `#/files`) is where people who are not admins land: a lazy folder tree, breadcrumb, list or
+grid, sort by name/date/size, search over names and text (snippets), a detail panel (size, modified, who can see,
+"View text", Download) and a "My drafts" entry that opens the drafts page. Arrow keys / Enter / Backspace in the list.
+Code: `src/web/files.ts`, `web/src/pages/Files.tsx`.
+
+- **One decision point.** Every endpoint walks with `Access.forPerson` (`src/policy.ts`): the person's session is a
+  token of their own whose scope is everything (the same rule as the drafts page). Admins get no extra reads here.
+- **"No AI" is for AI only.** A No-AI folder stays open on the web to people whose rules let them read it (plan 5.1
+  "AI 연결 금지(웹의 사람만)"); their agents still see nothing. Quarantine and "widened, waiting" close it on the web too
+  (stricter than the plan's "agents only" for widened copies), as do links, hard links, NAS system folders and NFC
+  collisions.
+- **Hidden == missing**: 404 with the same body and headers on list, stat, download, text, who and search scope.
+  Folders show no size or time (they would move with files you cannot see). A folder you see only as the way to a
+  readable subfolder lists only that child, and its "who can see" is withheld.
+- **Bytes**: opened without following links and re-checked (R1 ⑦) before they leave; downloads are always
+  `Content-Disposition: attachment`, `application/octet-stream`, `nosniff`, `CSP: sandbox`, `no-store` (64 MB cap,
+  read into memory). Nothing a file holds is rendered on this origin: extracted text is a JSON string shown as plain
+  text; a preview needs a separate origin and sandbox (plan 7.1, v0.3).
+- **Search**: walks only what the person may see (≤ 5,000 files, 2,000 folders), fills the text mirror on first use
+  within 15 s, runs ripgrep (fixed string, case-insensitive) over exactly those mirror files, re-checks each file
+  before its snippet leaves; 50 results, 3 snippets each; `partial` when a limit was hit.
+- **Audit, no provenance.** Every call is an audit row (`tool: web`, no token, `files <action> <path>`, files whose
+  content left; failures as `not_found`), and if the row cannot be written nothing is returned. Web reads open **no
+  provenance window** (R3): provenance labels what an agent's token touched so its drafts carry their sources; a person
+  in a browser writes no drafts through this server.
 
 Web tables (created on demand by `src/web/schema.ts`, not in `db.ts`): `accounts`, `web_sessions`, `web_links`,
 `notices`, `folder_history`; keys `web_setup_token` and `everyone_group` in `meta`.
@@ -248,8 +277,7 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
   runs on the next pass). No notifications (R11; events carry the recipients), no `manage` enforcement beyond storing
   alias detection (XSym link files are closed), no "widened draft" detection, no notifications (R11), no `manage` enforcement beyond storing
   grants, no web UI, no trash/purge of drafts (deleted drafts keep their rows and blobs).
-  alias/XSym detection, no "widened draft" detection, no webhook/Slack notifications (web notices + mail only), no
-  web file browser (v0.2), no trash/purge of drafts (deleted drafts keep their rows and blobs).
+  alias/XSym detection, no "widened draft" detection, no webhook/Slack notifications (web notices + mail only), no trash/purge of drafts (deleted drafts keep their rows and blobs).
 - grep: BRE/ERE are translated to Rust regex (no backreferences/lookaround — refused with ripgrep's message);
   `sed`/`awk` regexes run in just-bash (it uses re2js, a linear engine, for most of them). Output of `wc` with no flag
   counts extracted text. Extraction runs on first use (no background queue yet).
