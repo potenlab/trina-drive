@@ -209,11 +209,16 @@ waits at most for one global slot.
   sibling dir), reads and listings outside the grants (home, `~/.zshrc`, a sibling secret file), exec of `/bin/sh`
   and `curl`, signals to the server. No server file descriptors are inherited.
 
-**Linux — `bwrap`** (`bwrapArgs()`): `--unshare-all` (so no network), `--die-with-parent --new-session --cap-drop ALL`,
-read-only binds of `/usr /lib /lib64 /bin` + the same grants, the job dir read-write, fresh `/proc /dev /tmp`.
-Detection runs bwrap once (user namespaces may be off). **Not tested on this Mac.** Without bwrap: plain subprocess,
-`isolation: "none"`, refused unless `requireIsolation: false`. A cgroup per job (`Bun.spawn({cgroup})`, `memory.max`,
-`pids.max`) is the natural next step there.
+**Linux — `bwrap`** (`bwrapArgs()`): `--unshare-all` (user, mount, pid, net, ipc, uts, cgroup: no network, no other
+processes), `--die-with-parent --new-session --cap-drop ALL`, a fresh `/proc` of the worker's own pid namespace and
+`/dev`; on an empty root made read-only (`--remount-ro /`): shared libraries (`/usr/lib*`, `/lib*` as links on
+merged-/usr systems), `/usr/share`, `/etc/ld.so.cache`, `/etc/localtime`, `/etc/fonts`, the runtime, the grants and the
+execPaths, read-only; the job dir read-write. No `/bin` or `/usr/bin`, so only the runtime and execPaths can be started.
+bwrap sets NO_NEW_PRIVS. Detection starts the runtime once under these exact arguments, so a host where a plain bwrap
+works but this sandbox does not (Docker's masked `/proc`) reports `none` with the reason. Tested in the Docker image
+(docs/DOCKER.md, section 6: the container settings bwrap needs, and what the tests check). Without bwrap: plain
+subprocess, `isolation: "none"`, refused unless `requireIsolation: false`. A cgroup per job (`Bun.spawn({cgroup})`,
+`memory.max`, `pids.max`) is the natural next step there.
 
 **Dedicated worker user** (`runAs`, env `SHELF_WORKER_USER`, e.g. `_shelfwork`): workers are spawned with that
 uid/gid. This needs the spawning process to be root; there is no sudo and no setuid helper. When the server is not
@@ -254,7 +259,7 @@ A pre-built single-file bundle of the worker did not start faster (4.5 MB to par
   may see anyway.
 - A worker can make the server do work within its limits (fs calls, parent-run commands, writes of up to
   `maxChannelBytes` into the session's pending drafts). Set `maxChannelBytes` per job type as needed.
-- Linux (bwrap, `/proc` probe) is written but untested here; Windows is not supported.
+- Linux (bwrap, `/proc` probe) is tested in the Docker image only (arm64, Ubuntu 24.04 kernel); Windows is not supported.
 - With a worker user, the memory probe needs the server to be root (libproc refuses other uids otherwise; `ps` would
   be the fallback).
 - Extraction by path grants that one file to a fresh worker (no warm pool). The server always passes bytes it read
