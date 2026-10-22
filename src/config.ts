@@ -27,6 +27,8 @@ export const LIMITS = {
   /** bytes read from an original file */
   fileBytes: 64 * 1024 * 1024,
   draftBytes: 8 * 1024 * 1024,
+  /** one MCP request body (a draft as JSON, with room for escapes) */
+  requestBytes: 24 * 1024 * 1024,
   draftVersionsKept: 20,
 }
 

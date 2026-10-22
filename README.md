@@ -135,7 +135,7 @@ and the token's scope is computed inside it.
   break (inclusive); registered folders, personal folders and `--break` folders are breaks. Personal folders: owner
   only. Flags (`no_ai`, `quarantine`, `widened_pending`) come down from every ancestor and cannot be cleared below.
 - **R1 read**: inside a registered folder ∧ no flag on the path ∧ rule ≥ read ∧ under a token-scope folder ∧ no link
-  anywhere (every step is lstat'ed, files opened with `O_NOFOLLOW`, link count must be 1) ∧ not a NAS/OS system entry
+  anywhere (every step is lstat'ed, files opened with `O_NOFOLLOW`, link count must be 1, XSym link files closed) ∧ not a NAS/OS system entry
   (`#recycle`, `#snapshot`, `@Recycle`, `@Recently-Snapshot`, `.snapshot`, `~snapshot`, `@eaDir`, `.@__thumb`,
   `.Trashes`, `$RECYCLE.BIN`, `.TemporaryItems`, `.DS_Store`, `._*`, `~$*`) ∧ re-checked (identity of the file and of
   every folder up to the mount) after reading, right before content is returned. Names are compared on NFC and opened
@@ -246,6 +246,7 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
 - Reconciler (below) is after the fact between passes: a move is closed from the moment an agent walks into it until
   the next pass judges it, but a brand-new file appears to agents before its first hash/extraction (R6 copy detection
   runs on the next pass). No notifications (R11; events carry the recipients), no `manage` enforcement beyond storing
+  alias detection (XSym link files are closed), no "widened draft" detection, no notifications (R11), no `manage` enforcement beyond storing
   grants, no web UI, no trash/purge of drafts (deleted drafts keep their rows and blobs).
   alias/XSym detection, no "widened draft" detection, no webhook/Slack notifications (web notices + mail only), no
   web file browser (v0.2), no trash/purge of drafts (deleted drafts keep their rows and blobs).
@@ -292,4 +293,11 @@ bytes are refused at read time. `serve` reconciles on start, every 5 min (`--rec
 bun test                 # SHELF_TEST_HWP=/path/to/real.hwp also checks a Hangul-made file
 SHELF_SHELL=inprocess bun test   # the same with just-bash in-process (the hidden-path suites run both modes anyway)
 bunx tsc --noEmit
+bun run test:fuzz        # path/argument fuzzer, 60 s; --seconds N --seed S (or FUZZ_SECONDS / FUZZ_SEED) for long runs
 ```
+
+`test/security/` (plan 7.1, 7.4; review-permissions 7): `matrix` (entrances × roles × cases from 4.1), `existence`
+(hidden = nonexistent, byte for byte, plus timing p50/p95; `SHELF_TIMING_RUNS`), `fuzz` (canaries in every forbidden
+file, hidden names, originals unchanged, no crash, deadline, no server paths), `resource` (shell attacks bounded; another
+token's `ls` p99 < 200 ms — the in-process cases are `test.failing` until the worker sandbox), `mcp-protocol`, `links`,
+`tools`. Parts owned by features not built yet are `test.todo` with the owner in the name.

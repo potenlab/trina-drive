@@ -9,7 +9,7 @@
 // with a fixed message (never the error's own text, which may hold real paths). Both are reported server-side.
 import { AsyncLocalStorage } from 'node:async_hooks'
 import path from 'node:path'
-import { Bash, InMemoryFs, type BufferEncoding, type ByteString, type CpOptions, type FileContent, type FsStat, type IFileSystem, type MkdirOptions, type RmOptions } from 'just-bash'
+import { Bash, getCommandNames, InMemoryFs, type BufferEncoding, type CommandName, type ByteString, type CpOptions, type FileContent, type FsStat, type IFileSystem, type MkdirOptions, type RmOptions } from 'just-bash'
 
 type DirentEntry = { name: string; isFile: boolean; isDirectory: boolean; isSymbolicLink: boolean }
 type ReadFileOptions = { encoding?: BufferEncoding | null }
@@ -54,22 +54,27 @@ export function asFsError(e: unknown, syscall: string, p: string): FsError {
 }
 
 /** just-bash's in-memory stubs throw plain Errors with an errno-style message ("ENOENT: …"); give them a code. */
-async function sysCall<T>(p: string, fn: () => Promise<T>): Promise<T> {
-  try { return await fn() } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    const code = /^(E[A-Z]{2,}):/.exec(msg)?.[1]
-    throw code ? new FsError(code, msg, p) : e
-  }
-}
-
 const SYSTEM_DIRS = new Set(['bin', 'usr', 'dev', 'proc'])
 export const RESERVED = new Set([...SYSTEM_DIRS, 'drafts', '.raw', 'tmp', 'home'])
+
+/** Commands the plan keeps out of the shell (5.1: no real processes, network, ln, python, sqlite3, curl). */
+const EXCLUDED_COMMANDS = new Set(['sqlite3'])
+/** Built-in just-bash commands the agent shell offers (network, python and js are off unless configured). */
+export const SHELL_COMMANDS = getCommandNames().filter((n) => !EXCLUDED_COMMANDS.has(n)) as CommandName[]
 
 let sysFs: InMemoryFs | null = null
 /** In-memory /bin, /usr/bin, /dev, /proc as just-bash lays them out (it looks commands up there). */
 function sys(): InMemoryFs {
-  if (!sysFs) { sysFs = new InMemoryFs(); new Bash({ fs: sysFs }) }
+  if (!sysFs) { sysFs = new InMemoryFs(); new Bash({ fs: sysFs, commands: SHELL_COMMANDS }) }
   return sysFs
+}
+
+/** just-bash's in-memory fs throws plain Errors; everything leaving VirtualFs is an FsError (bash-like message, no crash). */
+async function sysCall<T>(fn: () => Promise<T>, syscall: string, p: string): Promise<T> {
+  try { return await fn() } catch (e) {
+    const code = /^(E[A-Z]+)/.exec(String((e as Error)?.message))?.[1]
+    throw code === 'EISDIR' ? eisdir(syscall, p) : code === 'ENOTDIR' ? enotdir(syscall, p) : enoent(syscall, p)
+  }
 }
 
 export type Hit =
@@ -156,7 +161,10 @@ export class VirtualFs implements IFileSystem {
   /** Bytes of a file hit as the current command should see them; records provenance. */
   async bytesOf(h: Hit, p: string): Promise<Uint8Array> {
     const m = currentMode()
-    if (h.t === 'sys') return sysCall(p, () => sys().readFileBuffer(h.p))
+    if (h.t === 'sys') {
+      // just-bash's in-memory /bin /proc /dev throw plain Errors; callers (the read tool) expect FsError
+      return sysCall(() => sys().readFileBuffer(h.p), 'open', p)
+    }
     if (h.t === 'draft') { this.s.touchDraft(h.item, !m.weak); return this.s.draftContent(h.item) }
     if (h.t !== 'file') throw eisdir('read', p)
     const f = h.f
@@ -198,7 +206,7 @@ export class VirtualFs implements IFileSystem {
     const h = this.hit(p, 'stat')
     this.touchMeta(h)
     switch (h.t) {
-      case 'sys': return sysCall(p, () => sys().stat(h.p))
+      case 'sys': return sysCall(() => sys().stat(h.p), 'stat', p)
       case 'file': return fileStat(h.f.size, h.f.mtimeMs)
       case 'draft': return fileStat(this.s.draftContent(h.item).length, h.item.draft?.updated_at ?? Date.now())
       default: return dirStat()
@@ -208,10 +216,23 @@ export class VirtualFs implements IFileSystem {
   async readdir(p: string): Promise<string[]> { return (await this.readdirWithFileTypes(p)).map((d) => d.name) }
   async readdirWithFileTypes(p: string): Promise<DirentEntry[]> {
     const h = this.hit(p, 'scandir')
-    if (h.t === 'sys') return sysCall(p, () => sys().readdirWithFileTypes(h.p))
+    if (h.t === 'sys') return sysCall(() => sys().readdirWithFileTypes(h.p), 'scandir', p)
     if (h.t === 'file' || h.t === 'draft') throw enotdir('scandir', p)
     if (h.t === 'dir') this.s.touchNode(h.node, false)
+    if (h.t === 'ddir') this.touchListedDrafts(h.rel)
     return this.children(h).map((c) => ({ name: c.name, isFile: !c.dir, isDirectory: c.dir, isSymbolicLink: false }))
+  }
+  /**
+   * R3: a listing shows draft names (and folder names taken from draft paths): every draft whose name it reveals is a
+   * weak touch. At /drafts itself, `@<token>` entries show only a token name, not the drafts inside.
+   */
+  private touchListedDrafts(rel: string) {
+    const prefix = rel ? rel + '/' : ''
+    for (const [k, item] of this.s.draftItems()) {
+      if (!k.startsWith(prefix)) continue
+      if (rel === '' && k.startsWith('@')) continue
+      this.s.touchDraft(item, false)
+    }
   }
   async readlink(p: string): Promise<string> {
     this.hit(p, 'readlink')

@@ -37,14 +37,35 @@ export function onPolicyError(fn: ((real: string, e: unknown) => void) | null) {
 
 type Readdir = (real: string) => string[]
 
+/** Some step of an absolute server path is a NAS/OS system folder (R1 ⑥). */
+const onSystemPath = (real: string) => real.split(path.sep).some((n) => n !== '' && isSystemName(n))
+
 const FLAGGED = (r: FolderRow) => r.no_ai || r.quarantine || r.widened_pending
+
+/** A Minshall-French symlink ("XSym") as macOS smbfs stores links on SMB shares: 1067 bytes, "XSym\n" + 4-digit length. */
+const XSYM_SIZE = 1067
+const isXSymHeader = (b: Uint8Array) => b.length >= 10 && Buffer.from(b.subarray(0, 10)).toString('latin1').match(/^XSym\n\d{4}\n$/) !== null
+
+/** R1 ⑤: a regular file that is really a link written by a Mac (XSym). Read without following, from the exact entry. */
+function isXSymFile(real: string, size: bigint): boolean {
+  if (size !== BigInt(XSYM_SIZE)) return false
+  let fd: number
+  try { fd = fs.openSync(real, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK) } catch { return true }
+  try {
+    const b = Buffer.alloc(10)
+    return isXSymHeader(b.subarray(0, fs.readSync(fd, b, 0, 10, 0)))
+  } catch { return true } finally { fs.closeSync(fd) }
+}
 
 /** R0: max over the person and their groups of the rules from F up to the nearest break (inclusive). */
 export function effectiveLevel(rows: FolderRow[], personId: number, groups: Set<number>, rules: Map<number, RuleRow[]>): number {
+  // Inside a personal folder only its owner counts, whatever lies below it (R0: no registration, rule or break may sit
+  // inside one — but rows made before the folder became personal, or by another path, must not reopen it).
+  const personal = rows.filter((r) => r.personal_owner != null)
+  if (personal.length) return personal.every((r) => r.personal_owner === personId) ? 2 : 0
   let best = 0
   for (let i = rows.length - 1; i >= 0; i--) {
     const r = rows[i]!
-    if (r.personal_owner != null) return r.personal_owner === personId ? 2 : 0
     for (const rule of rules.get(r.id) ?? []) {
       if ((rule.subject_type === 'person' && rule.subject_id === personId) || (rule.subject_type === 'group' && groups.has(rule.subject_id))) best = Math.max(best, rule.level)
     }
@@ -124,7 +145,8 @@ export class Access {
   /** Top-level registered folders by NFC name; two with the same name are both closed. */
   mounts(): Map<string, FolderRow> {
     if (this.mountMap) return this.mountMap
-    const reg = [...this.byId.values()].filter((f) => f.registered)
+    // R1 ⑥: a folder registered at or below a NAS system folder (a snapshot or recycle-bin copy) is never opened
+    const reg = [...this.byId.values()].filter((f) => f.registered && !onSystemPath(f.path))
     const top = reg.filter((f) => !reg.some((o) => o !== f && f.path.startsWith(o.path + '/')))
     const count = new Map<string, number>()
     for (const f of top) count.set(nfc(f.mount_name!), (count.get(nfc(f.mount_name!)) ?? 0) + 1)
@@ -133,6 +155,7 @@ export class Access {
   }
 
   mountNode(row: FolderRow): Node | null {
+    if (onSystemPath(row.path)) return null
     let st: fs.BigIntStats
     try { st = fs.lstatSync(row.path, { bigint: true }) } catch { return null }
     if (!st.isDirectory() || st.isSymbolicLink() || identityKey(st.dev, st.ino) !== identityKey(row.dev, row.ino)) return null
@@ -178,7 +201,7 @@ export class Access {
       const row = this.byIdentity.get(identityKey(st.dev, st.ino))
       return { kind: 'dir', node: { real, vpath, dev: st.dev, ino: st.ino, rows: row ? [...parent.rows, row] : parent.rows, parent } }
     }
-    if (!st.isFile() || st.nlink !== 1n) return null
+    if (!st.isFile() || st.nlink !== 1n || isXSymFile(real, st.size)) return null
     return { kind: 'file', parent, name, real, vpath, dev: st.dev, ino: st.ino, size: Number(st.size), mtimeMs: Number(st.mtimeMs), mtimeNs: st.mtimeNs }
   }
 
@@ -238,6 +261,7 @@ export class Access {
       let off = 0
       while (off < buf.length) { const n = fs.readSync(fd, buf, off, buf.length - off, off); if (n <= 0) break; off += n }
       if (sniffLink(buf.subarray(0, SNIFF_BYTES), off)) throw new Closed() // XSym / alias: a link in a file's clothes
+      if (off === XSYM_SIZE && isXSymHeader(buf)) throw new Closed()
       this.recheck(f)
       return buf.subarray(0, off)
     } finally { fs.closeSync(fd) }

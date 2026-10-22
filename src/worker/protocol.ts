@@ -26,7 +26,7 @@ export interface ShellJob {
   /** Commands the parent runs itself (e.g. grep/rg on real ripgrep over the text mirror). */
   parentCommands?: string[]
   /** Passed to just-bash (JSON-safe subset). */
-  bash?: { executionLimitProfile?: string; executionLimits?: Record<string, number> }
+  bash?: { executionLimitProfile?: string; executionLimits?: Record<string, number>; /** built-in commands offered (default: all) */ commands?: string[] }
   /** Worker truncates stdout/stderr to these sizes before replying. */
   maxStdoutBytes?: number
   maxStderrBytes?: number

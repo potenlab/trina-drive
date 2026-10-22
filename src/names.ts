@@ -5,7 +5,9 @@ export const nfc = (s: string) => s.normalize('NFC')
 
 /** NAS and OS system entries that are never shown (R1 ⑥), compared case-insensitively. */
 const SYSTEM = new Set(['#recycle', '#snapshot', '@recycle', '@recently-snapshot', '.snapshot', '~snapshot', '@eadir',
-  '.@__thumb', '.trashes', '$recycle.bin', '.temporaryitems', '.ds_store', '.spotlight-v100', '.fseventsd', '.apdisk'])
+  '.@__thumb', '.trashes', '$recycle.bin', '.temporaryitems', '.ds_store', '.spotlight-v100', '.fseventsd', '.apdisk',
+  // ZFS snapshot directory (TrueNAS with snapdir=visible lists it at every dataset root: read-only copies of everything)
+  '.zfs'])
 
 export function isSystemName(name: string): boolean {
   const n = nfc(name)

@@ -96,10 +96,16 @@ async function runShell(job: ShellJob) {
       return { stdout: '', stderr: `${name}: ${(e as WireError).message ?? 'failed'}\n`, exitCode: 2 }
     }
   }))
+  // commands the server does not offer are absent from /bin too (same as the in-process shell)
+  if (job.bash?.commands) {
+    const offered = new Set(job.bash.commands)
+    for (const n of jb.getCommandNames()) if (!offered.has(n)) for (const d of ['/bin', '/usr/bin']) await sysFs.rm(`${d}/${n}`, { force: true }).catch(() => {})
+  }
   const bash = new jb.Bash({
     fs, cwd: job.cwd ?? '/',
     env: job.env ?? { HOME: '/', PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     customCommands: [...remote, ...wrapped],
+    ...(job.bash?.commands ? { commands: job.bash.commands as never } : {}),
     executionLimitProfile: (job.bash?.executionLimitProfile ?? 'hardened') as never,
     executionLimits: job.bash?.executionLimits as never,
   })

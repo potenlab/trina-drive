@@ -188,7 +188,9 @@ async function collect(vfs: VirtualFs, o: Opts, flavor: Flavor, cwd: string): Pr
 }
 
 function relTo(absDir: string, vpath: string, shown: string) {
-  const rest = vpath.slice(absDir === '/' ? 1 : absDir.length + 1)
+  // vpaths are NFC; the typed directory may not be (an NFD name is longer in code units)
+  const dir = absDir.normalize('NFC')
+  const rest = vpath.slice(dir === '/' ? 1 : dir.length + 1)
   if (shown === '.' ) return rest
   return shown.replace(/\/+$/, '') + '/' + rest
 }

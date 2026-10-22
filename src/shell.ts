@@ -4,7 +4,7 @@ import { Bash, defineCommand, type Command } from 'just-bash'
 import { LIMITS, NAME } from './config'
 import { grepCommands } from './grep'
 import type { Session } from './session'
-import { commandMode, FsError, VirtualFs, type Mode } from './vfs'
+import { commandMode, FsError, SHELL_COMMANDS, VirtualFs, type Mode } from './vfs'
 import { runShellIsolated } from './worker'
 
 export interface ShellResult { stdout: string; stderr: string; exitCode: number }
@@ -46,7 +46,7 @@ export async function runShell(s: Session, command: string): Promise<ShellResult
   const vfs = new VirtualFs(s)
   const greps = new Map(grepCommands(vfs).map((c) => [c.name, c]))
   const bash = new Bash({
-    fs: vfs, cwd: '/',
+    fs: vfs, cwd: '/', commands: SHELL_COMMANDS,
     env: { HOME: '/drafts', PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', USER: 'agent' },
     customCommands: [...greps.values(), ...modeWrappers()],
     executionLimitProfile: 'hardened',
@@ -60,7 +60,7 @@ export async function runShell(s: Session, command: string): Promise<ShellResult
         job: {
           cwd: '/', env: { HOME: '/drafts', PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', USER: 'agent' },
           wrap: Object.keys(MODES), parentCommands: [...greps.keys()],
-          bash: { executionLimitProfile: 'hardened', executionLimits: { maxOutputSize: LIMITS.stdoutBytes * 4 } },
+          bash: { executionLimitProfile: 'hardened', executionLimits: { maxOutputSize: LIMITS.stdoutBytes * 4 }, commands: SHELL_COMMANDS },
           maxStdoutBytes: LIMITS.stdoutBytes * 4, maxStderrBytes: LIMITS.stderrBytes * 4,
         },
         hooks: {
