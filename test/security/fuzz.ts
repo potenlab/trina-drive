@@ -9,7 +9,8 @@
 //   2. no output names a hidden folder/file that the command itself did not type (principle 2)
 //   3. nothing is ever written outside the draft box: the original tree is byte-identical at the end
 //   4. the server never throws (an uncaught error would be an MCP internal error), and
-//   5. every call returns within the command deadline (+ slack)
+//   5. every call returns within the command deadline (+ slack), and
+//   6. no output shows a server-side path (data directory, registered folder paths, mirror, blobs)
 // At the end: every stored draft is checked against its writer's forbidden canaries, and the audit chain verifies.
 import { verifyAudit } from '../../src/audit'
 import { LIMITS } from '../../src/config'
@@ -174,6 +175,8 @@ function makeOracle(e: SecEnv) {
   /** `drafts`: names and text of the person's drafts (earlier commands may have stored typed names there). */
   return (role: Role, input: string, output: string, drafts: string): { kind: string; detail: string } | null => {
     for (const c of forbidden.get(role)!) if (output.includes(c)) return { kind: 'canary', detail: c }
+    // the server's own paths (data dir, NAS mount, mirror, blobs) never reach an agent
+    if (output.includes(e.dir) || output.includes(e.root)) return { kind: 'server-path', detail: output.includes(e.root) ? e.root : e.dir }
     const plain = input.replace(/\\x([0-9a-fA-F]{2})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16))).replace(/\\(.)/g, '$1')
     const typed = [input, plain, ...expandBraces(plain), drafts].map((t) => t + '\n' + t.normalize('NFC') + '\n' + t.normalize('NFD')).join('\n')
     for (const [n, re] of nameRe.get(role)!) {

@@ -160,4 +160,11 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
 ```sh
 bun test                 # SHELF_TEST_HWP=/path/to/real.hwp also checks a Hangul-made file
 bunx tsc --noEmit
+bun run test:fuzz        # path/argument fuzzer, 60 s; --seconds N --seed S (or FUZZ_SECONDS / FUZZ_SEED) for long runs
 ```
+
+`test/security/` (plan 7.1, 7.4; review-permissions 7): `matrix` (entrances × roles × cases from 4.1), `existence`
+(hidden = nonexistent, byte for byte, plus timing p50/p95; `SHELF_TIMING_RUNS`), `fuzz` (canaries in every forbidden
+file, hidden names, originals unchanged, no crash, deadline, no server paths), `resource` (shell attacks bounded; another
+token's `ls` p99 < 200 ms — the in-process cases are `test.failing` until the worker sandbox), `mcp-protocol`, `links`,
+`tools`. Parts owned by features not built yet are `test.todo` with the owner in the name.
