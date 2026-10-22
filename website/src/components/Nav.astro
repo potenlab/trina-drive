@@ -1,0 +1,40 @@
+---
+import type { Copy } from '../content/en'
+import { LINKS } from '../site'
+import Icon from './Icon.astro'
+import Logo from './Logo.astro'
+
+interface Props { t: Copy; home: string; langHref?: string }
+const { t, home, langHref = t.nav.langSwitch.href } = Astro.props
+const n = t.nav
+const a = (id: string) => `${home}#${id}`
+---
+<header class="nav">
+  <div class="container nav-inner">
+    <a class="logo" href={home} aria-label="Trina Drive home"><Logo /><span>Trina Drive</span></a>
+    <nav class="nav-links" aria-label="Main">
+      <a href={LINKS.docs} rel="noopener">{n.docs}</a>
+      <a href={a('pricing')}>{n.pricing}</a>
+      <a href={a('security')}>{n.security}</a>
+      <a href={a('faq')}>{n.faq}</a>
+    </nav>
+    <div class="nav-right">
+      <a class="icon-btn lang-link" href={langHref} hreflang={t.lang === 'en' ? 'ko' : 'en'} lang={t.lang === 'en' ? 'ko' : 'en'} aria-label={n.langSwitch.aria}>{n.langSwitch.label}</a>
+      <button class="icon-btn" type="button" data-theme-toggle aria-label={n.theme} title={n.theme}>
+        <Icon name="moon" class="theme-icon-light" /><Icon name="sun" class="theme-icon-dark" />
+      </button>
+      <a class="btn btn-secondary btn-sm nav-book" href={LINKS.bookCall(t.lang)}>{n.book}</a>
+      <a class="btn btn-primary btn-sm nav-start" href={a('start')}>{n.start}</a>
+      <button class="icon-btn menu-btn" type="button" data-menu-toggle aria-expanded="false" aria-controls="mobile-menu" aria-label={n.menu}>
+        <Icon name="menu" />
+      </button>
+    </div>
+  </div>
+  <div class="mobile-menu" id="mobile-menu" data-open="false">
+    <a href={LINKS.docs} rel="noopener">{n.docs}</a>
+    <a href={a('pricing')}>{n.pricing}</a>
+    <a href={a('security')}>{n.security}</a>
+    <a href={a('faq')}>{n.faq}</a>
+    <a class="btn btn-secondary" href={LINKS.bookCall(t.lang)}>{n.book}</a>
+  </div>
+</header>

@@ -1,0 +1,15 @@
+# Same headers as vercel.json, for hosts that read _headers (Cloudflare Workers Assets / Pages, Netlify).
+# Vercel ignores this file (it is served as a plain file there and holds nothing secret).
+# Paddle (overlay checkout): script from cdn.paddle.com, checkout iframe from (sandbox-)buy.paddle.com, its styles are
+# injected inline (style elements + style attributes), Apple Pay / PayPal open popups, the iframe needs `payment`.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.paddle.com; style-src 'self' 'unsafe-inline' https://cdn.paddle.com https://sandbox-cdn.paddle.com; img-src 'self' data: https://cdn.paddle.com https://sandbox-cdn.paddle.com; font-src 'self'; connect-src 'self' https://api.paddle.com https://sandbox-api.paddle.com; frame-src https://buy.paddle.com https://sandbox-buy.paddle.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(self "https://buy.paddle.com" "https://sandbox-buy.paddle.com"), usb=(), interest-cohort=()
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable

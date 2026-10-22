@@ -1,0 +1,19 @@
+---
+import Base from '../layouts/Base.astro'
+import Footer from '../components/Footer.astro'
+import Nav from '../components/Nav.astro'
+import en from '../content/en'
+const t = en
+---
+<Base t={t} title={`${t.notFound.title} — Trina Drive`} noindex>
+  <Nav t={t} home="/" />
+  <main id="main" class="container legal">
+    <h1>{t.notFound.title}</h1>
+    <p class="notice">{t.notFound.body}</p>
+    <a class="back" href="/">← {t.notFound.back}</a>
+  </main>
+  <Footer t={t} home="/" />
+  <script>
+    import '../scripts/main'
+  </script>
+</Base>

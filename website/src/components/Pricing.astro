@@ -1,0 +1,104 @@
+---
+// Plans from research/trina-drive/PRICING.md. Both currencies and both billing periods are in the HTML; the toggles
+// flip data-currency / data-billing on the section. Buttons with data-plan call startCheckout() (src/checkout.ts)
+// from main.ts: USD → Paddle overlay checkout when it is configured at build time, KRW → bank transfer by email.
+import type { Copy } from '../content/en'
+import { canSellOnline } from '../paddle'
+import { PADDLE } from '../paddle-env'
+import { LINKS } from '../site'
+import Icon from './Icon.astro'
+interface Props { t: Copy }
+const { t } = Astro.props
+const p = t.pricing
+const defaultCurrency = t.lang === 'ko' ? 'KRW' : 'USD'
+const CUR = ['USD', 'KRW'] as const
+const BILL = ['monthly', 'yearly'] as const
+const curClass = (c: 'USD' | 'KRW') => (c === 'USD' ? 'price-usd' : 'price-krw')
+const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bill-y')
+---
+<section class="section" id="pricing" aria-labelledby="pricing-title" data-pricing data-currency={defaultCurrency} data-billing="monthly">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">{p.eyebrow}</span>
+      <h2 id="pricing-title">{p.title}</h2>
+      <p>{p.sub}</p>
+    </div>
+    <div class="pricing-top">
+      <div class="pricing-toggles">
+        <div class="seg" role="group" aria-label={p.currencyLabel}>
+          <button type="button" data-currency-btn="KRW" aria-pressed={defaultCurrency === 'KRW' ? 'true' : 'false'}>KRW ₩</button>
+          <button type="button" data-currency-btn="USD" aria-pressed={defaultCurrency === 'USD' ? 'true' : 'false'}>USD $</button>
+        </div>
+        <div class="seg" role="group" aria-label={p.billingLabel}>
+          <button type="button" data-billing-btn="monthly" aria-pressed="true">{p.monthly}</button>
+          <button type="button" data-billing-btn="yearly" aria-pressed="false">{p.yearly}</button>
+        </div>
+      </div>
+      <div class="pricing-notes">
+        <span>{p.trialNote}</span>
+        <span class="price-krw">{p.vatNote} {p.krwNote}</span>
+      </div>
+    </div>
+    <div class="plans">
+      {p.plans.map((plan) => {
+        const online = canSellOnline(PADDLE, plan.id)
+        return (
+        <article class={`plan${plan.featured ? ' plan-featured' : ''}`} aria-labelledby={`plan-${plan.id}`}>
+          {plan.featured && <span class="plan-badge">{p.popular}</span>}
+          <h3 class="plan-name" id={`plan-${plan.id}`}>{plan.name}</h3>
+          <p class="plan-kind">{plan.kind}</p>
+          {CUR.map((cur) => (
+            <div class={curClass(cur)}>
+              {plan.yearly
+                ? <>
+                    <div class="bill-m">
+                      <p class="plan-price"><span class="plan-amount">{plan.price[cur]}</span>{plan.unit[cur] && <span class="plan-unit">{plan.unit[cur]}</span>}</p>
+                      <p class="plan-annual">{plan.annual[cur]}</p>
+                    </div>
+                    <div class="bill-y">
+                      <p class="plan-price"><span class="plan-amount">{plan.yearly.price[cur]}</span><span class="plan-unit">{plan.yearly.unit[cur]}</span></p>
+                      <p class="plan-annual">{plan.yearly.note[cur]}</p>
+                    </div>
+                  </>
+                : <>
+                    <p class="plan-price"><span class="plan-amount">{plan.price[cur]}</span>{plan.unit[cur] && <span class="plan-unit">{plan.unit[cur]}</span>}</p>
+                    <p class="plan-annual">{plan.annual[cur]}</p>
+                  </>}
+            </div>
+          ))}
+          <ul>
+            {plan.features.map((f) => (
+              <li>
+                <Icon name="check" />
+                {f.includes('{extra}') && plan.extra
+                  ? <span>{CUR.map((cur) => (
+                      <span class={curClass(cur)}>{BILL.map((b) => (
+                        <span class={billClass(b)}>{f.replace('{extra}', plan.extra![b][cur])}</span>
+                      ))}</span>
+                    ))}</span>
+                  : f}
+              </li>
+            ))}
+          </ul>
+          {plan.seats && (
+            <label class="plan-seats">
+              <span>{p.seatsLabel}</span>
+              <input type="number" inputmode="numeric" min="1" max="10000" step="1" value={plan.seats} data-seats={plan.id} />
+            </label>
+          )}
+          {plan.ctaKind === 'link'
+            ? <a class="btn btn-secondary btn-block" href={LINKS.github} rel="noopener">{plan.cta}</a>
+            : <button type="button" class={`btn btn-block ${plan.featured ? 'btn-primary' : 'btn-secondary'}`} data-plan={plan.id}>
+                {plan.ctaKrw
+                  ? <>
+                      <span class="price-usd">{online && plan.ctaPay ? plan.ctaPay : plan.cta}</span>
+                      <span class="price-krw">{plan.ctaKrw}</span>
+                    </>
+                  : plan.cta}
+              </button>}
+        </article>
+        )
+      })}
+    </div>
+  </div>
+</section>

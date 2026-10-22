@@ -1,0 +1,63 @@
+---
+import '../styles/global.css'
+import type { Copy } from '../content/en'
+import { SITE_URL } from '../site'
+
+interface Props {
+  t: Copy
+  title?: string
+  description?: string
+  /** Path of this page in English and Korean, for hreflang (e.g. '/' and '/ko'). */
+  alternates?: { en: string; ko: string }
+  noindex?: boolean
+  jsonLd?: object
+}
+const { t, title = t.meta.title, description = t.meta.description, alternates, noindex = false, jsonLd } = Astro.props
+const path = Astro.url.pathname.replace(/\.html$/, '').replace(/\/index$/, '/')
+const canonical = new URL(path, SITE_URL).href
+const ogImage = new URL(t.meta.ogImage, SITE_URL).href
+---
+<!doctype html>
+<html lang={t.lang}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
+    {alternates && (
+      <>
+        <link rel="alternate" hreflang="en" href={new URL(alternates.en, SITE_URL).href} />
+        <link rel="alternate" hreflang="ko" href={new URL(alternates.ko, SITE_URL).href} />
+        <link rel="alternate" hreflang="x-default" href={new URL(alternates.en, SITE_URL).href} />
+      </>
+    )}
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0a0b0d" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Trina Drive" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={t.meta.ogAlt} />
+    <meta property="og:locale" content={t.lang === 'ko' ? 'ko_KR' : 'en_US'} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    <!-- Applies a saved light/dark choice before first paint. External file: the CSP allows no inline script. -->
+    <script is:inline src="/theme.js"></script>
+    {jsonLd && <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
+  </head>
+  <body>
+    <a class="skip" href="#main">{t.skip}</a>
+    <slot />
+  </body>
+</html>

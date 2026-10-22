@@ -1,0 +1,231 @@
+---
+import type { Copy } from '../content/en'
+import Base from '../layouts/Base.astro'
+import { LINKS, SITE_URL, CONTACT_EMAIL } from '../site'
+import Footer from './Footer.astro'
+import Icon from './Icon.astro'
+import Nav from './Nav.astro'
+import Pricing from './Pricing.astro'
+import Terminal from './Terminal.astro'
+
+interface Props { t: Copy }
+const { t } = Astro.props
+const home = t.lang === 'ko' ? '/ko' : '/'
+const h = t.hero
+const d = t.how.diagram
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'Organization',
+      '@id': `${SITE_URL}/#org`,
+      name: 'Trina Inc.',
+      alternateName: '주식회사 트리나',
+      url: SITE_URL,
+      email: CONTACT_EMAIL,
+      logo: `${SITE_URL}/apple-touch-icon.png`,
+    },
+    {
+      '@type': 'SoftwareApplication',
+      name: 'Trina Drive',
+      url: new URL(home, SITE_URL).href,
+      applicationCategory: 'BusinessApplication',
+      operatingSystem: 'macOS, Linux',
+      description: t.meta.description,
+      publisher: { '@id': `${SITE_URL}/#org` },
+      offers: [
+        { '@type': 'Offer', name: 'Community (self-hosted)', price: '0', priceCurrency: 'USD' },
+        { '@type': 'Offer', name: 'Team (managed)', price: '99', priceCurrency: 'USD' },
+        { '@type': 'Offer', name: 'Business (managed)', price: '349', priceCurrency: 'USD' },
+      ],
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.items.map((i) => ({ '@type': 'Question', name: i.q, acceptedAnswer: { '@type': 'Answer', text: i.a } })),
+    },
+  ],
+}
+---
+<Base t={t} alternates={{ en: '/', ko: '/ko' }} jsonLd={jsonLd}>
+  <Nav t={t} home={home} />
+  <main id="main">
+    <!-- hero -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="container hero-grid">
+        <div>
+          <a class="pill" href="#faq"><span class="pill-dot" aria-hidden="true"></span>{h.pill}</a>
+          <h1 id="hero-title">{h.title}</h1>
+          <p class="hero-sub">{h.sub}</p>
+          <div class="hero-ctas">
+            <a class="btn btn-primary" href="#start">{h.primary}</a>
+            <a class="btn btn-secondary" href={LINKS.bookCall(t.lang)}>{h.secondary}</a>
+          </div>
+          <div class="install">
+            <code><span class="prompt" aria-hidden="true">$ </span>{h.install}</code>
+            <button class="copy-btn" type="button" data-copy={h.install} data-copied={h.copied}>{h.copy}</button>
+          </div>
+        </div>
+        <Terminal t={t} />
+      </div>
+    </section>
+
+    <!-- supported clients -->
+    <section class="clients" aria-label={t.clients.title}>
+      <div class="container clients-inner">
+        <p class="clients-title">{t.clients.title}</p>
+        <ul class="chips">
+          {t.clients.items.map((c) => (
+            <li class="chip" data-status={c.status}>{c.name}<small>{c.status === 'today' ? t.clients.today : t.clients.soon}</small></li>
+          ))}
+        </ul>
+      </div>
+    </section>
+
+    <!-- problem -> solution -->
+    <section class="section" id="problem" aria-labelledby="problem-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">{t.problem.eyebrow}</span>
+          <h2 id="problem-title">{t.problem.title}</h2>
+        </div>
+        <ul class="problem-grid">
+          {t.problem.items.map((p, i) => (
+            <li><h3><span aria-hidden="true">0{i + 1}</span>{p.title}</h3><p>{p.body}</p></li>
+          ))}
+        </ul>
+        <p class="solution"><Icon name="shield" />{t.problem.solution}</p>
+      </div>
+    </section>
+
+    <!-- features -->
+    <section class="section section-soft" id="features" aria-labelledby="features-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">{t.features.eyebrow}</span>
+          <h2 id="features-title">{t.features.title}</h2>
+        </div>
+        <ul class="feature-grid">
+          {t.features.items.map((f) => (
+            <li class="feature">
+              <span class="feature-icon"><Icon name={f.icon} /></span>
+              <h3>{f.title}</h3>
+              <p>{f.body}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+
+    <!-- how it works -->
+    <section class="section" id="how" aria-labelledby="how-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">{t.how.eyebrow}</span>
+          <h2 id="how-title">{t.how.title}</h2>
+        </div>
+        <ol class="steps">
+          {t.how.steps.map((s, i) => (
+            <li class="step">
+              <span class="step-num">0{i + 1}</span>
+              <h3>{s.title}</h3>
+              <p>{s.body}</p>
+              {s.code && <pre><span class="tl-prompt" aria-hidden="true">$ </span>{s.code}</pre>}
+            </li>
+          ))}
+        </ol>
+        <div class="arch" role="group" aria-label={`${d.people} → ${d.server} → ${d.folders}`}>
+          <div class="arch-box">
+            <h3>{d.people}</h3>
+            <ul>{d.peopleItems.map((x) => <li>{x}</li>)}</ul>
+            <p class="arch-note">{d.peopleNote}</p>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">
+            <svg viewBox="0 0 56 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M0 7h52M46 2l6 5-6 5" /></svg>
+            <span>{d.arrow1}</span>
+          </div>
+          <div class="arch-box arch-box-main">
+            <h3>{d.server}</h3>
+            <ul>{d.serverItems.map((x) => <li>{x}</li>)}</ul>
+            <p class="arch-note">{d.serverNote}</p>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">
+            <svg viewBox="0 0 56 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M0 7h52M46 2l6 5-6 5" /></svg>
+            <span>{d.arrow2}</span>
+          </div>
+          <div class="arch-box">
+            <h3>{d.folders}</h3>
+            <ul>{d.folderItems.map((x) => <li>{x}</li>)}</ul>
+            <p class="arch-note">{d.folderNote}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- security -->
+    <section class="section section-soft" id="security" aria-labelledby="security-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">{t.security.eyebrow}</span>
+          <h2 id="security-title">{t.security.title}</h2>
+        </div>
+        <div class="sec-grid">
+          <figure class="promise">
+            <figcaption class="promise-label">{t.security.promiseLabel}</figcaption>
+            <blockquote>{t.security.promise.map((s) => <p>{s}</p>)}</blockquote>
+          </figure>
+          <div class="sec-lists">
+            <div class="sec-list ok">
+              <h3>{t.security.protectTitle}</h3>
+              <ul>{t.security.protect.map((s) => <li><Icon name="check" />{s}</li>)}</ul>
+            </div>
+            <div class="sec-list no">
+              <h3>{t.security.limitsTitle}</h3>
+              <ul>{t.security.limits.map((s) => <li><Icon name="minus" />{s}</li>)}</ul>
+            </div>
+          </div>
+        </div>
+        <a class="sec-link" href={LINKS.securityModel} rel="noopener">{t.security.link}<span aria-hidden="true">→</span></a>
+      </div>
+    </section>
+
+    <Pricing t={t} />
+
+    <!-- faq -->
+    <section class="section section-soft" id="faq" aria-labelledby="faq-title">
+      <div class="container">
+        <div class="section-head center">
+          <span class="eyebrow">{t.faq.eyebrow}</span>
+          <h2 id="faq-title">{t.faq.title}</h2>
+        </div>
+        <div class="faq">
+          {t.faq.items.map((i) => (
+            <details>
+              <summary>{i.q}<Icon name="plus" /></summary>
+              <p class="answer">{i.a}</p>
+            </details>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- final cta -->
+    <section class="section" id="start" aria-labelledby="start-title">
+      <div class="container">
+        <div class="cta-box">
+          <h2 id="start-title">{t.cta.title}</h2>
+          <p>{t.cta.sub}</p>
+          <div class="hero-ctas">
+            <a class="btn btn-primary" href={LINKS.github} rel="noopener"><Icon name="github" />{t.cta.primary}</a>
+            <a class="btn btn-secondary" href={LINKS.bookCall(t.lang)}>{t.cta.secondary}</a>
+          </div>
+          <p class="cta-install"><a href={LINKS.installGuide} rel="noopener">{t.cta.install} →</a></p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <Footer t={t} home={home} />
+  <script>
+    import '../scripts/main'
+  </script>
+</Base>
