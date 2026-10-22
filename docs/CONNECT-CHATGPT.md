@@ -45,7 +45,7 @@ connection in ChatGPT.
 ## 3. Public exposure checklist (short form)
 
 Same list as [CONNECT-CLAUDE-AI.md §1.1](CONNECT-CLAUDE-AI.md#11-before-you-start--the-public-exposure-checklist):
-v0.2 security gate passed · every admin has a second factor (`--confirm-admin-2fa` until the web records it) · fixed
+v0.2 security gate passed · every admin has a second factor (checked live by the gate) · fixed
 public host name on Cloudflare · the tunnel points at the public listener (8788), never the LAN port · "No AI" set on
 folders that must not reach OpenAI · `--trusted-proxy` set · people know where to revoke. What ChatGPT reads goes to
 OpenAI (plan 7.2).

@@ -6,6 +6,7 @@ import { fmtDate, t } from '../i18n'
 import { Badge, ErrorLine, Loading, Page, useAction, useLoad, YesNo } from '../ui'
 import { FolderBadges } from './Folders'
 import { NAS_MODES } from './RegisterForm'
+import { at } from './approve-i18n'
 
 export function Folder({ id }: { id: number }) {
   const { data, error, reload } = useLoad(() => get<FolderDetail>(`/folders/${id}`), [id])
@@ -109,6 +110,19 @@ export function Folder({ id }: { id: number }) {
               <strong>{t('start_fresh')}</strong>
             </label>
           )}
+        {f.personal_owner == null && (
+          <>
+            <label className="check">
+              <input type="checkbox" checked={!!f.promote} disabled={!can.admin || a.busy || (!!f.promote && !f.promote_here)}
+                onChange={(e) => act(() => api<{ warnings?: string[] }>('PUT', `/folders/${id}/promote`, { enabled: e.target.checked }).then((r) => {
+                  if (r.warnings?.includes('server_cannot_write')) alert(at('folder_promote_cannot_write'))
+                  return r
+                }))} />
+              <strong>{at('folder_promote')}</strong>
+            </label>
+            <p className="muted small">{at('folder_promote_help')} {f.promote && !f.promote_here && at('folder_promote_inherited')} {!can.admin && at('folder_promote_admin')}</p>
+          </>
+        )}
         {(can.admin || f.quarantine) && (
           <label className="check">
             <input type="checkbox" checked={f.quarantine} disabled={!can.admin || a.busy} onChange={(e) => act(() => api('PATCH', `/folders/${id}`, { quarantine: e.target.checked }))} />

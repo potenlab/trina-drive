@@ -21,8 +21,10 @@ Do not open the public address until every line holds (plan 10 "v0.2 보안 관�
 
 - [ ] You run a release that passed the **v0.2 security gate**: permission matrix including OAuth and the tunnel, CIMD SSRF and
       consent-screen tests, external review (2–3 days), `SECURITY.md` and a private advisory channel.
-- [ ] **Every admin uses a second factor** (passkey/TOTP). Until the web records this itself, you confirm it with
-      `--confirm-admin-2fa`; the gate refuses to start the listener otherwise.
+- [ ] **Every admin has a second factor** (passkey or authenticator app: web *Settings → Second factor*; `shelf mfa status`).
+      The gate checks this live and refuses to start the listener otherwise. Passkeys are bound to the public host name
+      (their RP ID), so admins add their passkey on `https://files.example.com` once it is up (an authenticator app works
+      before that).
 - [ ] You own a domain on Cloudflare and will give shelf its own host name (e.g. `files.example.com`). The address is
       fixed: OAuth tokens are bound to `https://<that host>/mcp`, so changing it later disconnects everyone.
 - [ ] The tunnel points at the **public listener port (default 8788)**, never at the LAN port (8787).
@@ -38,7 +40,7 @@ Do not open the public address until every line holds (plan 10 "v0.2 보안 관�
 ```sh
 shelf public enable --url https://files.example.com \
   --port 8788 --host 127.0.0.1 --trusted-proxy 127.0.0.1 \
-  --confirm-admin-2fa --confirm-security-gate --gate-version v0.2.0
+  --confirm-security-gate --gate-version v0.2.0
 shelf public status          # every required line must be [x]
 shelf serve                  # prints "public listener: http://127.0.0.1:8788/ for the tunnel → https://files.example.com"
 ```
@@ -52,7 +54,12 @@ shelf serve                  # prints "public listener: http://127.0.0.1:8788/ f
 | `--allow-dcr` / `--no-dcr` | dynamic client registration (RFC 7591). Off by default: claude.ai and ChatGPT use client metadata documents; open registration lets anyone register a look-alike app |
 | `public disable` | stop serving the public listener at the next restart (connections stay until revoked) |
 
-If the gate does not pass, `serve` says which line is missing and starts only the LAN listener.
+If the gate does not pass, `serve` says which line is missing and starts only the LAN listener. `serve` uses the public
+address as `--public-url` too (passkey RP ID, links in mails) unless you pass another one.
+
+Besides AI connections, the public address serves the **approval inbox** and each person's **passkeys** (approvals need a
+passkey, and passkeys work only on this https host): `#/approvals`, `#/second-factor`. Everything else — folders, people,
+tokens, files, drafts, audit, TOTP setup — stays on the office address.
 
 ### 1.3 Run the Cloudflare tunnel (doc only — shelf never runs cloudflared)
 

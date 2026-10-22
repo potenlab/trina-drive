@@ -94,7 +94,14 @@ export function PublicOnly() {
     <div className="card narrow">
       <h1>{ct('public_title')}</h1>
       <p>{ct('public_text')}</p>
-      {me && <p className="muted small">{ct('public_signed_in', { name: me.name })}</p>}
+      {me && <>
+        <p className="muted small">{ct('public_signed_in', { name: me.name })}</p>
+        <div className="row-actions">
+          <a className="btn" href="#/approvals">{ct('public_approvals')}</a>
+          <a className="btn" href="#/second-factor">{ct('public_passkeys')}</a>
+          <button type="button" className="btn ghost" onClick={() => api('POST', '/logout').finally(() => window.location.reload())}>{ct('public_sign_out')}</button>
+        </div>
+      </>}
     </div>
   )
 }

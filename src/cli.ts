@@ -22,6 +22,7 @@ import { attachNotify } from './notify'
 import { readPublicSettings } from './oauth/settings'
 import { PUBLIC_HELP, publicCommand } from './web/public-cli'
 import { publicBanner, startPublicListener } from './web/public'
+import { mfaCommand, MFA_HELP, mfaServeNotice } from './web/mfa-cli'
 
 const HELP = `${NAME} ${VERSION} — permission-aware read shell and draft box for AI agents (phase-0 prototype)
 
@@ -38,6 +39,7 @@ usage: ${NAME} [--data DIR] <command>
   token create <person> [--name N] [--scope path1,path2] [--read-only] [--ttl 8h]
   token revoke <id>                      (same as connections revoke)
   audit verify
+${MFA_HELP}
 ${NOTIFY_HELP}
   demo seed                              sample company tree, people, rules and tokens
   sh --token <pat> -c <command>          run one shell command as that token (audited)
@@ -206,7 +208,10 @@ async function main(argv: string[]) {
       const port = Number(takeFlag(rest, '--port') ?? 8787)
       const host = takeFlag(rest, '--host') ?? '127.0.0.1'
       const origin = takeFlag(rest, '--allow-origin')
-      const publicUrl = takeFlag(rest, '--public-url')
+      // the public address (`public enable --url`) is also the passkeys' RP ID and the base of mailed links, unless given here
+      const configuredPublic = readPublicSettings(db).url ?? undefined
+      const publicUrl = takeFlag(rest, '--public-url') ?? configuredPublic
+      if (configuredPublic && publicUrl !== configuredPublic) console.error(`warning: --public-url ${publicUrl} differs from the public address ${configuredPublic} (OAuth issuer); passkeys made on one do not work on the other`)
       if (!TOOLS.rg) throw new StoreError('ripgrep (rg) is required: brew install ripgrep')
       if (!TOOLS.pdftotext) console.error('warning: pdftotext not found (brew install poppler); PDFs will not be readable')
       const ctx = makeCtx(db, dataDir)
@@ -219,11 +224,13 @@ async function main(argv: string[]) {
       if (pub.server) console.log(publicBanner(readPublicSettings(db), pub.server.port ?? 0))
       else if (readPublicSettings(db).enabled) console.error(`public listener NOT started (gate):\n${pub.gate.checks.filter((c) => !c.ok && c.required).map((c) => `  - ${c.text}`).join('\n')}\n(see: public status)`)
       console.log(`tools: rg=${TOOLS.rg} pdftotext=${TOOLS.pdftotext ?? 'missing'}`)
+      mfaServeNotice(db, publicUrl)
       if (!noReconcile) startReconciler(db, { dataDir, intervalMs: every ? parseDuration(every) : undefined })
       return new Promise(() => {})
     }
     default:
       if (cmd === 'public' && publicCommand(db, sub, rest)) return
+      if (mfaCommand(db, `${cmd} ${sub ?? ''}`.trim(), rest)) return
       if (await notifyCommand(db, dataDir, `${cmd} ${sub ?? ''}`.trim(), rest)) return
       console.error(`unknown command: ${args.join(' ')}\n\n${HELP}`)
       process.exitCode = 2

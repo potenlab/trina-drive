@@ -27,7 +27,8 @@ const en = {
   gone: 'This connection request is used or expired. Start again from the AI app.',
   redirecting: 'Going back to the app…',
   public_title: 'Connecting AI apps',
-  public_text: 'This address is only for connecting AI apps (claude.ai, ChatGPT) and approving them. Manage folders, people and tokens at the office address.',
+  public_text: 'This address is for connecting AI apps (claude.ai, ChatGPT), for approvals and for your passkeys. Manage folders, people and tokens at the office address.',
+  public_approvals: 'Approvals', public_passkeys: 'Passkeys and second factor', public_sign_out: 'Sign out',
   public_signed_in: 'You are signed in as {name}.',
 }
 
@@ -58,7 +59,8 @@ const ko: Record<Key, string> = {
   gone: '이미 처리했거나 만료된 연결 요청입니다. AI 앱에서 다시 시작하세요.',
   redirecting: '앱으로 돌아가는 중…',
   public_title: 'AI 앱 연결',
-  public_text: '이 주소는 AI 앱(claude.ai, ChatGPT) 연결과 그 허용에만 쓰입니다. 폴더·사람·토큰 관리는 사무실 주소에서 하세요.',
+  public_text: '이 주소는 AI 앱(claude.ai, ChatGPT) 연결, 승인, 내 패스키에만 쓰입니다. 폴더·사람·토큰 관리는 사무실 주소에서 하세요.',
+  public_approvals: '승인함', public_passkeys: '패스키와 2단계 인증', public_sign_out: '로그아웃',
   public_signed_in: '{name}(으)로 로그인되어 있습니다.',
 }
 

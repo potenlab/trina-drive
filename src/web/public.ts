@@ -1,20 +1,20 @@
 // The public listener (plan 5.2 "공개 주소", 7.1 "공개 노출", review-tech 4.3): a SEPARATE Bun listener meant for a
 // Cloudflare tunnel (cloudflared → http://127.0.0.1:<port>), so "came through the tunnel" never has to be guessed from
 // a peer address or a Host header. It serves only what claude.ai / ChatGPT and a person approving a connection need:
-//   /mcp · /oauth/* · /.well-known/oauth-* · the sign-in and consent pages (the app shell and its /assets) · the few
-//   /api calls those pages make (state, login, logout, session, oauth consent)
+//   /mcp · /oauth/* · /.well-known/oauth-* · the app shell and its /assets for sign-in, OAuth consent, approvals and
+//   one's own passkeys · the /api calls those pages make (PUBLIC_API below)
 // Everything else — the admin screens' API, files, drafts, audit, /health — is 404 here. Requests are rebuilt on the
 // configured public URL (https), so the same-origin checks and Secure cookies of /api work behind the tunnel.
 // CF-Connecting-IP / X-Forwarded-For are believed only when the peer is the configured tunnel connector address.
 //
-// It starts only when the public gate passes: an HTTPS public URL, an admin who can sign in, admin 2FA (requireAdmin2FA,
-// a TODO hook until the web records second factors) and the v0.2 security gate confirmed (plan 10: "통과 전에는 공개
-// 주소를 열지 않는다").
+// It starts only when the public gate passes: an HTTPS public URL, an admin who can sign in, a second factor for every
+// admin (mfa.ts requireAdmin2FA) and the v0.2 security gate confirmed (plan 10: "통과 전에는 공개 주소를 열지 않는다").
 import net from 'node:net'
 import { LIMITS, NAME, VERSION } from '../config'
 import type { DB } from '../db'
 import { readPublicSettings, type PublicSettings } from '../oauth/settings'
 import { setupDone } from './auth'
+import { MfaError, requireAdmin2FA } from './mfa'
 import type { WebCtx } from './http'
 import { handleWeb } from './server'
 
@@ -25,22 +25,31 @@ export const PUBLIC_EXACT = new Set([
   '/oauth/authorize', '/oauth/token', '/oauth/revoke', '/oauth/register',
   '/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server',
 ])
-/** /api calls of the sign-in and consent pages. (Passkey sign-in endpoints, when they land, are added here.) */
-export const PUBLIC_API = new Set(['GET /api/state', 'POST /api/login', 'POST /api/logout', 'GET /api/session'])
-export const PUBLIC_PREFIXES = ['/assets/', '/api/oauth/requests/']
+/**
+ * /api calls of the pages served here: sign-in (password, then the second factor), OAuth consent, the approval inbox
+ * (plan 5.2: approvals happen on the public HTTPS domain, where passkeys work — their RP ID is this host), and the
+ * person's own passkeys (registered here for the same reason; adding one asks for the password again, /api/me/reauth).
+ * TOTP setup, recovery codes and everything else stay on the office address.
+ */
+export const PUBLIC_API = new Set(['GET /api/state', 'POST /api/login', 'POST /api/login/second', 'POST /api/logout', 'GET /api/session',
+  'GET /api/me/2fa', 'POST /api/me/reauth', 'POST /api/me/passkeys/options', 'POST /api/me/passkeys'])
+/** /api prefixes: method and the rest of the path are decided by the handlers behind them (session, CSRF, R8) */
+export const PUBLIC_API_PREFIXES: [string, RegExp][] = [
+  ['/api/oauth/requests/', /^\/api\/oauth\/requests\/[A-Za-z0-9_-]+(\/(approve|deny))?$/],
+  ['/api/approvals', /^\/api\/approvals(\/\d+(\/(step-up\/options|step-up|approve|reject))?)?$/],
+  ['/api/me/passkeys/', /^\/api\/me\/passkeys\/\d+$/],
+]
+export const PUBLIC_PREFIXES = ['/assets/']
 
 export function publicPathAllowed(method: string, pathname: string): boolean {
   if (PUBLIC_EXACT.has(pathname)) return true
-  if (pathname.startsWith('/api/')) return PUBLIC_API.has(`${method} ${pathname}`) || pathname.startsWith('/api/oauth/requests/')
+  if (pathname.startsWith('/api/')) return PUBLIC_API.has(`${method} ${pathname}`) || PUBLIC_API_PREFIXES.some(([p, re]) => pathname.startsWith(p) && re.test(pathname))
   return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p)) && !pathname.includes('..')
 }
 
-/**
- * TODO(admin-2fa): replace with the web's own record once passkeys / TOTP for admins land (parallel stream): true when
- * every active admin has a second factor. Until then the operator confirms it (`public enable --confirm-admin-2fa`).
- */
-export function requireAdmin2FA(db: DB): boolean {
-  return readPublicSettings(db).admin2faConfirmedAt != null
+/** Every active admin has a second factor (src/web/mfa.ts; plan 5.2 "공개 주소를 여는 설치는 관리자 2단계 인증 필수"). */
+export function admin2faProblem(db: DB): string | null {
+  try { requireAdmin2FA(db); return null } catch (e) { if (e instanceof MfaError) return e.message; throw e }
 }
 
 export interface GateCheck { id: string; ok: boolean; required: boolean; text: string }
@@ -61,11 +70,12 @@ export function publicUrlProblem(raw: string | null): string | null {
 
 export function publicGate(db: DB, s: PublicSettings = readPublicSettings(db)): { ok: boolean; checks: GateCheck[] } {
   const urlProblem = publicUrlProblem(s.url)
+  const twofa = admin2faProblem(db)
   const checks: GateCheck[] = [
     { id: 'enabled', ok: s.enabled, required: true, text: 'public listener enabled (public enable)' },
     { id: 'https_url', ok: !urlProblem, required: true, text: urlProblem ? `public URL: ${urlProblem}` : `public URL ${s.url} (OAuth issuer; MCP resource ${s.url}/mcp)` },
     { id: 'admin', ok: setupDone(db), required: true, text: 'an admin can sign in on the web' },
-    { id: 'admin_2fa', ok: requireAdmin2FA(db), required: true, text: 'admins use a second factor (until the web records it: public enable --confirm-admin-2fa)' },
+    { id: 'admin_2fa', ok: !twofa, required: true, text: twofa ? `admin second factor: ${twofa} (web: Settings → Second factor; shelf mfa status)` : 'every admin has a second factor (passkey or authenticator app)' },
     { id: 'security_gate', ok: s.gateConfirmedAt != null, required: true,
       text: s.gateConfirmedAt != null ? `v0.2 security gate confirmed ${new Date(s.gateConfirmedAt).toISOString().slice(0, 10)}${s.gateVersion ? ` for ${s.gateVersion}` : ''}` : 'v0.2 security gate passed (plan 10; public enable --confirm-security-gate)' },
     { id: 'loopback_listener', ok: isLoopbackHost(s.host), required: false, text: `public listener on ${s.host}:${s.port} (loopback recommended: the tunnel connector runs on this machine)` },

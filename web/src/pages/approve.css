@@ -1,0 +1,7 @@
+/* approvals, second factors, promote (kept apart from styles.css) */
+.nav .count { display: inline-block; margin-left: .3rem; background: var(--danger); color: #fff; border-radius: 9px; font-size: .7rem; padding: 0 5px; line-height: 1.4; }
+pre.plain-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28rem; overflow: auto; background: var(--bg, transparent); border: 1px solid var(--line); border-radius: 8px; padding: .6rem .75rem; font-size: .82rem; margin: .5rem 0 0; }
+pre.plain-text.diff { color: var(--text); }
+details.card > summary { cursor: pointer; font-weight: 600; }
+form.inline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: flex-end; margin-top: .5rem; }
+.promote-form { display: grid; gap: .5rem; margin-top: .5rem; }

@@ -25,11 +25,11 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
 export const get = <T = any>(path: string) => api<T>('GET', path)
 
 // shapes the server returns (src/web/views.ts)
-export interface Me { id: number; name: string; admin: boolean; email: string | null; unread_notices: number }
+export interface Me { id: number; name: string; admin: boolean; email: string | null; unread_notices: number; approvals?: number; second_factor?: boolean }
 export interface FolderSummary {
   id: number; name: string; vpath: string | null; registered: boolean; path?: string; personal_owner: number | null
   no_ai: boolean; quarantine: boolean; widened_pending: boolean; inherit_break: boolean; blocked: boolean
-  nas_mode: 'all' | 'unknown' | 'chosen' | null; status: 'ok' | 'missing'
+  nas_mode: 'all' | 'unknown' | 'chosen' | null; status: 'ok' | 'missing'; promote?: boolean; promote_here?: boolean
   mine: { ai: boolean; nas: boolean | null; manage: boolean }
   can: { edit_rules: boolean; no_ai_on: boolean; no_ai_off: boolean; edit_nas: boolean; admin: boolean }
 }

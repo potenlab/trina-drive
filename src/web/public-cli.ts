@@ -8,7 +8,7 @@ import { StoreError } from '../store'
 import { publicGate, publicUrlProblem, SECURITY_GATE_CHECKLIST } from './public'
 
 export const PUBLIC_HELP = `  public enable --url https://HOST [--port 8788] [--host 127.0.0.1] [--trusted-proxy 127.0.0.1]
-                [--confirm-admin-2fa] [--confirm-security-gate [--gate-version V]] [--allow-dcr | --no-dcr]
+                [--confirm-security-gate [--gate-version V]] [--allow-dcr | --no-dcr]
                 [--client-host H]… [--any-client] [--default-clients]
                                          public address for claude.ai / ChatGPT through a tunnel (OAuth issuer = URL)
   public status                          settings and the public gate
@@ -60,7 +60,6 @@ export function publicCommand(db: DB, sub: string | undefined, rest: string[], o
       if (flag(rest, '--any-client')) next.clientHosts = 'any'
       if (flag(rest, '--default-clients')) next.clientHosts = [...DEFAULT_CLIENT_HOSTS]
       if (hosts.length) next.clientHosts = [...new Set([...(next.clientHosts === 'any' ? [] : next.clientHosts), ...hosts.map((h) => h.toLowerCase())])]
-      if (flag(rest, '--confirm-admin-2fa')) next.admin2faConfirmedAt = Date.now()
       if (flag(rest, '--confirm-security-gate')) { next.gateConfirmedAt = Date.now(); next.gateVersion = gateVersion ?? null }
       if (rest.length) throw new StoreError(`unknown option ${rest[0]}`)
       if (s.url && s.url !== origin) out(`warning: the public URL changes from ${s.url} to ${origin}; OAuth tokens issued for ${s.url}/mcp stop working (people connect again)`)

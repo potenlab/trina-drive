@@ -17,6 +17,8 @@ const LINES: Record<EventKind, Record<Lang, (n: number) => string>> = {
   token_revoked: { en: (n) => `${n} access token${n === 1 ? '' : 's'} revoked`, ko: (n) => `액세스 토큰 ${n}개가 끊겼습니다` },
   audit_anchor: { en: (n) => `Audit anchor: ${n} rows`, ko: (n) => `감사 기준점: ${n}행` },
   provenance_reset: { en: (n) => `${n} provenance reset${n === 1 ? '' : 's'} on an access token`, ko: (n) => `액세스 토큰 출처 초기화 ${n}건` },
+  approval_pending: { en: (n) => `${n} promote request${n === 1 ? '' : 's'} pending approval`, ko: (n) => `반영 승인 대기 ${n}건` },
+  approval_decided: { en: (n) => `${n} of your promote requests ${n === 1 ? 'was' : 'were'} decided`, ko: (n) => `반영 요청 결과 ${n}건` },
 }
 const DIGEST: Record<Lang, string> = { en: 'Daily summary: ', ko: '하루 요약: ' }
 const FOOT: Record<Lang, string> = { en: 'Details after sign-in:', ko: '로그인 뒤 상세 보기:' }
@@ -32,6 +34,8 @@ export function render(kind: EventKind, count: number, link: string, lang: Lang,
 /** Links carry only the kind (an enum) — never ids that could be guessed into names, never names. */
 export function linkFor(baseUrl: string, kind: EventKind, level: Level): string {
   const base = baseUrl.replace(/\/+$/, '')
+  // the approval inbox decides per person what they see (R8: detail for eligible approvers, a count for other managers)
+  if (kind === 'approval_pending' || kind === 'approval_decided') return `${base}/#/approvals`
   return level === 'detail' ? `${base}/alerts/${kind}` : `${base}/inbox`
 }
 

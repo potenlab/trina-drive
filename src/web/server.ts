@@ -33,6 +33,8 @@ export function makeWebCtx(ctx: Ctx, opts: WebOptions = {}): WebCtx {
   ensureWebSchema(ctx.db)
   return {
     ...ctx, opts,
+    // links handed to agents (approval pages) use the public address
+    publicUrl: opts.publicUrl ?? ctx.publicUrl,
     mailer: opts.mailer ?? new OutboxMailer(ctx.dataDir),
     // in SQLite: a restart does not reset them
     loginByName: new RateLimiter(5, 15 * 60_000, { db: ctx.db, scope: 'login_name' }),

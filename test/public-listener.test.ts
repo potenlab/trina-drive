@@ -6,7 +6,9 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import fs from 'node:fs'
 import path from 'node:path'
 import { readPublicSettings, writePublicSettings } from '../src/oauth/settings'
-import { clientAddress, handlePublic, publicGate, publicPathAllowed, publicUrlProblem, requireAdmin2FA, startPublicListener } from '../src/web/public'
+import { admin2faProblem, clientAddress, handlePublic, publicGate, publicPathAllowed, publicUrlProblem, startPublicListener } from '../src/web/public'
+import { totpBegin, totpConfirm } from '../src/web/mfa'
+import { totpAt } from '../src/web/totp'
 import { publicCommand } from '../src/web/public-cli'
 import { ISSUER, oauthSetup, pkce, type OAuthEnv } from './oauth-helpers'
 import { PASSWORD } from './web-helpers'
@@ -64,6 +66,21 @@ describe('allowlist', () => {
     expect(publicPathAllowed('GET', '/api/login')).toBe(false) // login is POST only
     expect(publicPathAllowed('POST', '/api/login')).toBe(true)
     expect(publicPathAllowed('DELETE', '/api/tokens/1')).toBe(false)
+    // approvals and one's own passkeys happen on the public https domain (passkey RP ID); TOTP setup and the rest do not
+    for (const [m, p] of [['GET', '/api/approvals'], ['GET', '/api/approvals/3'], ['POST', '/api/approvals/3/step-up/options'], ['POST', '/api/approvals/3/step-up'],
+      ['POST', '/api/approvals/3/approve'], ['POST', '/api/approvals/3/reject'], ['POST', '/api/login/second'], ['GET', '/api/me/2fa'], ['POST', '/api/me/reauth'],
+      ['POST', '/api/me/passkeys/options'], ['POST', '/api/me/passkeys'], ['DELETE', '/api/me/passkeys/2']] as const) expect({ m, p, ok: publicPathAllowed(m, p) }).toEqual({ m, p, ok: true })
+    for (const [m, p] of [['POST', '/api/me/totp/setup'], ['POST', '/api/me/totp/confirm'], ['DELETE', '/api/me/totp'], ['POST', '/api/me/recovery-codes'], ['POST', '/api/me/password'],
+      ['GET', '/api/approvals/3/diff'], ['GET', '/api/approvalsx'], ['GET', '/api/approvals/x'], ['DELETE', '/api/me/passkeys/x'], ['GET', '/api/oauth/requests/a/b']] as const) expect({ m, p, ok: publicPathAllowed(m, p) }).toEqual({ m, p, ok: false })
+  })
+
+  test('the approval inbox answers through the public listener (behind sign-in)', async () => {
+    expect((await pub('GET', '/api/approvals')).status).toBe(401)
+    const login = await pub('POST', '/api/login', { headers: { 'content-type': 'application/json', origin: ISSUER }, body: JSON.stringify({ login: 'boss', password: PASSWORD }) })
+    const cookie = /shelf_session=([^;]+)/.exec(login.headers.get('set-cookie') ?? '')![1]!
+    expect((await pub('GET', '/api/approvals', { headers: { cookie: `shelf_session=${cookie}` } })).status).toBe(200)
+    expect((await pub('GET', '/api/me/2fa', { headers: { cookie: `shelf_session=${cookie}` } })).status).toBe(200)
+    expect((await pub('GET', '/api/drafts', { headers: { cookie: `shelf_session=${cookie}` } })).status).toBe(404)
   })
 })
 
@@ -132,9 +149,9 @@ describe('the public gate', () => {
     }
   })
 
-  test('nothing starts until URL, admin 2FA confirmation and the security gate are in place; then only the allowlist answers', async () => {
+  test('nothing starts until URL, a second factor for every admin and the security gate are in place; then only the allowlist answers', async () => {
     const db = o.env.db
-    expect(requireAdmin2FA(db)).toBe(false)
+    expect(admin2faProblem(db)).toContain('1 admin without a second factor')
     expect(publicGate(db).ok).toBe(false)
     const out: string[] = []
     expect(() => publicCommand(db, 'enable', ['--url', 'http://files.example.test'], (s) => out.push(s))).toThrow('https')
@@ -143,8 +160,12 @@ describe('the public gate', () => {
     expect(g.ok).toBe(false)
     expect(g.checks.filter((c) => !c.ok && c.required).map((c) => c.id).sort()).toEqual(['admin_2fa', 'security_gate'])
     expect(startPublicListener(o.env.w).server).toBeNull()
-    publicCommand(db, 'enable', ['--confirm-admin-2fa', '--confirm-security-gate', '--gate-version', 'v0.2.0', '--trusted-proxy', '127.0.0.1'], (s) => out.push(s))
-    expect(requireAdmin2FA(db)).toBe(true)
+    publicCommand(db, 'enable', ['--confirm-security-gate', '--gate-version', 'v0.2.0', '--trusted-proxy', '127.0.0.1'], (s) => out.push(s))
+    expect(publicGate(db).checks.filter((c) => !c.ok && c.required).map((c) => c.id)).toEqual(['admin_2fa'])
+    // the admin (dion) sets up an authenticator app: the gate reads it live (web/mfa.ts)
+    const { secret } = totpBegin(db, o.env.pid('dion'), 'dion')
+    expect(totpConfirm(db, o.env.pid('dion'), totpAt(secret, Date.now()))).toBe(true)
+    expect(admin2faProblem(db)).toBeNull()
     g = publicGate(db)
     expect(g.ok).toBe(true)
     expect(out.join('\n')).toContain('Cloudflare tunnel')

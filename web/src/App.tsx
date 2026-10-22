@@ -3,6 +3,9 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { api, get, setCsrf, whenSignedOut, type Me } from './api'
 import { LOCALES, setLocale, t, useLocale } from './i18n'
+import { Approvals } from './pages/Approvals'
+import { SecondFactorSettings } from './pages/SecondFactor'
+import { at } from './pages/approve-i18n'
 import { Audit } from './pages/Audit'
 import { Drafts } from './pages/Drafts'
 import { Files } from './pages/Files'
@@ -48,7 +51,15 @@ export function App() {
   // OAuth consent (#/oauth/<id>): sign in first if needed, then decide; on both addresses
   const oauthMatch = /^\/oauth\/([A-Za-z0-9_-]{20,64})$/.exec(route)
   if (oauthMatch) return <SessionCtx.Provider value={ctx}><Bare wide>{me ? <Consent rid={oauthMatch[1]!} /> : <Login onDone={() => {}} />}</Bare></SessionCtx.Provider>
-  if (publicListener) return <SessionCtx.Provider value={ctx}><Bare>{me ? <PublicOnly /> : <><PublicOnly /><Login onDone={() => {}} /></>}</Bare></SessionCtx.Provider>
+  // the public address serves sign-in, consent, the approval inbox and one's own passkeys (RP ID = this host), nothing else
+  if (publicListener) {
+    const ap = /^\/approvals(?:\/(\d+))?$/.exec(route)
+    const page = !me ? <><PublicOnly /><Login onDone={() => {}} /></>
+      : ap ? <Approvals id={ap[1] ? Number(ap[1]) : undefined} />
+        : route === '/second-factor' ? <SecondFactorSettings />
+          : <PublicOnly />
+    return <SessionCtx.Provider value={ctx}><Bare wide={!!me && page.type !== PublicOnly}>{page}</Bare></SessionCtx.Provider>
+  }
   const linkMatch = /^\/(invite|reset)\/(.+)$/.exec(route)
   if (linkMatch) return <SessionCtx.Provider value={ctx}><Bare><LinkPage kind={linkMatch[1] as 'invite' | 'reset'} token={linkMatch[2]!} /></Bare></SessionCtx.Provider>
   if (route.startsWith('/setup') && (setupPending || me?.admin)) return <SessionCtx.Provider value={ctx}><Bare wide><Setup pending={setupPending} onDone={() => setSetupPending(false)} /></Bare></SessionCtx.Provider>
@@ -85,24 +96,27 @@ const NAV: { to: string; key: Parameters<typeof t>[0] }[] = [
 function Shell({ route }: { route: string }) {
   const { me, setMe } = useSession()
   const folder = /^\/folders\/(\d+)$/.exec(route)
+  const approval = /^\/approvals(?:\/(\d+))?$/.exec(route)
   // the file view is where people land; admins land on folders
-  const files = route === '/files' || route.startsWith('/files?') || (!me!.admin && !NAV.some((n) => route.startsWith(n.to)))
+  const files = route === '/files' || route.startsWith('/files?') || (!me!.admin && !route.startsWith('/approvals') && !NAV.some((n) => route.startsWith(n.to)))
   let page: React.ReactNode
   if (files) page = <Files route={route} />
   else if (folder) page = <Folder id={Number(folder[1])} />
+  else if (approval) page = <Approvals id={approval[1] ? Number(approval[1]) : undefined} />
   else if (route === '/people') page = <People />
   else if (route === '/tokens') page = <Tokens />
   else if (route === '/drafts') page = <Drafts />
   else if (route === '/audit') page = <Audit />
   else if (route === '/settings') page = <Settings />
   else page = <Folders />
-  const active = (to: string) => route === to || route.startsWith(to + '/') || (to === '/folders' && !files && !NAV.some((n) => route.startsWith(n.to)))
+  const active = (to: string) => route === to || route.startsWith(to + '/') || (to === '/folders' && !files && !approval && !NAV.some((n) => route.startsWith(n.to)))
   return (
     <div className="shell">
       <header className="top">
         <a className="brand" href={me!.admin ? '#/folders' : '#/files'}>{document.title || 'shelf'}</a>
         <nav className="nav">
           <a href="#/files" className={files ? 'active' : ''}>{ft('nav_files')}</a>
+          <a href="#/approvals" className={approval ? 'active' : ''}>{at('nav_approvals')}{(me!.approvals ?? 0) > 0 && <span className="count">{me!.approvals}</span>}</a>
           {NAV.map((n) => <a key={n.to} href={'#' + n.to} className={active(n.to) ? 'active' : ''}>{t(n.key)}</a>)}
         </nav>
         <div className="top-right">
