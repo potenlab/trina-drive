@@ -235,6 +235,8 @@ in a world-readable place (not under a 0700 home). This is what closes the gap b
 | token B `ls \| wc -l` during token A's 50 × 400 ms CPU jobs (global 4, per-token 2) | p50 10–20 ms, p99 165–300 ms over 10 runs (assert < 500) |
 | main's VirtualFs, 28 commands back to back (pool drained) | median 117 ms |
 | 30 commands of one token back to back, `cat f \| wc -l` over the server VFS | one job per process: 2.4 s (≈ 80 ms each, the warm pool cannot refill fast enough); kept worker: 0.28 s (≈ 2 ms each) |
+| extraction of a ~1 MB document, in-process parser → worker (median; pool refilled / back to back) | docx 6 → 29 / 43 ms, hwp 8 → 29 / 46 ms, pdf (pdftotext) 97 → 137 / 134 ms (a PDF always starts a fresh worker) |
+| read flood: 64 reads of 16 MB requested, worker stops reading | before: all 64 served, server RSS +1.3 GB; now 2 served, +38 MB |
 
 A pre-built single-file bundle of the worker did not start faster (4.5 MB to parse), so workers run the sources.
 
