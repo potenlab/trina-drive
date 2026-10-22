@@ -138,10 +138,7 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
     }
     if (moved) {
       const old = r.folder.path
-      db.transaction(() => {
-        renameFolderRows(db, old, moved!)
-        addEvent(db, { kind: 'renamed', path: moved, oldPath: old, dev: r.folder!.dev, ino: r.folder!.ino, folderId: r.folder!.id, at: now(), notify: { admins, manage: manageHolders(db, [r.folder!.id]) } })
-      })()
+      renameFolderRows(db, old, moved) // the diff below reports it (event + audit) like any other rename
       walked.push({ path: moved, oldPath: old })
       continue
     }
@@ -227,7 +224,8 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
   const topOf = (p: string, set: Set<string>) => { let t = p; while (set.has(path.dirname(t))) t = path.dirname(t); return t }
   const createdTop = countTops(created.map((c) => c.path), createdSet, topOf)
   const deletedTop = countTops(deleted.map((r) => r.path), deletedSet, topOf)
-  const silentRoot = (root: string) => !prevRootsWithRows.has(root) // first walk of this root: a baseline, not changes
+  const oldRoot = new Map(walked.map((w) => [w.path, w.oldPath]))
+  const silentRoot = (root: string) => !prevRootsWithRows.has(oldRoot.get(root) ?? root) // first walk of this root: a baseline, not changes
   const quiet = (p: string) => isNoiseName(path.basename(p))
 
   // ---- 4. apply (one transaction): folder paths, lost/found, R10, closures, index, audit

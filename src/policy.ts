@@ -61,6 +61,7 @@ export class Access {
   private mountMap: Map<string, FolderRow> | null = null
   /** reconciler findings: closed identities (R1 ⑤, R6, R10) and paths of lost rule-bearing folders */
   private readonly closures: Closures
+  private readonly indexedAt: (dev: bigint, ino: bigint) => { path: string }[]
 
   constructor(readonly db: DB, principal: { personId: number; token?: TokenRow }, private readonly readdir: Readdir = (p) => fs.readdirSync(p)) {
     this.personId = principal.personId
@@ -70,6 +71,8 @@ export class Access {
     for (const f of db.query<FolderRow, []>('SELECT * FROM folders').all()) { this.byIdentity.set(identityKey(f.dev, f.ino), f); this.byId.set(f.id, f) }
     for (const r of db.query<RuleRow, []>('SELECT * FROM rules').all()) this.rules.set(r.folder_id, [...(this.rules.get(r.folder_id) ?? []), r])
     this.closures = loadClosures(db)
+    const q = db.query<{ path: string }, [string, string]>('SELECT path FROM fs_index WHERE dev = ? AND ino = ?')
+    this.indexedAt = (dev, ino) => q.all(String(dev), String(ino))
   }
 
   static forToken(db: DB, token: TokenRow, readdir?: Readdir) { return new Access(db, { personId: token.person_id, token }, readdir) }
@@ -153,6 +156,9 @@ export class Access {
     if (st.isSymbolicLink()) return null
     const key = identityKey(st.dev, st.ino)
     if (this.closures.identities.has(key)) return null
+    // ⑦ against the index: something the last reconcile saw elsewhere moved since; closed until it is judged (R10)
+    const known = this.indexedAt(st.dev, st.ino)
+    if (known.length && !known.some((k) => k.path === real)) { recheckFailed?.(parent.real); return null }
     if (st.isDirectory()) {
       const lost = this.closures.lostPaths.get(real)
       if (lost !== undefined && lost !== key) return null
