@@ -45,8 +45,8 @@ xlsx, hwpx and hwp files. `bun run sim/provenance-day.ts` replays an office day 
 (`--password-stdin`, `$SHELF_PASSWORD`, or a no-echo prompt), makes a personal token on the server (`POST /api/tokens`:
 default 7 days, all folders the person reads; `--scope 공용,프로젝트`, `--read-only`, `--ttl`; admins must pass `--scope`
 or `--all-folders`, plan 5.1), signs out, and connects the client **in user scope only** — never a repo's `.mcp.json`,
-`.cursor/mcp.json` or `.codex/`. `--token-stdin` takes an existing token instead (a token argument is refused: shell
-history). `--dry-run` prints every command and file it would write, with `<token>` in place of the secret, and contacts
+`.cursor/mcp.json` or `.codex/`. `--token-stdin` takes an existing token instead, from a pipe or, when standard input is
+a terminal, pasted at a prompt that does not echo it (a token argument is refused: shell history). `--dry-run` prints every command and file it would write, with `<token>` in place of the secret, and contacts
 nothing.
 
 The token is kept in the macOS login Keychain (`security -i` on stdin, so it never appears in a process list; service

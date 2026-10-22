@@ -37,6 +37,8 @@ export interface McpIO {
   readStdin?: () => Promise<string>
   /** a password typed without echo (interactive) */
   promptPassword?: (question: string) => Promise<string>
+  /** standard input is a terminal: --token-stdin then asks for the token without echo (pasted; not in shell history) */
+  stdinIsTTY?: boolean
   fetch?: typeof fetch
   platform?: NodeJS.Platform
   hostname?: string
@@ -290,7 +292,8 @@ async function add(o: Opts, io: McpIO): Promise<number> {
     say(`# dry run: nothing is written and the server is not contacted`)
     say(o.tokenStdin ? '# token: the one given on standard input' : `# token: would be made on ${o.server} as "${tokenName}" (expires in ${o.ttl}${o.readOnly ? ', read-only' : ''}, ${o.scope ? `folders: ${o.scope.join(', ')}` : 'all folders you can read'})`)
   } else if (o.tokenStdin) {
-    token = (await (io.readStdin ?? (() => Bun.stdin.text()))()).trim()
+    token = (io.stdinIsTTY && io.promptPassword ? await io.promptPassword('paste the token (it is not shown): ')
+      : await (io.readStdin ?? (() => Bun.stdin.text()))()).trim()
     if (!new RegExp(`^${TOKEN_PREFIX}[A-Za-z0-9_-]{16,}$`).test(token)) throw new UsageError(`standard input does not hold a ${TOKEN_PREFIX}… token`)
   } else {
     const api = new Api(o.server, io.fetch ?? fetch)

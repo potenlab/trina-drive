@@ -78,7 +78,7 @@ async function main(argv: string[]) {
   // backup works on a data directory (and may run as root via launchd/sudo): never open or create a database for it
   if (cmd === 'backup') { process.exitCode = await backupCommand(args.slice(1), { dataDir }); return }
   // mcp add runs on a person's computer: no data directory there
-  if (cmd === 'mcp') { process.exitCode = await mcpCommand(args.slice(1), { env: process.env, out: console.log, err: console.error, promptPassword: ttyPassword }); return }
+  if (cmd === 'mcp') { process.exitCode = await mcpCommand(args.slice(1), { env: process.env, out: console.log, err: console.error, promptPassword: ttyPassword, stdinIsTTY: !!process.stdin.isTTY }); return }
   const db = openDb(dataDir)
   const need = (v: string | undefined, what: string) => { if (!v) throw new StoreError(`missing ${what}`); return v }
 
