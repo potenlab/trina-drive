@@ -151,8 +151,6 @@ Tables (created on demand): `mfa_passkeys`, `mfa_totp`, `mfa_recovery`, `mfa_cha
 
 Step-by-step: [CONNECT-CLAUDE-AI.md](CONNECT-CLAUDE-AI.md), [CONNECT-CHATGPT.md](CONNECT-CHATGPT.md).
 
-Step-by-step: [docs/CONNECT-CLAUDE-AI.md](docs/CONNECT-CLAUDE-AI.md), [docs/CONNECT-CHATGPT.md](docs/CONNECT-CHATGPT.md).
-
 - **Authorization server** (`src/oauth/`, MCP authorization 2025-11-25 and 2026-07-28): `/.well-known/oauth-protected-resource[/mcp]`
   (RFC 9728; the 401 on `/mcp` carries `resource_metadata`), `/.well-known/oauth-authorization-server` (RFC 8414),
   `/oauth/authorize`, `/oauth/token`, `/oauth/revoke` (RFC 7009), `/oauth/register` (RFC 7591, off unless `--allow-dcr`).
