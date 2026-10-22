@@ -11,10 +11,10 @@ export const ORIGIN = 'http://shelf.test'
 export const PASSWORD = 'correct horse battery'
 let sharedHash: string | null = null
 
-export async function webSetup(opts: { webDir?: string; emit?: WebOptions['emit'] } = {}) {
+export async function webSetup(opts: { webDir?: string; emit?: WebOptions['emit']; publicUrl?: string } = {}) {
   const e = setup()
   const mailer = new OutboxMailer(e.dir, true)
-  const w = makeWebCtx(e.ctx, { mailer, webDir: opts.webDir ?? '/nonexistent', emit: opts.emit })
+  const w = makeWebCtx(e.ctx, { mailer, webDir: opts.webDir ?? '/nonexistent', emit: opts.emit, publicUrl: opts.publicUrl })
   sharedHash ??= await hashPassword(PASSWORD)
   const pid = (name: string) => e.db.query<{ id: number }, [string]>('SELECT id FROM people WHERE name = ?').get(name)!.id
   for (const n of ['dion', 'kim', 'boss', 'lee', 'park'])
