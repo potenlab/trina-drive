@@ -192,14 +192,12 @@ export function placeNewFile(node: Node, name: string, bytes: Uint8Array): Place
   const tmp = path.join(node.real, `~$${NAME}-promote-${crypto.randomBytes(6).toString('hex')}.tmp`)
   const W = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW
   const fd = fs.openSync(tmp, W, 0o644)
-  let placed = false
   try {
     try { writeAll(fd, bytes) } finally { fs.closeSync(fd) }
     recheckDir(node)
     promoteHooks.beforePlace?.(final)
     try {
       fs.linkSync(tmp, final)
-      placed = true
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code ?? ''
       if (code === 'EEXIST') throw exists(name, vp)
@@ -209,15 +207,13 @@ export function placeNewFile(node: Node, name: string, bytes: Uint8Array): Place
         if ((e2 as NodeJS.ErrnoException).code === 'EEXIST') throw exists(name, vp)
         throw e2
       }
-      placed = true
-      try { writeAll(fd2, bytes) } finally { fs.closeSync(fd2) }
+      try { writeAll(fd2, bytes) } catch (e3) { try { fs.unlinkSync(final) } catch {} throw e3 } finally { fs.closeSync(fd2) }
     }
   } catch (e) {
     try { fs.unlinkSync(tmp) } catch {}
     throw e
   }
   try { fs.unlinkSync(tmp) } catch {}
-  void placed
   const st = fs.lstatSync(final, { bigint: true })
   const back = fs.readFileSync(final)
   if (!st.isFile() || st.nlink !== 1n || sha256(back) !== sha256(bytes)) {
