@@ -61,6 +61,34 @@ export function canSeeDraft(access: Access, token: TokenRow, d: Draft): boolean 
   return true
 }
 
+/**
+ * A draft's sources as one caller may be shown them (원칙 2). Src(d) can hold folders the caller cannot see: a NAS
+ * copy of someone else's draft passes its sources on to whoever reads it (R3/R6), and rules change after a draft
+ * was written. Only folders `access` can read right now (R1 ①–④, the same test as R4) are named, by the path the
+ * caller sees; every other source (hidden, unregistered, moved or gone alike) is only counted, so the answer is the
+ * same whether such a folder exists or not. Src itself is unchanged; this is for showing it.
+ */
+export interface SourcesView { shown: { folder: string; strong: boolean }[]; hidden: number }
+export function sourcesFor(access: Access, src: Map<number, boolean>): SourcesView {
+  const shown: SourcesView['shown'] = []
+  let hidden = 0
+  for (const [id, strong] of src) {
+    const n = access.nodeForFolder(id)
+    if (n && access.canRead(n)) shown.push({ folder: n.vpath, strong })
+    else hidden++
+  }
+  return { shown: shown.sort((x, y) => x.folder.localeCompare(y.folder)), hidden }
+}
+
+/** The "Draft sources: …" line an agent gets after writing (write, edit, history restore). */
+export function sourcesLine(v: SourcesView): string {
+  const parts = v.shown.map((s) => s.folder.replace(/^\//, '') + (s.strong ? '' : ' (weak)'))
+  if (v.hidden) parts.push(`${v.hidden} folder${v.hidden === 1 ? '' : 's'} this token cannot see`)
+  if (!parts.length) return 'Draft sources: none (only this token can see it)'
+  return `Draft sources: ${parts.join(', ')}` +
+    (v.hidden ? '. The draft is kept, but this token cannot open it until it can read every source.' : '')
+}
+
 /** Where a draft appears under /drafts for this token: own drafts at the top, other tokens' under @<token name>/. */
 export const draftRel = (d: Draft, token: TokenRow) => d.token_id === token.id ? d.path : `@${d.token_name.replace(/[/\s]/g, '_')}/${d.path}`
 

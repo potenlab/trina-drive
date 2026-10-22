@@ -4,7 +4,7 @@ import { get } from '../api'
 import { fmtDate, t } from '../i18n'
 import { ErrorLine, Loading, Page, useLoad } from '../ui'
 
-interface Draft { id: number; path: string; token: string; version: number; size: number; updated_at: number; sources: { folder: string; strong: boolean }[] }
+interface Draft { id: number; path: string; token: string; version: number; size: number; updated_at: number; sources: { folder: string; strong: boolean }[]; hidden_sources?: number }
 
 const folderName = (vpath: string) => vpath.replace(/^\//, '')
 
@@ -27,7 +27,8 @@ export function Drafts() {
                   <div className="prov">
                     {strong.length > 0 && <span className="prov-strong">{t('contains_from', { folders: strong.join(', ') })}</span>}
                     {weak.length > 0 && <span className="muted small"> {t('looked_at', { folders: weak.join(', ') })}</span>}
-                    {d.sources.length === 0 && <span className="muted small">{t('no_sources')}</span>}
+                    {(d.hidden_sources ?? 0) > 0 && <span className="muted small"> {t('hidden_sources', { n: d.hidden_sources ?? 0 })}</span>}
+                    {d.sources.length === 0 && !d.hidden_sources && <span className="muted small">{t('no_sources')}</span>}
                   </div>
                 </div>
                 <div className="row-actions"><a className="btn small" href={`/api/drafts/${d.id}/download`} download>{t('download')}</a></div>

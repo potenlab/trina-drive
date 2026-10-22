@@ -1,9 +1,10 @@
 // The five agent tools. Each call: one Session (policy view + provenance), the work, then one commit with the audit
 // row. If the commit (audit) fails the call fails and nothing it wrote is kept.
-import { draftVersions } from './drafts'
+import { draftVersions, sourcesFor, sourcesLine } from './drafts'
+import { Access } from './policy'
 import { type Ctx, Session } from './session'
 import { runShell } from './shell'
-import { folderById, sha256, type TokenRow } from './store'
+import { sha256, type TokenRow } from './store'
 import { asFsError, MSG, VirtualFs, type Hit } from './vfs'
 import { discardKept } from './worker'
 
@@ -34,19 +35,13 @@ function fsMessage(e: unknown, p: string): string {
   return f.code === 'ENOENT' ? `No such file or directory: ${p}` : f.code === 'EISDIR' ? `Is a directory: ${p}` : f.message
 }
 
-/** "경영/sub" style label of a folder for showing a draft's sources. */
-function folderLabel(ctx: Ctx, id: number): string {
-  const f = folderById(ctx.db, id)
-  if (!f) return `#${id}`
-  const mount = ctx.db.query<{ path: string; mount_name: string }, []>('SELECT path, mount_name FROM folders WHERE registered = 1').all()
-    .filter((m) => f.path === m.path || f.path.startsWith(m.path + '/')).sort((a, b) => a.path.length - b.path.length)[0]
-  return mount ? mount.mount_name + f.path.slice(mount.path.length) : `#${id}`
-}
-
-function sourcesOf(ctx: Ctx, token: TokenRow, rel: string): string[] {
-  return ctx.db.query<{ folder_id: number; strong: number }, [number, string]>(
+/** Sources of the caller's own draft at `rel`, as this token may be shown them (원칙 2: hidden folders only counted). */
+function sourcesOf(ctx: Ctx, token: TokenRow, rel: string): string {
+  const src = new Map(ctx.db.query<{ folder_id: number; strong: number }, [number, string]>(
     'SELECT s.folder_id, s.strong FROM draft_src s JOIN drafts d ON d.id = s.draft_id WHERE d.token_id = ? AND d.path = ? AND d.deleted_at IS NULL')
-    .all(token.id, rel).map((s) => folderLabel(ctx, s.folder_id) + (s.strong ? '' : ' (weak)')).sort()
+    .all(token.id, rel).map((s) => [s.folder_id, !!s.strong] as const))
+  // a fresh view: the commit may have just added folder rows for subfolders this call touched
+  return sourcesLine(sourcesFor(Access.forToken(ctx.db, token), src))
 }
 
 const draftRelOf = (vfs: VirtualFs, p: string) => {
@@ -165,8 +160,7 @@ export async function callTool(ctx: Ctx, token: TokenRow, name: string, args: Re
     throw new AuditFailure(`The call could not be recorded in the audit log, so it was not completed (${(e as Error).message}).`)
   }
   if (wrote !== null) {
-    const src = sourcesOf(ctx, token, wrote)
-    result.content.push({ type: 'text', text: `Draft sources: ${src.length ? src.join(', ') : 'none (only this token can see it)'}` })
+    result.content.push({ type: 'text', text: sourcesOf(ctx, token, wrote) })
   }
   return result
 }
