@@ -157,7 +157,8 @@ async function main(argv: string[]) {
     case 'share list': for (const r of shareRoots(db)) console.log(r.path); return
     case 'reconcile once': {
       const json = takeBool(rest, '--json')
-      const r = await reconcile(db, { dataDir })
+      // extraction workers would keep a one-shot process alive
+      const r = await reconcile(db, { dataDir }).finally(closeDefaultExecutor)
       return console.log(json ? JSON.stringify(r, null, 2) : summary(r))
     }
     case 'reconcile watch': {

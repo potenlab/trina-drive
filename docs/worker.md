@@ -32,6 +32,8 @@ const r = await runShellIsolated('grep -r 매출 / | head', vfs, { token, person
 const { status, text } = await extractIsolated(bytes, 'docx', { token, person })
 ```
 
+The server itself extracts only through `extractDocument(name, bytes, who)` in `src/extract/run.ts` (next section).
+
 `runIsolated(job, opts)` / `Executor.run` is the general form. It never throws for job failures; it returns
 `RunResult.status`:
 
@@ -91,6 +93,28 @@ Checked against main (commit c7034b5) with a differential script: 28 commands ×
 After the call returns, nothing more reaches the backend: the executor stops serving the moment it parses `done`
 (or kills the worker) and waits for calls already running, so `s.commit()` sees the final state.
 
+## Document extraction (`src/extract/run.ts`)
+
+Every text extraction the server does goes through `extractDocument(name, bytes, who)`: the mirror's on-demand path
+(`cat`/`head`/`read`/`grep` of an office file, `src/mirror.ts`) with `who` = the calling token and person, and the
+reconciler's queue (`extractForIndex` in `src/inplace/extractq.ts`) with `who` = `@index`. It sends the bytes the server
+read with its own no-follow checks (R1 ⑤ ⑦) to a worker, so the worker has no file access at all.
+
+- **Its own executor** (`extractExecutor()`): one job per process (never kept), no shell engine loaded at boot
+  (`WORKER_PRELOAD=0`), 1 warm worker, admission global = CPUs / 2, per token 2, per person 3, queue 256. Separate from
+  the shell's on purpose: a shell command that reads an office file holds a shell slot while the server extracts, so
+  extraction queued behind shell jobs would deadlock until the deadline.
+- **pdftotext only where needed**: a PDF goes to a fresh worker whose profile may exec pdftotext (per-job `execPaths`,
+  path passed in the job: the worker does not share the server's environment); docx/xlsx/pptx/hwp/hwpx workers may
+  exec nothing.
+- **Limits**: `LIMITS.extractMs` (20 s) and `LIMITS.extractRssBytes` (512 MB) per document; text over 32 MB (the frame
+  cap) is `output`.
+- **Errors**: a parser error, deadline, memory or output kill, or a crash is an `ExtractError` ("cannot extract text:
+  …"); the mirror remembers it for that file version, so a malicious document costs one worker, not one per read.
+  `refused` (no isolation and `requireIsolation`), `busy` and a worker that did not start are `ExtractUnavailable`: the
+  read fails with that message and nothing is remembered. There is no in-process fallback.
+- `SHELF_EXTRACT=inprocess` runs the parsers in the server process (development and tests only).
+
 ## Protocol (v1, `protocol.ts`)
 
 Transport: the worker's stdin (server → worker) and stdout (worker → server); the worker redirects `console.*` to
@@ -142,6 +166,12 @@ The worker answers `/bin`, `/usr`, `/dev`, `/proc` itself from just-bash's stub 
   (default 512 MB) → SIGKILL.
 - **Bytes**: frames ≤ `maxFrameBytes` (32 MB), channel ≤ `maxChannelBytes` (256 MB), stderr kept to `maxLogBytes`
   (16 KB) and killed past 16× that. Shell output is also cut by the worker (`maxStdoutBytes` / `maxStderrBytes`).
+- **Back-pressure on reads**: at most 2 `read` calls per worker are served at once, and each keeps its slot until its
+  reply has left the pipe (`FileSink.flush()`). A worker that asks for many large files and stops reading its stdin
+  holds at most two replies in the server; everything it does take in counts against its own RSS cap. The server's
+  VirtualFs also caps what one call may read: 64 MB per file, 128 MB per call (`LIMITS.fileBytes`, `callReadBytes`),
+  checked from the size before anything is read (EFBIG; hidden paths never reach the check, so they still answer
+  ENOENT like missing ones).
 - **Kill** = SIGKILL to the process group (workers start with `setsid`) **and** to every descendant found by the probe
   (in case one left the group), at the breach and again after exit. Tests check that no worker or child survives.
 - **Job dir**: `mkdtemp` under `$TMPDIR/shelf-work-<uid>/` (0700; 0711 with a worker user), the worker's cwd, HOME
@@ -153,7 +183,9 @@ The worker answers `/bin`, `/usr`, `/dev`, `/proc` itself from just-bash's stub 
 ## Admission (`scheduler.ts`)
 
 Limits per token (default 2), per person (3) and overall (CPU count − 2, at least 2), plus at most 64 waiting jobs per
-token (beyond: `busy`). Waiting jobs sit in one queue per token, served round-robin across tokens; a person's tokens
+token (beyond: `busy`); env `SHELF_WORKERS_GLOBAL`, `_PER_TOKEN`, `_PER_PERSON`, `_QUEUE` (read when the process-wide
+executor starts). `info()` reports `limits` and `runningBy` (per token / per person); test/security/resource.test.ts
+checks all four through the `bash` tool. Extraction has its own scheduler (above). Waiting jobs sit in one queue per token, served round-robin across tokens; a person's tokens
 share the person limit. So one token's flood only fills its own slots and its own queue, and another token's job
 waits at most for one global slot.
 
@@ -223,22 +255,29 @@ A pre-built single-file bundle of the worker did not start faster (4.5 MB to par
 - Linux (bwrap, `/proc` probe) is written but untested here; Windows is not supported.
 - With a worker user, the memory probe needs the server to be root (libproc refuses other uids otherwise; `ps` would
   be the fallback).
-- Extraction by path grants that one file to a fresh worker (no warm pool). Prefer passing bytes the server read with
-  its own no-follow checks (R1 ⑤ ⑦); then the worker has no file access at all.
+- Extraction by path grants that one file to a fresh worker (no warm pool). The server always passes bytes it read
+  with its own no-follow checks (R1 ⑤ ⑦); then the worker has no file access at all. A PDF always starts a fresh
+  worker (its own exec grant), ≈ 60–100 ms more than a warm one.
+- The reconciler's extractions share the extraction executor with on-demand reads (as token `@index`, at most 2 at a
+  time); the round-robin queue keeps a token's read from waiting behind a whole indexing backlog, but not behind the
+  2 indexing jobs already running.
+- A remembered extraction failure (deadline, memory) stays until the file changes, also when it was caused by load.
 
 ## Configuration
 
-`new Executor(config)` or `defaultExecutor()` (env: `SHELF_ISOLATION=auto|sandbox-exec|bwrap|none`,
-`SHELF_REQUIRE_ISOLATION=0`, `SHELF_WORKER_USER=_shelfwork`, `SHELF_WORKERS_WARM=2`, `SHELF_WORKER_REUSE=0`). Config
+`new Executor(config)`, `defaultExecutor()` for shell commands (env: `SHELF_ISOLATION=auto|sandbox-exec|bwrap|none`,
+`SHELF_REQUIRE_ISOLATION=0`, `SHELF_WORKER_USER=_shelfwork`, `SHELF_WORKERS_WARM=2`, `SHELF_WORKER_REUSE=0`,
+`SHELF_WORKERS_GLOBAL/_PER_TOKEN/_PER_PERSON/_QUEUE`) and `extractExecutor()` for extraction (same isolation settings,
+`SHELF_EXTRACT_WARM=1`, `SHELF_EXTRACT_GLOBAL/_PER_TOKEN/_PER_PERSON/_QUEUE`). Config
 fields: `isolation`, `requireIsolation`, `runAs`, `requireRunAs`, `tmpRoot`, `warm`, `warmReserve`, `reuse`
 (`false` or `{idleMs, maxJobs, maxIdle}`), `limits` (scheduler), `defaults` (job limits), `codePaths`, `execPaths`,
-`runtime`, `entry`, `pollMs`, `bootTimeoutMs`. `closeDefaultExecutor()` stops the process-wide executor (a one-shot
+`runtime`, `entry`, `pollMs`, `bootTimeoutMs`, `preloadShell`. `closeDefaultExecutor()` stops the process-wide executor (a one-shot
 process such as `cli sh` calls it so the warm pool does not keep it alive). Per run: `token`, `person`,
-any `JobLimits` field, `backend`, `hooks`, `body`, `readPaths`, `signal`.
+any `JobLimits` field, `backend`, `hooks`, `body`, `readPaths`, `execPaths`, `signal`.
 
 ## Tests
 
-`bun test tests/worker.test.ts` (35 tests, ~12 s; the macOS sandbox tests are skipped elsewhere). Hostile fixtures in
+`bun test tests/worker.test.ts` (36 tests, ~12 s; the macOS sandbox tests are skipped elsewhere). Hostile fixtures in
 `tests/fixtures/hostile.ts` run inside workers: infinite loop, memory bomb, stderr flood, junk on the channel, forged
 protocol frames (un-offered command, requests after `done`), child-process spawn + spin (no survivors, job dir gone),
 network/write/read/list/exec/signal attempts, and the procargs probe. Plus: just-bash over a proxied in-memory backend
@@ -246,3 +285,11 @@ network/write/read/list/exec/signal attempts, and the procargs probe. Plus: just
 extraction through `src/extract` (docx from bytes; pdf via `pdftotext` from a granted path), latency, fairness under a
 flood, the scheduler and frame decoding, a backend bug answered with EIO, and kept workers (same token only; not
 after a failure, an extraction, `maxJobs` or `idleMs`; `discardKept`, `close`).
+A read flood (`readFlood`: 64 requests for a 16 MB file, then never reading stdin) is held to 2 reads.
+
+`bun test test/extract-isolation.test.ts`: the server's extraction path with malicious documents
+(`test/hostile-docs.ts`): a docx and an xlsx zip bomb, a docx whose text run makes the tag-stripping regex quadratic
+(minutes of synchronous work), and a 1 KB .hwp whose self-referencing DIFAT chain makes the CFB reader build a > 1 GB
+FAT. Each `cat` is refused with the reason while another token's `ls` keeps p99 < 200 ms, the failure is remembered,
+the reconciler path is isolated too, and without isolation extraction is refused. In-process the same files block the
+server for 1.2 s (docx bomb, 850 MB), 29 s (xlsx bomb, 1.6 GB), 6 s (hwp, 1.8 GB) and ~10 min (regex).
