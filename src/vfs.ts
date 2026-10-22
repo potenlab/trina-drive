@@ -48,6 +48,14 @@ function sys(): InMemoryFs {
   return sysFs
 }
 
+/** just-bash's in-memory fs throws plain Errors; everything leaving VirtualFs is an FsError (bash-like message, no crash). */
+async function sysCall<T>(fn: () => Promise<T>, syscall: string, p: string): Promise<T> {
+  try { return await fn() } catch (e) {
+    const code = /^(E[A-Z]+)/.exec(String((e as Error)?.message))?.[1]
+    throw code === 'EISDIR' ? eisdir(syscall, p) : code === 'ENOTDIR' ? enotdir(syscall, p) : enoent(syscall, p)
+  }
+}
+
 export type Hit =
   | { t: 'root' } | { t: 'rawroot' }
   | { t: 'sys'; p: string }
@@ -126,7 +134,7 @@ export class VirtualFs implements IFileSystem {
     const m = currentMode()
     if (h.t === 'sys') {
       // just-bash's in-memory /bin /proc /dev throw plain Errors; callers (the read tool) expect FsError
-      try { return await sys().readFileBuffer(h.p) } catch (e) { throw String((e as Error)?.message).startsWith('EISDIR') ? eisdir('read', p) : enoent('open', p) }
+      return sysCall(() => sys().readFileBuffer(h.p), 'open', p)
     }
     if (h.t === 'draft') { this.s.touchDraft(h.item, !m.weak); return this.s.draftContent(h.item) }
     if (h.t !== 'file') throw eisdir('read', p)
@@ -169,7 +177,7 @@ export class VirtualFs implements IFileSystem {
     const h = this.hit(p, 'stat')
     this.touchMeta(h)
     switch (h.t) {
-      case 'sys': return sys().stat(h.p)
+      case 'sys': return sysCall(() => sys().stat(h.p), 'stat', p)
       case 'file': return fileStat(h.f.size, h.f.mtimeMs)
       case 'draft': return fileStat(this.s.draftContent(h.item).length, h.item.draft?.updated_at ?? Date.now())
       default: return dirStat()
@@ -179,7 +187,7 @@ export class VirtualFs implements IFileSystem {
   async readdir(p: string): Promise<string[]> { return (await this.readdirWithFileTypes(p)).map((d) => d.name) }
   async readdirWithFileTypes(p: string): Promise<DirentEntry[]> {
     const h = this.hit(p, 'scandir')
-    if (h.t === 'sys') return sys().readdirWithFileTypes(h.p)
+    if (h.t === 'sys') return sysCall(() => sys().readdirWithFileTypes(h.p), 'scandir', p)
     if (h.t === 'file' || h.t === 'draft') throw enotdir('scandir', p)
     if (h.t === 'dir') this.s.touchNode(h.node, false)
     return this.children(h).map((c) => ({ name: c.name, isFile: !c.dir, isDirectory: c.dir, isSymbolicLink: false }))

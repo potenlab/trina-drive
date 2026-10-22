@@ -17,3 +17,11 @@ describe('read on just-bash pseudo folders', () => {
     expect(textOf(await e.tool('kim', 'read', { path: '/proc/version' }))).toContain('just-bash')
   })
 })
+
+describe('shell on just-bash pseudo folders', () => {
+  test.each([['[ -d "/dev/null." ] && echo d; echo $?'], ['test -f /dev/nul{d,v}; echo $?'], ['stat /proc/nope'], ['ls /bin/nope'], ['ls -la /dev/../proc/x'], ['cat /proc/self/nope'],
+    ['find /proc/none'], ['du /dev/x']])('%s runs like bash (no exception)', async (c) => {
+    const r = await e.sh('kim', c)
+    expect(typeof r.exitCode).toBe('number')
+  })
+})
