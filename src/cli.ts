@@ -5,7 +5,8 @@ import { defaultDataDir, NAME, VERSION } from './config'
 import { openDb } from './db'
 import { seedDemo } from './demo'
 import { TOOLS } from './extract'
-import { serve } from './mcp'
+import { issueSetupToken } from './web/auth'
+import { serveWeb } from './web/server'
 import { makeCtx, Session } from './session'
 import { runShell } from './shell'
 import { addGroup, addMember, addPerson, createToken, grantManage, LEVELS, parseDuration, registerFolder, revokeToken, setFlag, setRule, StoreError, verifyToken, type LevelName, type NasReaders } from './store'
@@ -14,7 +15,7 @@ const HELP = `${NAME} ${VERSION} — permission-aware read shell and draft box f
 
 usage: ${NAME} [--data DIR] <command>
 
-  init                                   create the data directory
+  init                                   create the data directory; prints the one-time web setup token
   person add <name> [--admin]
   group add <name>
   group member <group> <person>
@@ -27,7 +28,7 @@ usage: ${NAME} [--data DIR] <command>
   audit verify
   demo seed                              sample company tree, people, rules and tokens
   sh --token <pat> -c <command>          run one shell command as that token (audited)
-  serve [--port 8787] [--host 127.0.0.1] [--allow-origin URL]
+  serve [--port 8787] [--host 127.0.0.1] [--allow-origin URL] [--public-url URL]   web admin at /, MCP at /mcp
 
 data directory: --data, $${NAME.toUpperCase()}_HOME, or ~/.${NAME}`
 
@@ -56,7 +57,13 @@ async function main(argv: string[]) {
   const need = (v: string | undefined, what: string) => { if (!v) throw new StoreError(`missing ${what}`); return v }
 
   switch (single ? cmd : `${cmd} ${sub ?? ''}`.trim()) {
-    case 'init': return console.log(`data directory ready: ${dataDir}`)
+    case 'init': {
+      console.log(`data directory ready: ${dataDir}`)
+      const setup = issueSetupToken(db)
+      if (setup) console.log(`web setup token (one use, 7 days; paste it on the first web page to create the admin):\n${setup}`)
+      else console.log('web setup is already done (an admin can sign in)')
+      return
+    }
     case 'person add': { const admin = takeBool(rest, '--admin'); addPerson(db, need(rest[0], 'name'), admin); return console.log(`added ${rest[0]}${admin ? ' (admin)' : ''}`) }
     case 'group add': addGroup(db, need(rest[0], 'group name')); return console.log(`added group ${rest[0]}`)
     case 'group member': addMember(db, need(rest[0], 'group'), need(rest[1], 'person')); return console.log(`${rest[1]} is in ${rest[0]}`)
@@ -102,6 +109,8 @@ async function main(argv: string[]) {
       console.log(`kim token:                    ${tokens.kim.token}`)
       console.log(`boss token:                   ${tokens.boss.token}`)
       console.log(`boss token (프로젝트 only):    ${tokens.bossNarrow.token}`)
+      const setup = issueSetupToken(db)
+      if (setup) console.log(`web setup token (sign up as dion): ${setup}`)
       return
     }
     case 'sh': {
@@ -121,10 +130,11 @@ async function main(argv: string[]) {
       const port = Number(takeFlag(rest, '--port') ?? 8787)
       const host = takeFlag(rest, '--host') ?? '127.0.0.1'
       const origin = takeFlag(rest, '--allow-origin')
+      const publicUrl = takeFlag(rest, '--public-url')
       if (!TOOLS.rg) throw new StoreError('ripgrep (rg) is required: brew install ripgrep')
       if (!TOOLS.pdftotext) console.error('warning: pdftotext not found (brew install poppler); PDFs will not be readable')
-      const server = serve(makeCtx(db, dataDir), port, host, { allowedOrigins: origin ? [origin] : [] })
-      console.log(`${NAME} ${VERSION} MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
+      const { server } = serveWeb(makeCtx(db, dataDir), port, host, { allowedOrigins: origin ? [origin] : [], publicUrl })
+      console.log(`${NAME} ${VERSION} web: http://${host}:${server.port}/   MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
       console.log(`tools: rg=${TOOLS.rg} pdftotext=${TOOLS.pdftotext ?? 'missing'}`)
       return new Promise(() => {})
     }
