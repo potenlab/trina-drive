@@ -103,7 +103,7 @@ if (term) {
         for (const ch of full[i] ?? '') {
           if (me !== run) return
           text.textContent += ch
-          await sleep(28 + Math.random() * 40)
+          await sleep(22 + Math.random() * 30)
         }
         await sleep(380)
         caret.remove()
