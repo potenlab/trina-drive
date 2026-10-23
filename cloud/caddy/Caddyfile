@@ -6,6 +6,7 @@
 #   TDCLOUD_SLUG_LABEL    how many labels TDCLOUD_DOMAIN has (cloud.trina.app → 3): {labels.N} is then the slug
 #   TDCLOUD_ASK_URL       http://<control private IP>:8790/internal/caddy/ask?key=<TDCLOUD_CADDY_ASK_KEY>
 #   ACME_EMAIL            Let's Encrypt account contact
+#   TDCLOUD_TRUSTED_OFFICE_CIDRS  client ranges with higher rate limits (team_routes.caddy; Terraform office_cidrs)
 #
 # TLS: on-demand (HTTP-01 / TLS-ALPN-01), one certificate per team name, issued only for names the control plane
 # says are live teams (`ask`). The wildcard alternative (DNS-01 on Route 53) is in cloud/README.md, "TLS".

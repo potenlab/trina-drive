@@ -1,40 +1,92 @@
 # The routes in front of every team (imported by Caddyfile and Caddyfile.dev).
+#
+# Environment (all optional):
+#   TDCLOUD_TRUSTED_OFFICE_CIDRS  space-separated client ranges with higher limits (one office NAT carries a whole team:
+#                                 Finder's WebDAV PROPFINDs, everyone's MCP). Default 192.0.2.0/32 (TEST-NET-1: nobody).
+#   TDCLOUD_DAV_MAX_BODY          request body cap on /dav/* (WebDAV uploads; default 4GiB). Everything else: 25MB.
 (team_routes) {
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options nosniff
 		-Server
 	}
-	request_body {
+	# WebDAV (Finder, Windows, rclone) uploads whole files in one PUT: its own cap; the product enforces the plan's quota
+	# and its own per-file maximum (TDRIVE_MAX_FILE_BYTES). Everything else stays small.
+	@dav path /dav /dav/*
+	@notdav not path /dav /dav/*
+	request_body @dav {
+		max_size {$TDCLOUD_DAV_MAX_BODY:4GiB}
+	}
+	request_body @notdav {
 		max_size 25MB
 	}
-	# per client address ({client_ip}: the TCP peer, or what a trusted front proxy says; see the global options)
+	# per client address ({client_ip}: the TCP peer, or what a trusted front proxy says; see the global options). The
+	# office ranges get their own zones with higher limits; everyone else the normal ones.
 	rate_limit {
 		zone signin {
 			match {
-				path /api/login /api/login/second /api/setup /api/links/* /api/me/reauth /oauth/token /oauth/register /oauth/authorize
+				path /api/login /api/login/second /api/setup /api/links/* /api/me/reauth /api/sso/* /oauth/token /oauth/register /oauth/authorize
+				not client_ip {$TDCLOUD_TRUSTED_OFFICE_CIDRS:192.0.2.0/32}
 			}
 			key {client_ip}
 			events 30
 			window 1m
 		}
-		zone mcp {
+		zone signin_office {
 			match {
-				path /mcp
+				path /api/login /api/login/second /api/setup /api/links/* /api/me/reauth /api/sso/* /oauth/token /oauth/register /oauth/authorize
+				client_ip {$TDCLOUD_TRUSTED_OFFICE_CIDRS:192.0.2.0/32}
 			}
 			key {client_ip}
 			events 300
 			window 1m
 		}
+		zone mcp {
+			match {
+				path /mcp
+				not client_ip {$TDCLOUD_TRUSTED_OFFICE_CIDRS:192.0.2.0/32}
+			}
+			key {client_ip}
+			events 300
+			window 1m
+		}
+		zone mcp_office {
+			match {
+				path /mcp
+				client_ip {$TDCLOUD_TRUSTED_OFFICE_CIDRS:192.0.2.0/32}
+			}
+			key {client_ip}
+			events 1500
+			window 1m
+		}
 		zone all {
+			match {
+				not client_ip {$TDCLOUD_TRUSTED_OFFICE_CIDRS:192.0.2.0/32}
+			}
 			key {client_ip}
 			events 1200
+			window 1m
+		}
+		zone all_office {
+			match {
+				client_ip {$TDCLOUD_TRUSTED_OFFICE_CIDRS:192.0.2.0/32}
+			}
+			key {client_ip}
+			events 6000
 			window 1m
 		}
 	}
 	# /health is for the host itself (Docker's HEALTHCHECK runs inside the container)
 	respond /health 404
-	reverse_proxy tdc-{labels.{$TDCLOUD_SLUG_LABEL}}:8787 {
+	# WebDAV: the answer to a large PUT comes after the product has written (and hashed) the whole file
+	reverse_proxy @dav tdc-{labels.{$TDCLOUD_SLUG_LABEL}}:8787 {
+		header_up X-Forwarded-For {client_ip}
+		transport http {
+			dial_timeout 3s
+			response_header_timeout 10m
+		}
+	}
+	reverse_proxy @notdav tdc-{labels.{$TDCLOUD_SLUG_LABEL}}:8787 {
 		# exactly one address, the client's, whatever the client sent: the team believes this header from Caddy's fixed
 		# address only (TDRIVE_TRUSTED_PROXY), so its sign-in / MCP limits and audit addresses are per client
 		header_up X-Forwarded-For {client_ip}
