@@ -26,5 +26,8 @@ locals {
   control_mail_address = "cloud@${local.mail_domain}"
   team_mail_address    = var.team_mail_address != "" ? var.team_mail_address : "drive@${local.mail_domain}"
   team_mail_from       = "${var.team_mail_name} <${local.team_mail_address}>"
-  ses_identity_arn     = "arn:${local.partition}:ses:${var.region}:${local.account}:identity/${local.mail_domain}"
+  # SES authorizes a send against the identity it matches, which is not always the domain: before the domain verifies
+  # (and for sandbox recipients) it checks identity/<address> (first AWS run: AccessDenied on identity/drive@...). The
+  # roles may therefore use any identity of the account, and the ses:FromAddress condition is what limits them.
+  ses_identity_arns = ["arn:${local.partition}:ses:${var.region}:${local.account}:identity/*"]
 }

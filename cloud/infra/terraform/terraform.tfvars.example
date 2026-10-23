@@ -1,11 +1,14 @@
-# cp terraform.tfvars.example terraform.tfvars, then edit
-region      = "ap-northeast-2"
-domain      = "cloud.trina.app"
-mail_domain = "trina.app"
-acme_email  = "contact@trina.app"
-host_count  = 1
+# Copy outside the repository (README, Deploy step 1): cp terraform.tfvars.example ~/.config/trina-drive/tdcloud-tf/terraform.tfvars
+region     = "ap-northeast-2"
+domain     = "cloud.trina.app"
+acme_email = "contact@trina.app"
+# mail_domain = ""                 # empty = domain: SES DKIM/DMARC records go into the Route 53 zone
+host_count = 1                     # 0 = hold mode (README, "Hold mode")
 # host_instance_type = "m7g.xlarge"
-# host_data_gb       = 500
-trina_image_tag   = "0.2.0"
-control_image_tag = "0.1.0"
+# host_data_gb       = 300
+trina_image_tag   = "0.2.0-<commit>" # tags are immutable: a new tag per build
+control_image_tag = "0.1.0-<commit>"
 caddy_image_tag   = "2.10.2-1"
+# a deploy identity without kms:PutKeyPolicy / iam:TagRole (README, Deploy step 0):
+# kms_admin_arns                         = ["arn:aws:iam::<account>:user/tdcloud-deploy"]
+# create_autoscaling_service_linked_role = false
