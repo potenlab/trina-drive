@@ -30,10 +30,11 @@
 .cd-app-mark svg { width: 14px; height: 14px; }
 .cd-conn {
   display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border-radius: 999px; white-space: nowrap;
-  color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  color: var(--fg-muted); background: var(--inset); border: 1px solid var(--border);
   font-size: 12px; font-weight: 550;
 }
-.cd-conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+/* status only: a small success-green dot, the label stays neutral */
+.cd-conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
 .cd-users { margin-left: auto; display: grid; justify-items: end; }
 .cd-user {
   grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 550; white-space: nowrap;
@@ -43,7 +44,7 @@
 .cd-user[data-active="false"] { opacity: 0; visibility: hidden; }
 .cd-avatar-sm, .sv-avatar {
   display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-size: 11px; font-weight: 650;
-  background: var(--accent-grad); color: #fff;
+  background: var(--signal); color: var(--signal-fg);
 }
 
 .cd-stack { display: grid; padding: 24px 26px 10px; }
@@ -93,9 +94,9 @@
 .cd-tail { margin-top: 12px; font-size: 14.5px; color: var(--fg-muted); }
 .cd-saved {
   margin-top: 14px; display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px; border-radius: 12px;
-  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--accent-soft);
+  border: 1px dashed var(--border-strong); background: var(--inset);
 }
-.cd-saved-icon { color: var(--accent); margin-top: 1px; }
+.cd-saved-icon { color: var(--ok); margin-top: 1px; }
 .cd-saved-icon svg { width: 17px; height: 17px; }
 .cd-saved-text { display: grid; gap: 2px; font-size: 14px; }
 .cd-saved-text b { font-weight: 600; }
@@ -111,9 +112,9 @@
 .cd-chip-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .cd-ext {
   display: inline-grid; place-items: center; min-width: 32px; padding: 1px 4px; border-radius: 5px; font-family: var(--font-sans);
-  font-size: 9.5px; font-weight: 700; letter-spacing: 0.02em; color: #fff; background: #6b7280;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.02em; color: #fff; background: #6b645d;
 }
-.cd-ext-pdf { background: #c2410c; }
+.cd-ext-pdf { background: #b42318; }
 .cd-ext-xlsx { background: #15803d; }
 .cd-ext-docx { background: #1d4ed8; }
 
@@ -372,6 +373,7 @@
 /* ---------- for developers ---------- */
 .dev-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 56px; align-items: center; }
 .dev-copy .section-head { margin-bottom: 24px; }
+.dev-copy .section-head h2 { font-size: clamp(30px, 3.6vw, 46px); }
 .dev-points { display: grid; gap: 10px; margin-bottom: 24px; }
 .dev-points li { position: relative; padding-left: 28px; font-size: 15px; color: var(--fg-muted); }
 .dev-points svg { position: absolute; left: 0; top: 3px; width: 17px; height: 17px; color: var(--accent); }

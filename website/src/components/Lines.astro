@@ -1,0 +1,7 @@
+---
+// A heading text with deliberate line breaks: "\n" in the copy becomes <br>, so two-sentence headings always break
+// between the sentences (each part still wraps on its own on narrow screens).
+interface Props { text: string }
+const parts = Astro.props.text.split('\n')
+---
+{parts.map((line, i) => <>{i > 0 && <br />}{line}</>)}

@@ -2,21 +2,21 @@
   <title id="t">How Trina Drive works</title>
   <desc id="d">AI apps connect over MCP to a Trina Drive server in your office. Every request goes through one permission check (the person's rules intersected with the token's scope) before it reaches your existing folders, which stay read-only. Agents write to a draft box that remembers sources, and every call is written to a hash-chained audit log.</desc>
   <style>
-    .bg { fill: #ffffff } .card { fill: #ffffff; stroke: #d4d6d2 } .soft { fill: #f6f7f6; stroke: #e7e8e5 }
-    .srv { fill: #f7fbf9; stroke: #0a7a53; stroke-dasharray: 6 5 } .gate { fill: #e7f6ef; stroke: #0a7a53 }
-    .h { font: 650 17px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #0a0b0d }
-    .t { font: 500 14px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #0a0b0d }
-    .m { font: 400 13px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #4d535b }
-    .k { font: 600 12px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; letter-spacing: .06em; fill: #656b74 }
-    .a { font: 600 13px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #0a7a53 }
-    .code { font: 500 13px "Geist Mono", ui-monospace, Menlo, Consolas, monospace; fill: #0a0b0d }
-    .ln { stroke: #0a7a53; stroke-width: 2; fill: none } .ln2 { stroke: #8b929c; stroke-width: 1.6; fill: none; stroke-dasharray: 5 4 }
-    .ah { fill: #0a7a53 } .ah2 { fill: #8b929c } .pill { fill: #e7f6ef } .pill2 { fill: #fdf3e2 } .p2 { fill: #8a5a00 }
+    .bg { fill: #fcfbf8 } .card { fill: #ffffff; stroke: #d8d0c3 } .soft { fill: #f6f2ea; stroke: #e9e3d8 }
+    .srv { fill: #fffaf6; stroke: #c43d0a; stroke-dasharray: 6 5 } .gate { fill: #fdf0e8; stroke: #c43d0a }
+    .h { font: 650 17px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #14110f }
+    .t { font: 500 14px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #14110f }
+    .m { font: 400 13px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #514b45 }
+    .k { font: 600 12px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; letter-spacing: .06em; fill: #6b645d }
+    .a { font: 600 13px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #c43d0a }
+    .code { font: 500 13px "Geist Mono", ui-monospace, Menlo, Consolas, monospace; fill: #14110f }
+    .ln { stroke: #c43d0a; stroke-width: 2; fill: none } .ln2 { stroke: #958c82; stroke-width: 1.6; fill: none; stroke-dasharray: 5 4 }
+    .ah { fill: #c43d0a } .ah2 { fill: #958c82 } .pill { fill: #fdf0e8 } .pill2 { fill: #f3efe7 } .p2 { fill: #514b45 }
     @media (prefers-color-scheme: dark) {
-      .bg { fill: #0d1117 } .card { fill: #11161d; stroke: #30363d } .soft { fill: #161b22; stroke: #30363d }
-      .srv { fill: #0f1a16; stroke: #3ddc97 } .gate { fill: #0f2a20; stroke: #3ddc97 }
-      .h, .t, .code { fill: #f2f3f5 } .m { fill: #a7adb6 } .k { fill: #8a919b } .a { fill: #3ddc97 }
-      .ln { stroke: #3ddc97 } .ah { fill: #3ddc97 } .pill { fill: #0f2a20 } .pill2 { fill: #2a2110 } .p2 { fill: #f5c26b }
+      .bg { fill: #0e0c0b } .card { fill: #151210; stroke: #2c2723 } .soft { fill: #1a1714; stroke: #2c2723 }
+      .srv { fill: #17110d; stroke: #ff6a33 } .gate { fill: #2a160c; stroke: #ff6a33 }
+      .h, .t, .code { fill: #f6f2ea } .m { fill: #b3aaa0 } .k { fill: #958c82 } .a { fill: #ff6a33 }
+      .ln { stroke: #ff6a33 } .ah { fill: #ff6a33 } .pill { fill: #2a160c } .pill2 { fill: #1d1916 } .p2 { fill: #b3aaa0 }
     }
   </style>
   <defs>

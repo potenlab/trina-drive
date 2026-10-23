@@ -2,6 +2,7 @@
 // Variant B: "Shared with the whole team, safely" — three cards with small UI illustrations in plain terms (who sees
 // which folder, a draft with its sources, the access log), then the limits in three lines (full promise on /security).
 // Illustrations are decorative; the card text says it in words.
+import Lines from '../Lines.astro'
 import type { CopyB } from '../../content/en-b'
 import Icon from '../Icon.astro'
 interface Props { t: CopyB }
@@ -12,7 +13,7 @@ const s = t.safe
   <div class="container">
     <div class="section-head" data-reveal>
       <span class="eyebrow">{s.eyebrow}</span>
-      <h2 id="safe-title">{s.title}</h2>
+      <h2 id="safe-title"><Lines text={s.title} /></h2>
       <p>{s.sub}</p>
     </div>
     <ul class="bento bento-pillars">

@@ -1,6 +1,7 @@
 ---
 // Competitor table, driven entirely by t.competitors (rendered only when t.competitors.enabled). One row per product,
 // Trina Drive first and highlighted. Scrolls sideways inside its own box on small screens.
+import Lines from './Lines.astro'
 import type { Copy } from '../content/en'
 interface Props { t: Copy }
 const { t } = Astro.props
@@ -10,7 +11,7 @@ const c = t.competitors
   <div class="container">
     <div class="section-head" data-reveal>
       <span class="eyebrow">{c.eyebrow}</span>
-      <h2 id="compare-title">{c.title}</h2>
+      <h2 id="compare-title"><Lines text={c.title} /></h2>
     </div>
     <div class="compare-wrap" role="region" aria-labelledby="compare-title" tabindex="0">
       <table class="compare">

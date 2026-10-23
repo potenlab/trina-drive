@@ -9,12 +9,12 @@
 <style>
   @font-face { font-family: "Geist"; src: url("../../../website/public/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; }
   @font-face { font-family: "Geist Mono"; src: url("../../../website/public/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; }
-  :root { --fg: #f2f3f5; --muted: #a7adb6; --accent: #3ddc97; --grad: linear-gradient(100deg, #6ee7b7 0%, #3ddc97 40%, #67e8f9 100%); }
+  :root { --fg: #f6f2ea; --muted: #b3aaa0; --accent: #ff6a33; --grad: linear-gradient(100deg, #ff6a33 0%, #ff8a4c 55%, #ffab73 100%); }
   * { box-sizing: border-box; margin: 0; }
-  html, body { width: 1280px; height: 400px; overflow: hidden; background: #08090b; }
+  html, body { width: 1280px; height: 400px; overflow: hidden; background: #0e0c0b; }
   body { font-family: "Geist", system-ui, sans-serif; color: var(--fg); position: relative; -webkit-font-smoothing: antialiased; }
   .bg { position: absolute; inset: 0; background: url("../../../website/public/img/hero-dark-2400.webp") center 42% / cover no-repeat; }
-  .bg::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse 52% 70% at 50% 50%, rgba(8, 9, 11, 0.92) 0%, rgba(8, 9, 11, 0.7) 55%, rgba(8, 9, 11, 0.15) 100%); }
+  .bg::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse 52% 70% at 50% 50%, rgba(14, 12, 11, 0.92) 0%, rgba(14, 12, 11, 0.7) 55%, rgba(14, 12, 11, 0.15) 100%); }
   .c { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 80px; }
   .brand { display: flex; align-items: center; gap: 14px; font-size: 30px; font-weight: 640; letter-spacing: -0.02em; }
   .brand svg { width: 46px; height: 46px; }
@@ -28,17 +28,17 @@
   body.social, body.social .bg { height: 640px; } html:has(body.social) { height: 640px; }
   body.social h1 { font-size: 60px; margin-top: 34px; } body.social .brand { font-size: 38px; } body.social .brand svg { width: 58px; height: 58px; }
   body.social .sub { font-size: 21px; margin-top: 28px; flex-direction: column; gap: 10px; } body.social .tags { margin-top: 34px; font-size: 17px; }
-  body.social .bg::after { background: radial-gradient(ellipse 60% 70% at 50% 50%, rgba(8, 9, 11, 0.93) 0%, rgba(8, 9, 11, 0.72) 60%, rgba(8, 9, 11, 0.2) 100%); }
+  body.social .bg::after { background: radial-gradient(ellipse 60% 70% at 50% 50%, rgba(14, 12, 11, 0.93) 0%, rgba(14, 12, 11, 0.72) 60%, rgba(14, 12, 11, 0.2) 100%); }
   /* chat illustration */
-  html:has(body.chat) { height: 860px; background: #f6f7f6; }
-  body.chat { height: 860px; background: #f6f7f6; color: #0a0b0d; }
-  body.chat .bg { background-image: url("../../../website/public/img/hero-light-2400.webp"); opacity: .9; } body.chat .bg::after { display: none; }
+  html:has(body.chat) { height: 860px; background: #f6f2ea; }
+  body.chat { height: 860px; background: #f6f2ea; color: #14110f; }
+  body.chat .bg { background-image: url("../../../website/public/img/hero-light-2400.webp"); opacity: .55; } body.chat .bg::after { display: none; }
   body.chat .c { justify-content: flex-start; padding: 40px 56px 0; }
-  .label { display: inline-flex; align-items: center; gap: 10px; padding: 8px 16px; border-radius: 999px; background: #e7f6ef; color: #0a7a53;
-    border: 1px solid rgba(10, 122, 83, .25); font-size: 17px; font-weight: 580; }
-  .label::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #0a7a53; box-shadow: 0 0 0 4px rgba(10,122,83,.15); }
+  .label { display: inline-flex; align-items: center; gap: 10px; padding: 8px 16px; border-radius: 999px; background: #fdf0e8; color: #c43d0a;
+    border: 1px solid rgba(196, 61, 10, .25); font-size: 17px; font-weight: 580; }
+  .label::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #ff5b1f; box-shadow: 0 0 0 4px rgba(255,91,31,.18); }
   .shot { margin-top: 26px; width: 1168px; border-radius: 18px; }
-  .note { margin-top: 18px; font-size: 14px; color: #656b74; }
+  .note { margin-top: 18px; font-size: 14px; color: #6b645d; }
   body:not(.chat) .chatonly, body.chat .nochat { display: none; }
 </style>
 </head>
@@ -46,7 +46,7 @@
 <div class="bg"></div>
 <div class="c nochat">
   <div class="brand">
-    <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" fill="#f2f3f5"/><path d="M8 11.5a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2V21a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2z" fill="none" stroke="#0a0b0d" stroke-width="1.8" stroke-linejoin="round"/><circle cx="16" cy="16.5" r="1.9" fill="#0a7a53"/><path d="M16 18v2.4" stroke="#0a7a53" stroke-width="1.8" stroke-linecap="round"/></svg>
+    <svg viewBox="0 0 32 32" aria-hidden="true"><defs><mask id="m" maskUnits="userSpaceOnUse" x="-8" y="-8" width="48" height="48"><rect x="-8" y="-8" width="48" height="48" fill="#fff"/><path d="M16 19.028L11.497 13.85L2.528 11.25L11.497 8.65L16 3.472L20.503 8.65L29.472 11.25L20.503 13.85Z" fill="#000" stroke="#000" stroke-width="3" stroke-linejoin="round"/><path d="M16 19.028L16 29.528" stroke="#000" stroke-width="1.65"/></mask></defs><g fill="#f6f2ea" stroke="#f6f2ea" stroke-width="0.25" stroke-linejoin="round" mask="url(#m)"><path d="M29.472 11.25L20.503 13.85L20.503 23.35L29.472 20.75Z"/><path d="M11.497 13.85L2.528 11.25L2.528 20.75L11.497 23.35Z"/><path d="M16 19.028L11.497 13.85L11.497 23.35L16 28.528Z"/><path d="M20.503 13.85L16 19.028L16 28.528L20.503 23.35Z"/></g><path d="M16 19.028L11.497 13.85L2.528 11.25L11.497 8.65L16 3.472L20.503 8.65L29.472 11.25L20.503 13.85Z" fill="#ff6a33"/></svg>
     Trina Drive
   </div>
   <h1>Your company folders,<br><span>as your team’s AI knowledge base.</span></h1>

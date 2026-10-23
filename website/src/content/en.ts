@@ -129,7 +129,7 @@ const en = {
   // No dollar figures for ontology projects. Don't claim connectors can't read files: they read one at a time.
   compare: {
     eyebrow: 'Why folders',
-    title: 'No ontology project. No one-file connector.',
+    title: 'No ontology project.\nNo one-file connector.',
     sub: 'Search every folder at once, where the files already live.',
     cols: ['Ontology / RAG', 'Drive connector', 'Trina Drive'],
     rows: [
@@ -219,7 +219,7 @@ const en = {
   },
   features: {
     eyebrow: 'What you get',
-    title: 'Ask in plain words. Your agent digs.',
+    title: 'Ask in plain words.\nYour agent digs.',
     // Text inside the small product illustrations on each card (decorative; the card text says it in words).
     minis: {
       filter: {
@@ -415,7 +415,7 @@ const en = {
   },
   faq: {
     eyebrow: 'FAQ',
-    title: 'Questions, answered plainly',
+    title: 'Questions,\nanswered plainly',
     more: 'Something else?',
     moreBody: 'A person answers within one business day.',
     items: [
@@ -447,7 +447,7 @@ const en = {
     ],
   },
   cta: {
-    title: 'An AI knowledge base, without building one.',
+    title: 'An AI knowledge base,\nwithout building one.',
     sub: 'Free to self-host, or we run it on your office Mac mini.',
     primary: 'View on GitHub',
     secondary: 'Book a setup call',

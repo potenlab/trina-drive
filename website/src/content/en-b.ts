@@ -225,7 +225,7 @@ const enB = {
   },
   works: {
     eyebrow: 'Works where you already work',
-    title: 'Keep your AI app. Keep your folders.',
+    title: 'Keep your AI app.\nKeep your folders.',
     sub: 'Nothing moves, and nobody learns a new tool.',
     appsTitle: 'The AI apps your team uses',
     apps: [
@@ -250,7 +250,7 @@ const enB = {
   // One compact comparison in plain language (same shape as en.compare). Never say Drive connectors can't read files.
   compare: {
     eyebrow: 'Why it’s different',
-    title: 'No knowledge-base project. No one-file connector.',
+    title: 'No knowledge-base project.\nNo one-file connector.',
     sub: 'Your AI searches inside every shared folder at once, where files already live.',
     cols: ['Knowledge-base project', 'Drive connector', 'Trina Drive'],
     rows: [
@@ -338,7 +338,7 @@ const enB = {
   },
   devs: {
     eyebrow: 'For developers',
-    title: 'Also in Claude Code, Codex CLI and Cursor.',
+    title: 'Also in Claude\u00a0Code,\nCodex\u00a0CLI and\u00a0Cursor.',
     sub: 'One command. ls, grep and cat over only the folders they may read.',
     points: [
       'Personal token in the Keychain, 7 days by default',
@@ -378,7 +378,7 @@ const enB = {
   },
   cta: {
     ...en.cta,
-    title: 'An AI knowledge base, without building one.',
+    title: 'An AI knowledge base,\nwithout building one.',
     sub: 'Book a call. We set it up and connect your team.',
     primary: 'Book a setup call',
     secondary: 'See pricing',

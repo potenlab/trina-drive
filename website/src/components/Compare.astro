@@ -2,6 +2,7 @@
 // One compact comparison used by both variants: an ontology/RAG build vs. a drive connector vs. Trina Drive (last
 // column, highlighted), with a small demo beside it (passed in as the default slot). On phones each row becomes a
 // label over three cells.
+import Lines from './Lines.astro'
 import Icon from './Icon.astro'
 interface Props {
   /** Tinted background (default) or plain, to keep the section rhythm of the page using it. */
@@ -15,7 +16,7 @@ const last = c.cols.length - 1
   <div class="container">
     <div class="section-head" data-reveal>
       <span class="eyebrow">{c.eyebrow}</span>
-      <h2 id="cmp-title">{c.title}</h2>
+      <h2 id="cmp-title"><Lines text={c.title} /></h2>
       <p>{c.sub}</p>
     </div>
     <div class="cmp" data-reveal>
