@@ -87,6 +87,20 @@ not reserved atomically across processes (one server process writes). Only exact
 upload (no paragraph matching), and copies made outside this server (download, edit, upload) are not tracked.
 Backups (`tdrive backup`) do not yet include the managed root: back it up with the data directory's disk.
 
+### Mounting (WebDAV) and Google Drive import
+
+- **A mounted drive is a person, not an agent.** `/dav/` signs in with an app password (one per computer, shown once,
+  sha256 kept, revocable, revoked on a password reset, useless for an inactive person) over HTTPS only; agent tokens are
+  never accepted there, and app passwords are never accepted on `/mcp` or `/api`. It sees what `Access.forPerson`
+  allows, only managed folders (in-place NAS folders are hidden on the mount), hidden == missing, and writes through
+  the same `Managed` path (write rule, quota, versions, trash, audit with tool `webdav`). An app password skips the
+  second factor (like any app password); making one needs the password typed within 5 minutes.
+- **Google Drive** (`drive.file`): Trina sees only the files a person picks. Refresh and access tokens are sealed with
+  the install's data key (`TDRIVE_SECRET_KEY` or `<data>/keys/data.key`, 0600; not in backups), bound to the person.
+  The OAuth round trip is bound to the browser that started it (state once + a SameSite=Lax cookie + PKCE). Imported
+  files land only where the person may write and are then team files under Trina's rules (Drive's sharing is not
+  copied). Disconnect revokes the grant at Google.
+
 ## Alerts and audit
 
 Plan §4.1 R9/R11, §5.1, §7.1 (token leak, audit forgery). Code in `src/notify/`.
@@ -209,6 +223,12 @@ Step-by-step: [CONNECT-CLAUDE-AI.md](CONNECT-CLAUDE-AI.md), [CONNECT-CHATGPT.md]
   takes the public address as `--public-url` unless one is given.
 
 ## Known limits
+
+- WebDAV: locks live in memory (a restart drops them; clients lock again); dead properties (PROPPATCH) are answered but
+  not kept; a `MOVE` of a file over a file leaves the source in the trash; Windows' WebClient limits files to 50 MB by
+  default; timing of hidden vs missing paths is not equalised (as elsewhere). Google Drive import: one-shot (no change
+  polling yet), jobs in memory, `drive.readonly` folder mode only for design partners; a restored backup without the
+  data key needs people to connect Google Drive again.
 
 - Promote / approvals: a name taken by a file the caller cannot see (a closed link, an NFC twin) is refused as
   "exists", which shows that something is there (principle 2's documented hole). The link-then-unlink placement leaves

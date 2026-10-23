@@ -95,6 +95,13 @@ audit, and agents read it exactly like a NAS folder. We host it per team in Trin
 `tdrive init --managed`, then make team folders on the Folders page (or `tdrive folder create <name>`). Details:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#managed-storage-cloud-mode).
 
+- **Mount as a drive.** Open the team folders in Finder or Windows Explorer over WebDAV (`https://<server>/dav/`, an
+  app password from Settings). Same rules, versions, trash and audit as the web.
+  [How](docs/ARCHITECTURE.md#mount-as-a-drive-webdav)
+- **Import from Google Drive.** Pick files in the Google Picker; Docs, Sheets and Slides come in as docx, xlsx and
+  pptx, and importing again updates them as new versions. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
+  `GOOGLE_API_KEY` to turn it on. [How](docs/ARCHITECTURE.md#google-drive-import)
+
 ### Self-host on a Mac mini
 
 The v0.1 path: a release folder and an installer that sets up service accounts, LaunchDaemons, pinned tools and

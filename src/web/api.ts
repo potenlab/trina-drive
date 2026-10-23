@@ -13,6 +13,8 @@ import {
 import * as approve from './approve'
 import * as files from './files'
 import * as managed from '../managed/web'
+import * as gdrive from '../gdrive/web'
+import * as apppw from '../dav/apppw'
 import { ManagedError } from '../managed/core'
 import { consumeTicket, createTicket, has2FA, ticketFailed, ticketPerson } from './mfa'
 import { ApiError, bad, json, notFound, rateLimited, type WebCtx } from './http'
@@ -63,7 +65,7 @@ async function body(req: Request): Promise<Record<string, unknown>> {
   try { const v = JSON.parse(text); if (v && typeof v === 'object' && !Array.isArray(v)) return v; throw 0 } catch { throw bad('bad_json') }
 }
 
-const base = (w: WebCtx, req: Request) => (w.opts.publicUrl ?? ownOrigin(req)).replace(/\/$/, '')
+export const base = (w: WebCtx, req: Request) => (w.opts.publicUrl ?? ownOrigin(req)).replace(/\/$/, '')
 
 function startSession(w: WebCtx, req: Request, personId: number, previous?: WebSession | null) {
   if (previous) revokeSession(w.db, previous.idHash) // a new id on every sign-in (no fixation)
@@ -263,6 +265,19 @@ const routes: Route[] = [
   R('POST', '/trash/:id/restore', true, (c) => managed.restore(c.w, c.actor, id(c))),
   R('DELETE', '/trash/:id', true, (c) => managed.purge(c.w, c.actor, id(c))),
   R('GET', '/storage', true, ({ w, actor }) => managed.storageView(w, actor)),
+  // Google Drive import (src/gdrive): 404 everywhere unless configured; the callback comes back from Google (no session)
+  R('GET', '/gdrive', true, ({ w, actor }) => gdrive.status(w, actor)),
+  R('POST', '/gdrive/connect', true, ({ w, actor, req, body: b }) => gdrive.connect(w, actor, req, base(w, req), b)),
+  R('GET', '/gdrive/callback', false, ({ w, req, url }) => gdrive.callback(w, req, url, readCookie(req, gdrive.STATE_COOKIE))),
+  R('GET', '/gdrive/picker', true, ({ w, actor }) => gdrive.picker(w, actor)),
+  R('DELETE', '/gdrive', true, ({ w, actor }) => gdrive.disconnectOwn(w, actor)),
+  R('POST', '/gdrive/import', true, ({ w, actor, body: b }) => gdrive.importStart(w, actor, b)),
+  R('GET', '/gdrive/jobs', true, ({ w, actor }) => gdrive.jobs(w, actor)),
+  R('GET', '/gdrive/jobs/:jid', true, (c) => gdrive.job(c.w, c.actor, c.m.groups!.jid!)),
+  // WebDAV mount (src/dav): app passwords (own only; shown once, kept as sha256) and the address to mount
+  R('GET', '/me/app-passwords', true, ({ w, actor, req }) => apppw.view(w, actor, base(w, req))),
+  R('POST', '/me/app-passwords', true, ({ op, s, body: b }) => apppw.create(op, s!.idHash, b)),
+  R('DELETE', '/me/app-passwords/:id', true, (c) => apppw.revoke(c.w, c.actor, id(c))),
   R('GET', '/audit', true, ({ w, actor, url }) => views.auditView(w, actor, url.searchParams.get('view') ?? 'mine', Number(url.searchParams.get('before') ?? '') || undefined)),
 ]
 

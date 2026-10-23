@@ -7,6 +7,7 @@ import { appendAudit } from '../audit'
 import { isSystemName, nfc } from '../names'
 import { Rights, type Actor } from '../rights'
 import { addPerson, createToken, ensureFolder, LEVELS, registerFolder as storeRegister, StoreError, type FolderRow, type LevelName } from '../store'
+import { revokeAppPasswordsOf } from '../dav/apppw'
 import { accountOf, checkPasswordRules, createLink, freshLogin, FRESH_LOGIN_MS, markReauth, revokeSessionsOf, revokeTokensOf, setPassword, verifyPassword } from './auth'
 import { ApiError, bad, forbidden, notFound, rateLimited, type WebCtx } from './http'
 import { notify, type NoticeKind } from './notices'
@@ -162,6 +163,7 @@ export async function resetPassword(op: Op, id: unknown) {
   db.transaction(() => {
     tokens = revokeTokensOf(db, p.id)
     revokeSessionsOf(db, p.id)
+    revokeAppPasswordsOf(db, p.id)
     secret = createLink(db, 'reset', p.id, op.actor.personId)
     record(op, `person ${p.name} password reset (tokens revoked: ${tokens})`)
   })()

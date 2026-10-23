@@ -50,6 +50,10 @@ used by the macOS installer and the Docker image). Both keep managed storage in 
 | `TDRIVE_FILES_DIR` | `<data>/files` | the managed root |
 | `TDRIVE_STORAGE_QUOTA` | none | the team's total (files, trash, earlier versions, unfinished uploads), e.g. `50GB` (also `tdrive storage quota`) |
 | `TDRIVE_MAX_FILE_BYTES`, `TDRIVE_VERSIONS_KEPT`, `TDRIVE_TRASH_DAYS` | 10 GB, 10, 30 | largest file, earlier versions kept per file, days in the trash |
+| `TDRIVE_WEBDAV` | on (managed storage) | `off` turns the `/dav/` mount off ([ARCHITECTURE.md](ARCHITECTURE.md#mount-as-a-drive-webdav)) |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_API_KEY` | — | Google Drive import: all three set (and managed storage) turns it on; otherwise it is hidden. `GOOGLE_APP_ID` (Cloud project number) defaults to the client id's prefix |
+| `TDRIVE_GDRIVE_READONLY` | off | `1` also asks for `drive.readonly` so whole folders import recursively (restricted scope: unverified-app screen, 100 users per Cloud project for life; design partners only) |
+| `TDRIVE_SECRET_KEY` | `<data>/keys/data.key` | 32-byte data key (hex or base64) sealing people's Google tokens; made on first use when unset. Not in backups: keep it with the data disk or set it from your secret store |
 | `TDRIVE_SMTP_PASS` | — | overrides the SMTP password stored in `notify.json` |
 | `TDRIVE_MAILER` | — (`notify.json`) | `smtp`, `ses`, `outbox` or `off`: the mailer for notifications **and** the web's invites and password resets, instead of `notify.json`'s `email` (a hosted instance gets it from its env file) |
 | `TDRIVE_MAIL_FROM` | — | From address (required for `smtp` / `ses`) |

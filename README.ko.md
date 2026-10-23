@@ -95,6 +95,12 @@ NAS가 없나요? 폴더를 Trina Drive가 직접 갖게 하세요. **관리형 
 폴더와 똑같이 읽습니다. Trina Cloud에서 팀마다 따로 호스팅하거나 직접 운영합니다: `tdrive init --managed` 뒤에 폴더 화면에서
 팀 폴더를 만드세요(또는 `tdrive folder create <이름>`). 자세한 내용: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#managed-storage-cloud-mode).
 
+- **드라이브로 연결.** Finder나 Windows 탐색기에서 팀 폴더를 WebDAV로 엽니다(`https://<서버>/dav/`, 설정에서 만든 앱
+  비밀번호). 규칙, 버전, 휴지통, 기록은 웹과 같아요. [방법](docs/ARCHITECTURE.md#mount-as-a-drive-webdav)
+- **Google Drive에서 가져오기.** Google 선택 창에서 파일을 고르면 문서·스프레드시트·프레젠테이션은 docx·xlsx·pptx로
+  들어오고, 다시 가져오면 새 버전이 돼요. `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_API_KEY`를 설정하면
+  켜집니다. [방법](docs/ARCHITECTURE.md#google-drive-import)
+
 ### 맥 미니에 직접 설치
 
 v0.1의 설치 방법이에요. 설치기가 서비스 계정, LaunchDaemon, 고정 버전 도구, 암호화된 일일 백업까지 준비해요
