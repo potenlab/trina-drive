@@ -184,9 +184,13 @@ export async function main(argv: string[]): Promise<number> {
       if (!slug || !owner) throw new CloudError('usage', 'teams create <slug> --owner EMAIL [--name NAME] [--plan team|business] [--allow-reserved]')
       if (plan && plan !== 'team' && plan !== 'business') throw new CloudError('usage', '--plan team or business')
       const t = await cloud.adminCreateTeam({ email: owner, slug, name, plan: plan as 'team' | 'business' | undefined, allowReserved, actor })
-      await cloud.runDueJobs()
-      console.log(teamLine(cloud, teamBySlug(cloud.db, t.slug)!))
-      return 0
+      // the running control plane's job loop provisions it (running the job here too would race with it)
+      console.error(`${t.slug}: queued; waiting for the control plane to provision it…`)
+      const deadline = Date.now() + 15 * 60_000
+      let row = teamBySlug(cloud.db, t.slug)!
+      while (row.status === 'provisioning' && Date.now() < deadline) { await Bun.sleep(3000); row = teamBySlug(cloud.db, t.slug)! }
+      console.log(teamLine(cloud, row))
+      return row.status === 'active' ? 0 : 1
     }
     case 'teams suspend': await cloud.suspend(team(), 'admin', actor); console.log('suspended'); return 0
     case 'teams resume': await cloud.resume(team(), actor); console.log('resumed'); return 0
