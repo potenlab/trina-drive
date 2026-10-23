@@ -20,17 +20,23 @@ export interface PlanLimits {
   diskGb: number
   /** /tmp tmpfs for worker job folders */
   tmpMb: number
+  /** host capacity it takes (TDCLOUD_MAX_TEAMS_PER_HOST slots per host) */
+  slots: number
 }
 
 /** room on /data beyond the files: the database, drafts, the search mirror, logs */
 export const DATA_HEADROOM_GB = 20
 
-const plan = (id: PlanId, cpus: number, memoryMb: number, pids: number, storageGb: number, tmpMb: number): PlanLimits =>
-  ({ id, cpus, memoryMb, pids, storageGb, diskGb: 2 * storageGb + DATA_HEADROOM_GB, tmpMb })
+const plan = (id: PlanId, cpus: number, memoryMb: number, pids: number, storageGb: number, tmpMb: number, slots: number): PlanLimits =>
+  ({ id, cpus, memoryMb, pids, storageGb, diskGb: 2 * storageGb + DATA_HEADROOM_GB, tmpMb, slots })
 
 export const PLANS: Record<PlanId, PlanLimits> = {
-  team: plan('team', 1, 2048, 512, 100, 256),
-  business: plan('business', 2, 4096, 1024, 1000, 512),
+  team: plan('team', 1, 2048, 512, 100, 256, 1),
+  // twice the cpu and memory limits: two slots
+  business: plan('business', 2, 4096, 1024, 1000, 512, 2),
 }
+
+/** SQL: the slots a team row takes (matches PLANS) */
+export const SLOTS_SQL = "CASE plan WHEN 'business' THEN 2 ELSE 1 END"
 
 export const planOf = (id: string | null | undefined): PlanLimits => PLANS[(id as PlanId) in PLANS ? (id as PlanId) : 'team']

@@ -140,7 +140,7 @@ export class DockerDriver implements Driver {
     const n = names(spec.slug, spec.number), l = this.o.layout
     await this.docker(host, ['create', '--name', n.container, '--hostname', spec.slug, '--network', n.network, '--ip', spec.net.teamIp, '--restart', 'unless-stopped',
       '--user', `${spec.uid}:${spec.uid}`, '--mount', l.dataMount(spec.slug), '--mount', l.stagingMount(spec.slug), '--env-file', l.envFile(spec.slug),
-      ...securityArgs(l, spec.plan), ...limitArgs(spec.plan), ...labels(spec),
+      ...securityArgs(l, spec.plan), ...limitArgs(spec.plan), ...labels(spec), '--label', `tdcloud.host=${host}`,
       '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3', '--stop-timeout', '30',
       spec.image, 'serve', '--host', '0.0.0.0', '--port', '8787', '--allow-origin', spec.url, '--public-url', spec.url], { what: 'create container' })
   }

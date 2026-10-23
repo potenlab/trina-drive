@@ -113,7 +113,9 @@ export function makeHandler(cloud: Cloud) {
   function teamCard(t: TeamRow, csrf: string) {
     const url = cloud.url(t)
     const status: Record<string, string> = {
-      pending_payment: 'waiting for payment', provisioning: 'starting (a minute or two; the setup link comes by email)', active: 'running',
+      pending_payment: 'waiting for payment',
+      provisioning: t.waiting_since ? 'starting — a server is being prepared for it (a few minutes; the setup link comes by email)' : 'starting (a minute or two; the setup link comes by email)',
+      active: 'running',
       past_due: `running — payment failed, paused on ${iso(t.grace_until)} unless paid`, suspended: `paused (${t.suspend_reason ?? ''})`,
       deleting: 'being deleted', failed: 'could not start — we have been alerted', deleted: 'deleted',
     }
@@ -280,6 +282,13 @@ export function metrics(cloud: Cloud): string {
   for (const t of cloud.db.query<{ slug: string; disk_bytes: number | null; plan: string }, []>("SELECT slug, disk_bytes, plan FROM teams WHERE status IN ('active', 'past_due') AND disk_bytes IS NOT NULL").all()) lines.push(`tdcloud_team_disk_bytes{team="${t.slug}",plan="${t.plan}"} ${t.disk_bytes}`)
   lines.push('# HELP tdcloud_jobs_pending Jobs waiting', '# TYPE tdcloud_jobs_pending gauge', `tdcloud_jobs_pending ${cloud.db.query<{ n: number }, []>('SELECT count(*) AS n FROM jobs WHERE done_at IS NULL').get()!.n}`)
   lines.push('# HELP tdcloud_jobs_failed_total Jobs that gave up', '# TYPE tdcloud_jobs_failed_total counter', `tdcloud_jobs_failed_total ${cloud.db.query<{ n: number }, []>('SELECT count(*) AS n FROM jobs WHERE done_at IS NOT NULL AND last_error IS NOT NULL AND attempts >= 5').get()!.n}`)
+  if (cloud.scaler) {
+    const hosts = cloud.scaler.view()
+    lines.push('# HELP tdcloud_hosts Team hosts by state', '# TYPE tdcloud_hosts gauge')
+    for (const st of ['booting', 'ready', 'draining', 'terminating', 'lost']) lines.push(`tdcloud_hosts{state="${st}"} ${hosts.filter((h) => h.state === st).length}`)
+    lines.push('# HELP tdcloud_host_slots_free Free slots on ready hosts', '# TYPE tdcloud_host_slots_free gauge', `tdcloud_host_slots_free ${hosts.filter((h) => h.state === 'ready').reduce((a, h) => a + h.free, 0)}`)
+    lines.push('# HELP tdcloud_teams_waiting_for_host Paid teams with no host yet', '# TYPE tdcloud_teams_waiting_for_host gauge', `tdcloud_teams_waiting_for_host ${cloud.scaler.waiting().length}`)
+  }
   lines.push('# HELP tdcloud_last_backup_age_seconds Age of each team\'s newest backup', '# TYPE tdcloud_last_backup_age_seconds gauge')
   for (const t of cloud.db.query<{ slug: string; last_backup_at: number | null }, []>("SELECT slug, last_backup_at FROM teams WHERE status IN ('active', 'past_due')").all()) lines.push(`tdcloud_last_backup_age_seconds{team="${t.slug}"} ${t.last_backup_at ? Math.round((now() - t.last_backup_at) / 1000) : -1}`)
   return lines.join('\n') + '\n'

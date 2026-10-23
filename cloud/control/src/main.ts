@@ -9,13 +9,13 @@ import { parseTarget } from './backup'
 import { Cloud, CloudError } from './cloud'
 import { loadConfig, type Config } from './config'
 import { openDb, teamBySlug, updateTeam, type TeamRow } from './db'
-import { awsDriver } from './drivers/aws'
+import { AwsPool, awsDriver, SsmRunner } from './drivers/aws'
 import { FakeDriver } from './drivers/fake'
-import { localDockerDriver } from './drivers/local'
-import type { Driver } from './drivers/types'
+import { LocalPool, LocalRunner, localDockerDriver } from './drivers/local'
+import type { Driver, HostPool } from './drivers/types'
 import { KmsKeyWrapper, LocalKeyWrapper, type KeyWrapper } from './keys'
 import { OutboxMailer, SesMailer, type Mailer } from './mailer'
-import { planOf } from './plans'
+import { planOf, SLOTS_SQL } from './plans'
 import { MAX_BODY_BYTES, relayFromEnv } from './relay'
 import { seal, unseal } from './seal'
 import { iso } from './util'
@@ -36,6 +36,11 @@ const HELP = `Trina Cloud control plane
   teams retry <slug>                      provision again after a failure
   teams link <slug> <subscription_id>     attach a Paddle subscription that arrived without custom_data
   teams set-plan <slug> team|business
+  hosts list [--all]                      team hosts: state, slots used/free, teams, empty since; the pool's size and limits
+  hosts scale                             one scaler pass now (the running control plane makes one every minute,
+                                          every few seconds while a team waits or a host boots)
+  hosts keep <id> | unkeep <id>           never scale this host in / let the scaler handle it again
+  hosts resume                            launch hosts again after repeated boot failures stopped scale-out
   jobs list | jobs run                    pending jobs | run the due ones once
   db snapshot <file>                      a consistent copy of the control database (the control host ships it to S3 nightly)
   audit verify | audit list [--team slug] [--limit N]
@@ -46,7 +51,7 @@ const HELP = `Trina Cloud control plane
 
 Every admin command is recorded in the audit log as actor admin:$USER.`
 
-export function buildCloud(cfg: Config, opts: { driver?: Driver; mailer?: Mailer; keys?: KeyWrapper; log?: (s: string) => void } = {}): Cloud {
+export function buildCloud(cfg: Config, opts: { driver?: Driver; pool?: HostPool | null; mailer?: Mailer; keys?: KeyWrapper; log?: (s: string) => void } = {}): Cloud {
   const db = openDb(cfg.dbFile)
   const creds = new CredentialProvider()
   const aws = new AwsClient(cfg.aws.region, creds)
@@ -59,12 +64,16 @@ export function buildCloud(cfg: Config, opts: { driver?: Driver; mailer?: Mailer
       aws, hostTag: cfg.aws.hostTag, ssmPrefix: cfg.aws.ssmPrefix, kmsKeyId: cfg.kmsKeyId,
       backupBucket: target.bucket ? `${target.bucket}${target.prefix ? `/${target.prefix}` : ''}` : null,
       caddyContainer: cfg.caddyContainer, helperImage: cfg.helperImage, maxTeamsPerHost: cfg.maxTeamsPerHost,
-      // slots in use: Business takes two (twice the cpu and memory limits)
-      teamsOnHost: (h) => cloud!.db.query<{ n: number | null }, [string]>("SELECT sum(CASE plan WHEN 'business' THEN 2 ELSE 1 END) AS n FROM teams WHERE host = ? AND status NOT IN ('deleted', 'pending_payment')").get(h)!.n ?? 0,
+      // slots in use (without the scaler: TDCLOUD_AUTOSCALE=0): Business takes two (twice the cpu and memory limits)
+      teamsOnHost: (h) => cloud!.db.query<{ n: number | null }, [string]>(`SELECT sum(${SLOTS_SQL}) AS n FROM teams WHERE host = ? AND status NOT IN ('deleted', 'pending_payment')`).get(h)!.n ?? 0,
     })
     : cfg.driver === 'fake' ? new FakeDriver(path.join(cfg.stateDir, 'fake'))
       : localDockerDriver({ stateDir: cfg.stateDir, seccomp: cfg.seccompProfile, apparmor: cfg.apparmorProfile, caddyContainer: cfg.caddyContainer, helperImage: cfg.helperImage }))
-  cloud = new Cloud({ cfg, db, driver, mailer, keys, target, log: opts.log })
+  const pool = opts.pool !== undefined ? opts.pool : !cfg.autoscale ? null
+    : cfg.driver === 'aws' ? new AwsPool(aws, new SsmRunner(aws, cfg.helperImage), { asgName: cfg.aws.asgName, hostTag: cfg.aws.hostTag })
+      : cfg.driver === 'local' ? new LocalPool(cfg.stateDir, new LocalRunner(), { bootMs: cfg.localHostBootMs, max: cfg.maxHosts })
+        : null
+  cloud = new Cloud({ cfg, db, driver, mailer, keys, target, log: opts.log, pool })
   if (cfg.driver === 'aws' && cfg.aws.route53ZoneId) {
     const zone = cfg.aws.route53ZoneId
     cloud.dnsHook = (action, slug, ip) => aws.changeA(zone, action, `${slug}.${cfg.domain}`, ip)
@@ -124,17 +133,26 @@ async function helper(cmd: string, args: string[]): Promise<number> {
   return -1
 }
 
+/** scaler passes while a team waits or a host boots or goes */
+const URGENT_SCALE_MS = 5_000
+
 async function serve(cfg: Config) {
   const cloud = buildCloud(cfg)
   const handle = makeHandler(cloud)
   const server = Bun.serve({ hostname: cfg.listenHost, port: cfg.listenPort, development: false, maxRequestBodySize: 2 * 1024 * 1024, fetch: (req, srv) => handle(req, srv.requestIP(req)?.address) })
   cloud.log(`Trina Cloud control plane on http://${cfg.listenHost}:${server.port}  (public ${cfg.controlUrl}; teams at *.${cfg.domain}; driver ${cloud.driver.name}; mail ${cfg.mailer}; keys ${cloud.keys.kind}; backups ${cloud.target.description})`)
+  if (cloud.scaler) cloud.log(`host scaler: ${cloud.scaler.pool.name}, up to ${cfg.maxHosts} hosts of ${cfg.maxTeamsPerHost} slots, ${cfg.spareSlots} spare, empty hosts go after ${dur(cfg.emptyHostGraceMs)}`)
   let busy = false
-  let lastBackupScan = 0, lastMetrics = 0
+  let lastBackupScan = 0, lastMetrics = 0, lastScale = 0
   setInterval(async () => {
     if (busy) return
     busy = true
     try {
+      // the scaler before the jobs: a host that just finished booting takes the waiting teams in the same round
+      if (cloud.scaler && Date.now() - lastScale > (cloud.scaler.urgent() ? URGENT_SCALE_MS : cfg.scalerEveryMs)) {
+        lastScale = Date.now()
+        await cloud.scaler.tick().catch(() => { /* logged and alerted by the scaler */ })
+      }
       await cloud.runDueJobs()
       if (Date.now() - lastBackupScan > 600_000) { lastBackupScan = Date.now(); cloud.scheduleBackups() }
       if (Date.now() - lastMetrics > cfg.metricsEveryMinutes * 60_000) { lastMetrics = Date.now(); await cloud.measure() }
@@ -145,7 +163,38 @@ async function serve(cfg: Config) {
 
 function teamLine(c: Cloud, t: TeamRow) {
   const gb = t.disk_bytes != null ? `${(t.disk_bytes / 1024 ** 3).toFixed(2)}/${planOf(t.plan).storageGb} GB` : '-'
-  return `${t.slug.padEnd(20)} ${t.status.padEnd(16)} ${t.plan.padEnd(9)} ${(t.host ?? '-').padEnd(20)} ${gb.padEnd(14)} backup ${iso(t.last_backup_at)}  ${c.url(t)}`
+  const host = t.host ?? (t.waiting_since ? `(waiting ${Math.round((Date.now() - t.waiting_since) / 60_000)} min)` : '-')
+  return `${t.slug.padEnd(20)} ${t.status.padEnd(16)} ${t.plan.padEnd(9)} ${host.padEnd(20)} ${gb.padEnd(14)} backup ${iso(t.last_backup_at)}  ${c.url(t)}`
+}
+
+const dur = (ms: number) => (ms < 120_000 ? `${Math.round(ms / 1000)}s` : ms < 7200_000 ? `${Math.round(ms / 60_000)}m` : `${(ms / 3600_000).toFixed(1)}h`)
+
+async function hostsList(c: Cloud, all: boolean) {
+  const s = c.scaler
+  if (!s) {
+    console.log('the host scaler is off (TDCLOUD_AUTOSCALE=0): hosts are whatever the driver offers')
+    return
+  }
+  const cfg = c.cfg
+  let pool = ''
+  try {
+    const st = await s.pool.status()
+    pool = `desired ${st.desired}, running ${st.instances.filter((i) => i.lifecycle !== 'terminating').length}, max ${Math.min(cfg.maxHosts, st.max)} (TDCLOUD_MAX_HOSTS ${cfg.maxHosts}, pool max ${st.max})`
+  } catch (e) { pool = `pool not readable: ${(e as Error).message}` }
+  console.log(`pool       ${s.pool.name}: ${pool}`)
+  console.log(`per host   ${cfg.maxTeamsPerHost} slots (Team 1, Business 2); spare slots ${cfg.spareSlots}; empty hosts go after ${dur(cfg.emptyHostGraceMs)}; boot timeout ${dur(cfg.hostBootTimeoutMs)}`)
+  if (s.bootFailures) console.log(`boot fails ${s.bootFailures} in a row${s.bootFailures >= 3 ? ' — scale-out STOPPED (hosts resume)' : ''}`)
+  const waiting = s.waiting()
+  console.log(`waiting    ${waiting.length ? waiting.map((t) => `${t.slug} (${t.waiting_since ? dur(Date.now() - t.waiting_since) : 'new'})`).join(', ') : '-'}`)
+  const rows = s.view(all)
+  console.log('')
+  console.log(`${'HOST'.padEnd(21)} ${'STATE'.padEnd(11)} ${'SLOTS'.padEnd(7)} ${'FREE'.padEnd(5)} ${'EMPTY SINCE'.padEnd(28)} ${'IP'.padEnd(16)} TEAMS / NOTE`)
+  for (const h of rows) {
+    const empty = h.empty_since != null ? `${iso(h.empty_since)} (${dur(Date.now() - h.empty_since)})` : '-'
+    const extra = [h.teams.join(','), h.keep ? 'KEEP' : '', h.online ? '' : 'offline', h.note ?? ''].filter(Boolean).join('  ')
+    console.log(`${h.id.padEnd(21)} ${h.state.padEnd(11)} ${`${h.used}/${h.capacity}`.padEnd(7)} ${String(h.free).padEnd(5)} ${empty.padEnd(28)} ${(h.public_ip ?? '-').padEnd(16)} ${extra}`)
+  }
+  if (!rows.length) console.log('(no hosts)')
 }
 
 export async function main(argv: string[]): Promise<number> {
@@ -252,6 +301,28 @@ export async function main(argv: string[]): Promise<number> {
       cloud.db.query('VACUUM INTO ?').run(out)
       fs.chmodSync(out, 0o600)
       console.log(`snapshot: ${out}`)
+      return 0
+    }
+    case 'hosts list': await hostsList(cloud, rest.includes('--all')); return 0
+    case 'hosts scale': {
+      if (!cloud.scaler) throw new CloudError('usage', 'the host scaler is off (TDCLOUD_AUTOSCALE=0)')
+      const r = await cloud.scaler.tick()
+      writeAudit(cloud.db, { actor, action: 'hosts.scale_pass' })
+      console.log(r.skipped ? 'another scaler pass is running (the control plane): try again in a moment' : JSON.stringify(r))
+      return 0
+    }
+    case 'hosts keep': case 'hosts unkeep': {
+      if (!cloud.scaler || !rest[0]) throw new CloudError('usage', `hosts ${sub} <host id>`)
+      cloud.scaler.setKeep(rest[0], sub === 'keep')
+      writeAudit(cloud.db, { actor, action: `hosts.${sub}`, detail: { host: rest[0] } })
+      console.log(`${rest[0]}: ${sub === 'keep' ? 'never scaled in' : 'the scaler may scale it in when empty'}`)
+      return 0
+    }
+    case 'hosts resume': {
+      if (!cloud.scaler) throw new CloudError('usage', 'the host scaler is off')
+      cloud.scaler.resume()
+      writeAudit(cloud.db, { actor, action: 'hosts.resume' })
+      console.log('scale-out resumed')
       return 0
     }
     case 'jobs list':

@@ -2,7 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import type { BackupArtifact, CreateResult, Driver, ExecResult, InstanceState, TeamSpec } from './types'
+import type { BackupArtifact, CreateResult, Driver, ExecResult, HostPool, HostProbe, InstanceState, PoolStatus, TeamSpec } from './types'
 import { DriverError } from './types'
 
 export class FakeDriver implements Driver {
@@ -40,4 +40,46 @@ export class FakeDriver implements Driver {
     })
   }
   async exec(_h: string, slug: string, args: string[]): Promise<ExecResult> { this.calls.push(`exec ${slug} ${args.join(' ')}`); return { code: 0, stdout: '', stderr: '' } }
+}
+
+/** In-memory host pool for the scaler's tests: an ASG with instances i-1, i-2, … that become ready when the test says. */
+export class FakePool implements HostPool {
+  readonly name = 'fake pool'
+  readonly calls: string[] = []
+  desired = 0
+  max = 10
+  private next = 1
+  readonly hosts = new Map<string, { ready: boolean; failBoot: boolean; online: boolean; teams: number; reachable: boolean }>()
+  /** new hosts never finish their bootstrap */
+  failBoots = false
+  /** a setDesired call waits for this (races) */
+  gate: Promise<void> | null = null
+  private launch() {
+    while (this.hosts.size < this.desired) this.hosts.set(`i-${this.next++}`, { ready: false, failBoot: this.failBoots, online: true, teams: 0, reachable: true })
+  }
+  async status(): Promise<PoolStatus> {
+    this.launch()
+    return { desired: this.desired, max: this.max, instances: [...this.hosts].map(([id, h]) => ({ id, lifecycle: 'in_service' as const, online: h.online })) }
+  }
+  async setDesired(n: number) {
+    this.calls.push(`desired ${n}`)
+    if (this.gate) await this.gate
+    this.desired = Math.min(n, this.max)
+    this.launch()
+  }
+  /** bootstrap done on every launched host (or one) */
+  boot(id?: string) { for (const [k, h] of this.hosts) if (!id || k === id) if (!h.failBoot) h.ready = true }
+  async probe(id: string): Promise<HostProbe | null> {
+    const h = this.hosts.get(id)
+    if (!h || !h.reachable) return null
+    return { ready: h.ready, teams: h.teams, publicIp: null }
+  }
+  async terminate(id: string) {
+    if (!this.hosts.has(id)) throw new DriverError(`no ${id}`)
+    this.calls.push(`protection-off ${id}`, `terminate ${id} decrement`)
+    this.hosts.delete(id)
+    this.desired = Math.max(0, this.desired - 1)
+    return { volumes: [`vol-${id}`] }
+  }
+  async cleanup(_id: string, volumes: string[]) { for (const v of volumes) this.calls.push(`delete-volume ${v}`); return true }
 }
