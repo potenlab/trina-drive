@@ -99,7 +99,7 @@ function Shell({ route }: { route: string }) {
   const folder = /^\/folders\/(\d+)$/.exec(route)
   const approval = /^\/approvals(?:\/(\d+))?$/.exec(route)
   // the file view is where people land; admins land on folders
-  const files = route === '/files' || route.startsWith('/files?') || (!me!.admin && !route.startsWith('/approvals') && !NAV.some((n) => route.startsWith(n.to)))
+  const files = route === '/files' || route.startsWith('/files?') || route === '/trash' || (!me!.admin && !route.startsWith('/approvals') && !NAV.some((n) => route.startsWith(n.to)))
   let page: React.ReactNode
   if (files) page = <Files route={route} />
   else if (folder) page = <Folder id={Number(folder[1])} />

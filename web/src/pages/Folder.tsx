@@ -19,6 +19,9 @@ export function Folder({ id }: { id: number }) {
   const can = f.can
   const act = async (fn: () => Promise<unknown>) => { if (await a.run(fn) !== undefined) reload() }
   const setRule = (r: TableRow, on: boolean) => act(() => api('PUT', `/folders/${id}/rules`, { subject_type: r.type, subject_id: r.id, level: on ? 'read' : 'none' }))
+  // managed storage: one rule decides who views and who edits (no NAS); levels below an inherited one cannot be chosen
+  const setLevel = (r: TableRow, level: 'none' | 'read' | 'write') => act(() => api('PUT', `/folders/${id}/rules`, { subject_type: r.type, subject_id: r.id, level }))
+  const managed = !!f.managed
   const nasPeople = data.rows.filter((r) => r.type === 'person' && r.nas === true).map((r) => r.id)
   const setNasPerson = (pid: number, on: boolean) => act(() => api('PUT', `/folders/${id}/nas`, { mode: 'chosen', people: on ? [...nasPeople, pid] : nasPeople.filter((x) => x !== pid) }))
   const ownerName = f.personal_owner != null ? people.find((p) => p.id === f.personal_owner)?.name ?? '…' : null
@@ -37,13 +40,20 @@ export function Folder({ id }: { id: number }) {
           {r.type === 'group' && <span className="muted small"> · {t('members_n', { n: r.members ?? 0 })}</span>}
           {r.warn && <div><Badge kind="warn" title={t('warn_ai_no_nas_help')}>{t('warn_ai_no_nas')}</Badge> <span className="muted small hide-narrow">{t('warn_ai_no_nas_help')}</span></div>}
         </td>
-        <td className="c">
+        {!managed && <td className="c">
           {nasEditable && r.type === 'person'
             ? <input type="checkbox" aria-label={`${t('col_nas')}: ${r.name}`} checked={r.nas === true} disabled={a.busy} onChange={(e) => setNasPerson(r.id, e.target.checked)} />
             : <YesNo v={r.nas} />}
-        </td>
+        </td>}
         <td className="c">
-          <input type="checkbox" aria-label={`${t('col_ai')}: ${r.name}`} checked={checked} disabled={!can.edit_rules || lockedOn || a.busy} onChange={(e) => setRule(r, e.target.checked)} />
+          {managed ? (
+            <select aria-label={`${t('col_access')}: ${r.name}`} value={['none', 'read', 'write'][r.ai.level] ?? 'none'} disabled={!can.edit_rules || a.busy}
+              onChange={(e) => setLevel(r, e.target.value as 'none' | 'read' | 'write')}>
+              {(['none', 'read', 'write'] as const).map((lv, i) => (
+                <option key={lv} value={lv} disabled={!r.ai.direct && i < r.ai.level}>{t(lv === 'none' ? 'access_none' : lv === 'read' ? 'access_view' : 'access_edit')}</option>
+              ))}
+            </select>
+          ) : <input type="checkbox" aria-label={`${t('col_ai')}: ${r.name}`} checked={checked} disabled={!can.edit_rules || lockedOn || a.busy} onChange={(e) => setRule(r, e.target.checked)} />}
           {note && <div className="muted small">{note}</div>}
         </td>
       </tr>
@@ -62,10 +72,10 @@ export function Folder({ id }: { id: number }) {
 
       <section className="card">
         <h2>{t('who_can_see')}</h2>
-        <p className="muted small">{t('table_help')}</p>
+        <p className="muted small">{managed ? t('access_help_managed') : t('table_help')}</p>
         {f.blocked && <p className="warn">{f.no_ai ? t('no_ai_help') : t('quarantine_help')}</p>}
         {!can.edit_rules && !can.edit_nas && <p className="muted small">{t('read_only_table')}</p>}
-        {f.registered && (
+        {f.registered && !managed && (
           <div className="nas-mode">
             <span>{t('nas_question')}</span>
             {can.edit_nas ? (
@@ -83,16 +93,16 @@ export function Folder({ id }: { id: number }) {
         )}
         <div className="table-wrap">
           <table className="matrix">
-            <thead><tr><th></th><th className="c">{t('col_nas')}</th><th className="c">{t('col_ai')}</th></tr></thead>
+            <thead><tr><th></th>{!managed && <th className="c">{t('col_nas')}</th>}<th className="c">{managed ? t('col_access') : t('col_ai')}</th></tr></thead>
             <tbody>
-              {groups.length > 0 && <tr className="section"><td colSpan={3}>{t('groups')}</td></tr>}
+              {groups.length > 0 && <tr className="section"><td colSpan={managed ? 2 : 3}>{t('groups')}</td></tr>}
               {groups.map(row)}
-              <tr className="section"><td colSpan={3}>{t('people')}</td></tr>
+              <tr className="section"><td colSpan={managed ? 2 : 3}>{t('people')}</td></tr>
               {persons.map(row)}
             </tbody>
           </table>
         </div>
-        <p className="muted small">{t('inherit_help')}</p>
+        {!managed && <p className="muted small">{t('inherit_help')}</p>}
       </section>
 
       <section className="card">

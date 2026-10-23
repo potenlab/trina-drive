@@ -97,6 +97,14 @@ const en = {
   kind_former_personal_registered: 'A former personal folder was registered', kind_password_reset: 'Password reset started; tokens cut',
   kind_email_changed: 'Sign-in address changed', kind_home_registered: 'A folder that may be your NAS home was registered',
   kind_second_factor_changed: 'Your second factor changed',
+  // managed storage (cloud mode): the server owns the folders, rules decide who views and who edits
+  new_team_folder: 'New team folder', reg_name_managed: 'Folder name (people and agents see it)', managed_badge: 'Managed', col_access: 'Access', access_none: 'No access', access_view: 'Can view', access_edit: 'Can edit',
+  access_help_managed: 'People open this folder by these rules: “can view” reads (and their AI reads), “can edit” also uploads, renames, moves and deletes. Folders below inherit and can only add; to narrow, turn on "Start fresh here".',
+  reg_managed_help: 'The server makes this folder in its own storage. People put files in through the web.',
+  tpl_team_managed_d: 'One team views and edits it; that team\'s AI may read it.',
+  storage_title: 'Team storage', storage_used: '{used} used', storage_of: '{used} of {quota}', storage_no_quota: 'no limit',
+  storage_files: 'Files', storage_trash: 'Trash', storage_versions: 'Earlier versions', storage_uploads: 'Unfinished uploads',
+  storage_count: '{n} files', storage_quota_help: 'The quota is set by whoever runs the server (your plan in Trina Cloud).', storage_full: 'Storage is almost full.',
   promise: 'Storage, permission decisions and the record stay on your server. What an agent reads goes to the AI company that runs that agent; mark folders that must not go there "No AI". The person who runs the server can see its disk.',
 }
 
@@ -188,6 +196,13 @@ const ko: Record<Key, string> = {
   kind_former_personal_registered: '예전 개인 폴더가 일반 폴더로 등록됐습니다', kind_password_reset: '비밀번호 재설정 시작, 토큰 끊김',
   kind_email_changed: '로그인 메일 주소가 바뀌었습니다', kind_home_registered: '내 NAS 홈 폴더일 수 있는 폴더가 등록됐습니다',
   kind_second_factor_changed: '2단계 인증이 바뀌었습니다',
+  new_team_folder: '새 팀 폴더', reg_name_managed: '폴더 이름(사람과 에이전트가 보는 이름)', managed_badge: '관리형', col_access: '권한', access_none: '권한 없음', access_view: '보기', access_edit: '편집',
+  access_help_managed: '이 규칙대로 엽니다: “보기”는 읽기(그 사람의 AI도 읽음), “편집”은 올리기·이름 바꾸기·옮기기·지우기까지. 아래 폴더는 물려받고 더할 수만 있습니다. 좁히려면 "여기서부터 새로"를 켜세요.',
+  reg_managed_help: '서버가 자기 저장소에 이 폴더를 만듭니다. 사람들은 웹으로 파일을 넣습니다.',
+  tpl_team_managed_d: '한 팀이 보고 편집하며, 그 팀의 AI가 읽습니다.',
+  storage_title: '팀 저장 공간', storage_used: '{used} 사용', storage_of: '{quota} 중 {used}', storage_no_quota: '제한 없음',
+  storage_files: '파일', storage_trash: '휴지통', storage_versions: '이전 버전', storage_uploads: '덜 올린 파일',
+  storage_count: '파일 {n}개', storage_quota_help: '용량 한도는 서버 운영자가 정합니다(Trina Cloud에서는 요금제).', storage_full: '저장 공간이 거의 찼습니다.',
   promise: '저장, 권한 판단, 기록은 여러분 서버에 있습니다. 에이전트가 읽은 내용은 그 에이전트를 만든 AI 회사로 갑니다. 그러면 안 되는 폴더는 "AI 연결 금지"로 두세요. 서버를 운영하는 사람은 디스크를 볼 수 있습니다.',
 }
 
