@@ -21,13 +21,15 @@ second factor), behind Caddy as its one trusted proxy, on managed storage with t
 mail through the host's mail relay. The AWS path (driver, host agent, mail relay → Resend or SES, Terraform) is written and
 unit-tested against fake AWS endpoints, and was **deployed once to AWS on 2026-10-23** (one control instance, one
 m7g.xlarge host, the dogfood team `trina`): provisioning over SSM, hosted-mode settings, the host firewall, the mail
-relay up to SES, backups to S3 and an export through KMS all worked; DNS delegation, TLS certificates and real mail wait
-on the Gabia NS records and mail. AWS then denied SES production access: mail now goes through
+relay up to SES, backups to S3 and an export through KMS all worked; TLS certificates and real mail were not reached
+then (the `cloud` delegation has been in place since: `trina.app` moved from Gabia to Cloudflare, which carries the four
+NS records). AWS then denied SES production access: mail now goes through
 [Resend](#mail-resend) from `drive.trina.app` (verified; not yet live on AWS: see
 [Switching to Resend](#switching-a-deployment-to-resend)). The deployment is now in [hold mode](#hold-mode-no-teams-until-the-first-customer).
 Team hosts [scale out from 0 and back in](#hosts-scale-out-and-scale-in) by themselves (built after that deploy: tested
 locally and against fake AWS endpoints; needs a Terraform apply and a new control image, see the section).
-See [Known gaps](#known-gaps-and-follow-ups) before launch.
+See [Known gaps](#known-gaps-and-follow-ups) before launch. The way out of hold for Trina Cloud v1 is the
+[rollout runbook](#v1-rollout-runbook-a0a10) (A0–A10), checked by the [smoke check](#smoke-check).
 
 ## How it works
 
@@ -151,6 +153,16 @@ load balancer or CDN is ever added:
   Restrict the hosts' security group to those ranges, or anyone can reach Caddy directly and claim any address.
 
 The control plane works the same way (`caddy/Caddyfile.control`; it reads the right-most entry, from 127.0.0.1 only).
+
+**Rate limits per client address** (`caddy/team_routes.caddy`): sign-in, setup, one-time links, re-auth, SSO
+(`/api/sso/*`) and OAuth 30/min, MCP 300/min, everything 1,200/min. One office behind one NAT address is a whole team
+at once (Finder's WebDAV sends a PROPFIND per folder), so **office ranges** get their own zones: 300 / 1,500 / 6,000 per
+minute. Terraform `office_cidrs` (e.g. `["203.0.113.7/32"]`, in `terraform.tfvars`) → `OFFICE_CIDRS` in each host's
+`host.conf` → `TDCLOUD_TRUSTED_OFFICE_CIDRS` in Caddy's env; unset, the zones match nobody (`192.0.2.0/32`). A running
+host takes a change with `OFFICE_CIDRS='…'` in `/etc/tdcloud/host.conf` and a bootstrap rerun (Caddy restarts; teams keep
+running). **Uploads**: 25 MB per request, except `/dav/*` (WebDAV clients PUT whole files): `TDCLOUD_DAV_MAX_BODY`,
+4 GiB by default, and 10 minutes for the answer to a large PUT (60 s elsewhere); the product's own per-file limit and
+the plan's quota still apply.
 
 ### Mail from team instances
 
@@ -440,9 +452,10 @@ The SES identity is the cloud domain itself (`mail_domain` empty = `domain`); it
 go into the Route 53 zone. It is kept for `mail_upstream = "ses"`; by default mail goes through Resend from
 `drive.trina.app` (step 3).
 
-**2. Gabia (trina.app DNS), once.** In 가비아 → DNS 관리 → trina.app → 레코드 수정, add **four NS records** with host
-`cloud`, one per value of `name_servers` (e.g. `cloud  NS  ns-123.awsdns-15.com.`). Nothing else changes at Gabia
-(not the apex, not `drive`). Check: `dig NS cloud.trina.app +short` shows the four Route 53 servers. The SES identity
+**2. Delegate `cloud` (trina.app DNS), once.** `trina.app` is at **Cloudflare** (it moved from Gabia after the first
+deploy): in its zone add **four NS records** with name `cloud`, one per value of `name_servers` (e.g. `cloud  NS
+ns-123.awsdns-15.com`; NS records are never proxied). Nothing else changes there (not the apex, not `drive`). Done for
+`cloud.trina.app` (ns-1119.awsdns-11.org, ns-1636.awsdns-12.co.uk, ns-405.awsdns-50.com, ns-667.awsdns-19.net). Check: `dig NS cloud.trina.app +short` shows the four Route 53 servers. The SES identity
 `cloud.trina.app` then verifies itself within the hour (`aws sesv2 get-email-identity --email-identity cloud.trina.app`).
 
 **3. Mail (Resend).** In Resend: add the domain `drive.trina.app` (region Tokyo), put the records its dashboard shows
@@ -473,7 +486,10 @@ docker buildx build --platform linux/arm64 -t $REG/tdcloud-control:0.1.0-$V --pu
 docker buildx build --platform linux/arm64 -t $REG/tdcloud-caddy:2.10.2-1 --push cloud/caddy
 ```
 
-and set `trina_image_tag` / `control_image_tag` / `caddy_image_tag` in `terraform.tfvars`.
+and set `trina_image_tag` / `control_image_tag` / `caddy_image_tag` in `terraform.tfvars`. ECR keeps the newest 30
+tagged images per repository and never expires a `rollback-*` tag: tag the known-good build you would go back to
+`rollback-<commit>` as well (same digest; `docker buildx imagetools create -t $REG/<repo>:rollback-<commit>
+$REG/<repo>:<tag>`).
 
 **5. Paddle** (sandbox first, then live). Developer tools → Notifications → **New destination**
 `https://cloud.trina.app/paddle/webhook`, events: `subscription.created`, `.activated`, `.trialing`, `.updated`,
@@ -553,9 +569,10 @@ and existing teams `teams upgrade` (their env carries the old From, which the re
 `teams resend-setup <slug>`) and the mail arrives; `docker logs tdc-mail` on a host shows `(resend <id>)` lines;
 `/healthz` of the relay (from the host: `curl 127.0.0.1:8025/healthz`) says `"upstream":"resend"`.
 
-**Restore a team** (manual for now): on a host, recreate the team (`teams retry` on a fresh slug or the same one
-after `destroy`), then `tdrive backup restore <archive> --into …` with the product key and `tar -x` of `files.tar`
-from `teams export`; see [docs/DOCKER.md §5](../docs/DOCKER.md).
+**Restore a team** (manual for now): on a host, recreate the team (`teams retry <slug> --reset-host` for one whose host
+is gone), then `tdrive backup restore <archive> --into …` with the product key and `tar -x` of `files.tar`
+from `teams export`; see [docs/DOCKER.md §5](../docs/DOCKER.md). Backups made before a `--reset-host` are opened with the
+keys in `retired_backup_keys` (wrapped like `teams.backup_key_enc`).
 
 ### TLS: on-demand (default) or one wildcard certificate
 
@@ -572,7 +589,9 @@ from `teams export`; see [docs/DOCKER.md §5](../docs/DOCKER.md).
   `route53:ListResourceRecordSets`. Unknown names then get a valid certificate and the paused page instead of a TLS
   error.
 
-Either way the DNS zone is the delegated `cloud.trina.app` on Route 53; trina.app itself stays at Gabia.
+Either way the DNS zone is the delegated `cloud.trina.app` on Route 53; trina.app itself is at Cloudflare. The zone's CAA
+records allow Let's Encrypt only (`issue`/`issuewild "letsencrypt.org"`): no ZeroSSL fallback, so a failing first
+issuance must be fixed, not retried (Let's Encrypt allows 5 failures per name per hour).
 
 ### Hold mode (no teams until the first customer)
 
@@ -597,12 +616,14 @@ docker exec tdc-control bun /app/src/main.ts hosts list          # wait for the 
 aws ec2 stop-instances --instance-ids <control instance id>
 ```
 
-Coming back: `aws ec2 start-instances --instance-ids <control>` (its containers restart by themselves; Caddy gets
-the `cloud.trina.app` certificate once Gabia delegates the zone). Nothing else: the first paid team (or `teams
-create`) launches a host, which boots in ~3 minutes with an Elastic IP the control plane allocated for it. A team kept
-from before the hold (the dogfood `trina`) is restored by hand onto a host: `teams export` gives the archive and keys;
-there is no `teams restore` yet, and its row still names the terminated host (the scaler ignores a host that is not in
-the group; `hosts list` does not show it).
+Coming back: the [v1 rollout runbook](#v1-rollout-runbook-a0a10). In short, `aws ec2 start-instances --instance-ids
+<control>` (its containers restart by themselves; Caddy gets the `cloud.trina.app` certificate), new images through the
+control bootstrap; the first team (or `teams create`) launches a host, which boots in ~3 minutes with an Elastic IP the
+control plane allocated for it. A team kept from before the hold whose row still names the terminated host (the
+dogfood `trina`) starts over with `teams retry <slug> --reset-host`: the control database is copied first (to the
+backup target, `control/…-before-reset-<slug>.db`), its old backup keys are kept in `retired_backup_keys` (its old
+backups stay readable), the host reference goes, and the scaler gives it a new host with new, empty data. Its old data
+comes back, if wanted, with the manual restore below.
 
 ### Hosts: scale-out and scale-in
 
@@ -682,6 +703,230 @@ terraform apply -var-file=$S/terraform.tfvars
 # control_env_template` has the new lines), then rerun the control bootstrap
 ```
 
+## Host disk
+
+Every team on a host shares its data volume (`/srv/tdcloud`, XFS, `host_data_gb`, 100 GB on m7g.large hosts); each
+team's directory is capped by an XFS project quota (Team 220 GB: files + database + backup staging), which is a cap,
+not a reservation. When the volume fills, every team's SQLite stops. So:
+
+- **Hourly check** (cron on the control host, `/etc/cron.d/tdcloud-host-disk`): `hosts check --alert` asks each host
+  (`tdcloud-host info` over SSM) and mails ops once per host and 12 h when a volume is ≥ `TDCLOUD_HOST_DISK_ALERT_PCT`
+  (80) or a ready host does not answer. By hand: `hosts check` (exit 1 on a problem), `hosts check --isolation` also
+  runs `tdcloud-host check <slug>` for each running team.
+- **Grow a volume** (online, no restart): EC2 → Volumes → the host's `tdcloud-host` data volume → Modify → new size;
+  then on the host `xfs_growfs /srv/tdcloud`. Raise `host_data_gb` in Terraform for hosts launched later.
+- A team that outgrows a shared host goes to its own (Upgrade path below; `teams move` is not built).
+
+## Smoke check
+
+`cloud/scripts/aws-smoke.ts` after every deploy (A7 below), or `--local` against `cloud/dev/up.sh`:
+
+```sh
+bun cloud/scripts/aws-smoke.ts --base https://cloud.trina.app --team trina      # profile tdcloud, Seoul
+bun cloud/scripts/aws-smoke.ts --local --skip mail                              # the local stack (team acme)
+```
+
+Each line is `ok|FAIL|skip <n> <name> <detail>`; exit 1 on a FAIL. `--only 2,4`, `--skip mail`, `--json`.
+1 the website's Sign in / Start free go to `cloud.trina.app` · 2 `/healthz`, Let's Encrypt certificate (≥ 30 days),
+HSTS, http → 308, the control plane's start line (driver aws, mail resend, keys kms, backups s3) · 3 the smoke
+account signs in to the console, `trina` active · 4 the team's front page, its certificate, OAuth issuer and protected
+resource · 5 `/mcp` without auth: 401 + `resource_metadata` · 6 SSO: console session → `/api/sso/start` → the
+console's form_post → the team's session, host-only cookies (none with `Domain=`, none shared), `/api/files` 200 ·
+7 a PAT made for the run: MCP initialize, `tools/list` without sharing tools, `bash ls /` without the canary folder ·
+8 an app password made for the run: PROPFIND 207, 30 MB PUT, GET back with the same sha256 · 9 a console sign-in link
+reaches the smoke mailbox (read with `gws gmail`) with dkim=pass for `drive.trina.app` and spf=pass (one Resend mail) ·
+10 `teams backup`, the objects in S3 under SSE-KMS, `tdcloud_last_backup_age_seconds` < 26 h, nobody waiting for a host
+· 11 `tdcloud-host check <team>` on its host: metadata service, the control plane's private address, the host's ports
+and other teams unreachable; the relay, public HTTPS and the control plane's public address reachable; the firewall
+rules there · 12 an unknown name gets no certificate (Caddy's `ask` refuses before ACME) · 13 hairpin (the team reaches
+`https://cloud.trina.app`: invite callbacks) · 14 `/internal/*` 404 through the public Caddy · 15 port 8790 closed on
+the control and host addresses · 16 the hosts' Caddy has the office zones and an office range · 17 `hosts check` and its
+hourly cron.
+
+It reads the smoke account from `~/.config/trina-drive/smoke/{email,password}` (0600) or the SSM SecureStrings
+`/tdcloud/smoke/{email,password}` — never argv or the environment — and redacts every value it read (and the cookies,
+tokens and passwords it made) from its output. The PAT, the app password and the 30 MB file are removed at the end.
+Set up once (A6): a console **member** of the team (no TOTP), with Editor on one folder (WebDAV writes there), and a
+canary folder it must not see: `teams exec trina -- folder create smoke-canary` (no rule for the smoke member).
+
+## v1 rollout runbook (A0–A10)
+
+From hold to `trina.cloud.trina.app` with Trina Cloud v1 (plan v1.1 §6.2/§10). Run by the lead after Phase 1 is merged
+and the local end-to-end checks are green. Everything below uses the `tdcloud` profile (never the account root),
+Seoul, and these shorthands:
+
+```sh
+export AWS_PROFILE=tdcloud AWS_REGION=ap-northeast-2
+S=~/.config/trina-drive/tdcloud-tf; export TF_DATA_DIR=$S/.terraform
+REG=896568317806.dkr.ecr.ap-northeast-2.amazonaws.com
+CONTROL=i-0393ffa5f3c7c88be                     # the control instance (stopped in hold), EIP 3.34.8.120
+C='docker exec -e USER=<you> tdc-control bun /app/src/main.ts'   # the admin CLI, on the control instance as root
+```
+
+**Stop conditions** (stay in hold, report): the plan's release gates are not green; `terraform plan` shows a destroy
+other than the three ECR lifecycle policies (below); Let's Encrypt fails for `cloud.trina.app` (do not retry in a
+loop: 5 failures per hour lock the name); the smoke check fails on 2, 4, 6, 10 or 11.
+
+**A0 — images** (~20 min). From a clean checkout of the merged main (`V=$(git rev-parse --short HEAD)`), built from
+`git archive` (not a working tree), arm64 on colima's buildx:
+
+```sh
+aws ecr get-login-password | docker login --username AWS --password-stdin $REG
+D=$(mktemp -d); git archive HEAD | tar -x -C $D
+docker buildx build --builder colima --platform linux/arm64 --build-arg VERSION=0.3.0 --build-arg REVISION=$V \
+  -t $REG/trina-drive:0.3.0-$V --push $D
+docker buildx build --builder colima --platform linux/arm64 -t $REG/tdcloud-control:0.2.0-$V --push $D/cloud/control
+docker buildx build --builder colima --platform linux/arm64 -t $REG/tdcloud-caddy:2.10.2-2 --push $D/cloud/caddy
+for r in trina-drive:0.3.0-$V tdcloud-control:0.2.0-$V tdcloud-caddy:2.10.2-2; do
+  aws ecr describe-images --repository-name ${r%%:*} --image-ids imageTag=${r#*:} --query 'imageDetails[0].imageDigest'; done
+```
+
+The rollback baseline is already in ECR (main 8e036ac, pushed 2026-10-23): `trina-drive`, `tdcloud-control`,
+`tdcloud-caddy` each `:rollback-8e036ac` (= `:0.2.0-8e036ac`); the lifecycle rule from A2 keeps `rollback-*` forever.
+
+**A1 — Resend** (done 2026-10-23): `/tdcloud/control/resend-api-key` and `/tdcloud/hosts/resend-api-key` (v1). Check:
+
+```sh
+aws ssm describe-parameters --parameter-filters Key=Name,Option=BeginsWith,Values=/tdcloud/ --query 'Parameters[].Name'
+bun cloud/scripts/resend-domain.ts        # exit 0: DKIM, send.drive MX (forge.rmta.net) and SPF ok; _dmarc recommended
+```
+
+**A2 — Terraform** (~10 min). In `$S/terraform.tfvars` (already: `host_max = 3`, `m7g.large`, `host_data_gb = 100`,
+`mail_upstream = "resend"`): `trina_image_tag = "0.3.0-<V>"`, `control_image_tag = "0.2.0-<V>"`,
+`caddy_image_tag = "2.10.2-2"`, and `office_cidrs = ["<office NAT>/32"]` (from the office:
+`curl -s https://checkip.amazonaws.com`). Then
+
+```sh
+cd cloud/infra/terraform && terraform init -backend-config="path=$S/terraform.tfstate"
+terraform plan -var-file=$S/terraform.tfvars -out=$S/plan-a2.bin | tee $S/plan-a2.txt
+```
+
+Read it resource by resource (expected, from the dry run of 2026-10-23 on this branch: 3 to add, 6 to change, 3 to
+destroy): `aws_autoscaling_group.hosts` max_size 0 → 3 (launches nothing: desired is the scaler's);
+`aws_ecr_lifecycle_policy.keep[*]` ×3 **replaced** (the provider replaces a changed policy: the policy object, not
+images — ECR's preview of the new rules on all three repositories expires nothing); `aws_iam_role_policy.control`
+(SES From `cloud@drive.trina.app`, MailKey, PoolRead, PoolSize, HostVolumes, PoolAddress*); `aws_iam_role_policy.host`
+(SES From, MailKey); `aws_launch_template.host` (m7g.large, 100 GB, the three new images, `MAIL_UPSTREAM=resend`,
+`MAIL_KEY_PARAM`, `OFFICE_CIDRS`); `aws_s3_object.artifacts["host/bootstrap.sh"]`, `["host/tdcloud-host"]`. Nothing
+for the control instance (user data is ignored: A4), the zone, SES, KMS or the buckets; no EIP resources (pool
+addresses are the scaler's). Anything else: stop. Then `terraform apply $S/plan-a2.bin` and note the diff in the
+deploy log.
+
+**A3 — control env** (~10 min). Into a 0600 file, edit, back, remove:
+
+```sh
+umask 077; aws ssm get-parameter --with-decryption --name /tdcloud/control/env --query Parameter.Value --output text | cat > $S/control.env
+terraform output -raw control_env_template      # compare: the non-secret lines this code expects
+```
+
+Set (keep the secrets and the Paddle placeholder as they are):
+
+```
+TDCLOUD_ENV=production
+TDCLOUD_MAILER=resend
+TDCLOUD_RESEND_API_KEY_PARAM=/tdcloud/control/resend-api-key
+TDCLOUD_MAIL_FROM=Trina Cloud <cloud@drive.trina.app>
+TDCLOUD_TEAM_MAIL_FROM=Trina Drive <drive@drive.trina.app>
+TDCLOUD_IMAGE=896568317806.dkr.ecr.ap-northeast-2.amazonaws.com/trina-drive:0.3.0-<V>
+TDCLOUD_HELPER_IMAGE=896568317806.dkr.ecr.ap-northeast-2.amazonaws.com/tdcloud-control:0.2.0-<V>
+TDCLOUD_ASG_NAME=tdcloud-hosts
+TDCLOUD_MAX_HOSTS=3
+TDCLOUD_MAX_TEAMS_PER_HOST=10
+TDCLOUD_MAX_FREE_TEAMS=0
+PADDLE_ENV=sandbox
+```
+
+no `TDCLOUD_TURNSTILE_*` lines, and the console/SSO settings D1's section of this README names (the SSO key is wrapped
+with the existing `TDCLOUD_KMS_KEY_ID`). Then
+
+```sh
+aws ssm put-parameter --type SecureString --key-id alias/tdcloud --overwrite --name /tdcloud/control/env --value file://$S/control.env
+rm -P $S/control.env
+```
+
+**A4 — control instance** (~10 min). First, from the laptop: `dig +short cloud.trina.app @8.8.8.8` = `3.34.8.120`,
+`dig +short NS cloud.trina.app @1.1.1.1` = the four awsdns servers, `dig +short CAA cloud.trina.app` lists
+`letsencrypt.org`. Then
+
+```sh
+aws ec2 start-instances --instance-ids $CONTROL && aws ec2 wait instance-status-ok --instance-ids $CONTROL
+nc -zv -w 5 3.34.8.120 80; nc -zv -w 5 3.34.8.120 443     # both open once Caddy runs (after the bootstrap below)
+aws ssm start-session --target $CONTROL
+```
+
+In the session (`sudo -i`):
+
+```sh
+sed -i -E 's#(trina-drive:)[^ ]*#\10.3.0-<V>#; s#(tdcloud-control:)[^ ]*#\10.2.0-<V>#; s#(tdcloud-caddy:)[^ ]*#\12.10.2-2#' /etc/tdcloud/host.conf
+grep IMAGE /etc/tdcloud/host.conf
+. /etc/tdcloud/host.conf
+aws s3 cp s3://$ARTIFACTS_BUCKET/host/bootstrap.sh /usr/local/sbin/tdcloud-bootstrap && chmod 0755 /usr/local/sbin/tdcloud-bootstrap
+/usr/local/sbin/tdcloud-bootstrap                       # ends with "tdcloud bootstrap done (control)"
+docker logs tdc-control 2>&1 | grep 'control plane on'  # driver aws; mail resend; keys kms; backups s3
+docker logs tdc-caddy 2>&1 | grep -iE 'certificate obtained|error' | tail
+ls /etc/cron.d/                                          # tdcloud-control-backup, tdcloud-host-disk
+```
+
+Check from the laptop: `curl -sS https://cloud.trina.app/healthz` → `{"ok":true}`; `echo | openssl s_client -connect
+cloud.trina.app:443 -servername cloud.trina.app 2>/dev/null | openssl x509 -noout -issuer -enddate` → Let's Encrypt.
+If Caddy logs an ACME error: stop, fix DNS/80, then one `docker restart tdc-caddy` — not more.
+
+**A5 — the dogfood team** (~6 min; review finding 24: no `teams restore --fresh`). On the control instance:
+
+```sh
+$C teams show trina                                 # suspended, host i-054ebcf7be3ae5f94 (terminated)
+$C teams set-plan trina team --complimentary        # Team = 100 GB; recorded (the host is gone: applies at provision)
+$C teams retry trina --reset-host                   # control DB → s3://tdcloud-backups-896568317806/control/…-before-reset-trina.db,
+                                                    # old backup keys kept, host forgotten; waits while the scaler launches a host
+$C hosts list && $C teams list                      # 1 host ready, trina active on it
+$C hosts check --isolation                          # disk %, and the isolation probes from inside trina
+dig +short trina.cloud.trina.app @ns-405.awsdns-50.com   # the host's Elastic IP
+```
+
+The old data stays in the backup bucket (`teams/trina/…`, `trina/…`), readable with the retired keys.
+
+**A6 — owner, by hand** (~10 min): console sign-in as the owner (contact@trina.app or the CEO's account), TOTP
+enrolment, Open drive → SSO → the drive's second factor; folders 공용, 경영 (No AI), 프로젝트, 인사. The smoke account:
+invite a member (a mailbox `gws` reads), accept, set its password; put its address and password in
+`~/.config/trina-drive/smoke/{email,password}` (0600) or `/tdcloud/smoke/{email,password}` (SecureString, file://);
+give it Editor on one folder; `$C teams exec trina -- folder create smoke-canary`.
+
+**A7 — smoke** (~5 min): `bun cloud/scripts/aws-smoke.ts --base https://cloud.trina.app --team trina` → all ok (or
+`--skip mail` when `gws` cannot read the smoke mailbox). Port 8790, office zones and the disk cron are in it.
+
+**A8 — restore drill** (~15 min, S31): `$C teams create trina-drill --owner contact@trina.app --plan team` (Free is
+closed), put a file in, `$C teams backup trina-drill`, `$C teams export trina-drill --out /var/lib/tdcloud/drill`
+(decrypts: the drill), `rm -rf /var/lib/tdcloud/drill`, `$C teams delete trina-drill --yes`. Scale-in is watched the
+next day (`hosts list`, nothing should go while `trina` is on the host).
+
+**A9 — the team, in the morning**: invites from the console (Members), each person connects their AI (Claude Code,
+Codex, Claude.ai), one WebDAV mount, one Google import (the trina-only OAuth client: check the app is **published**, not
+Testing — Testing caps users at 100 and expires refresh tokens after 7 days).
+
+**A10 — record**: in `~/.config/trina-drive/tdcloud-deploy-log.md` the date, image tags and digests, the plan diff as
+applied, the host's instance id and Elastic IP, the smoke output, the monthly cost (~$115 with one m7g.large host:
+plan §6.4). The Gabia → Cloudflare text in this README is already fixed.
+
+### Rollback (finding 17: the mixed versions)
+
+Known-good images: `trina-drive`, `tdcloud-control`, `tdcloud-caddy` `:rollback-8e036ac` (main 8e036ac: Resend and the
+scaler, no SSO, no console). Roll back the **product first, then the control plane**:
+
+| product \ control | new (0.2.0-<V>) | old (rollback-8e036ac) |
+|---|---|---|
+| **new** (0.3.0-<V>) | normal | nobody signs in to an SSO-only team (no issuer) — never leave it here: roll the product back first |
+| **old** (rollback-8e036ac) | the console's Open drive fails; the drive's own sign-in works (owner: `people reset-link`) | the state before v1 |
+
+| What broke | Back |
+|---|---|
+| the product (0.3) | turn SSO off for the team in the control env (so its rewritten env has no `TDRIVE_SSO_ONLY` / `TDRIVE_CLOUD_SSO_KEYS`), `TDCLOUD_IMAGE=…/trina-drive:rollback-8e036ac`, control bootstrap rerun, `$C teams upgrade trina` (a backup first, then a new container on the same data; new columns/tables are ignored by the old code), owner: `$C teams exec trina -- people reset-link <name>` |
+| the control plane | `tdcloud-control:rollback-8e036ac` in the control's `host.conf` (and `TDCLOUD_HELPER_IMAGE`), bootstrap rerun; the control DB's new tables are ignored (migrations are additive; the copy from A5 is in `control/`) |
+| Caddy | `tdcloud-caddy:rollback-8e036ac` in the hosts' `host.conf`, bootstrap rerun: WebDAV uploads over 25 MB fail again and the office shares one limit |
+| SSO (nobody gets in) | `$C teams exec trina -- people reset-link <name>`, or SSO off for the team + `teams upgrade trina` |
+| hosts / the scaler | `TDCLOUD_AUTOSCALE=0` + `hosts keep <id>`; worst case hold mode |
+| mail | `TDCLOUD_MAILER=smtp` (Resend's SMTP, same key) |
+| everything | [Hold mode](#hold-mode-no-teams-until-the-first-customer): `teams backup trina`, `teams suspend trina`, hosts scale in, control stopped (~$8/month); DNS stays |
+
 ## Cost estimate (AWS, Seoul, on-demand, USD per month)
 
 Prices from the AWS Price List API on 2026-10-23: m7g.xlarge $0.2006/h ($146.44/month), t4g.small $0.0208/h, gp3
@@ -757,7 +1002,8 @@ is the first host: from hold mode (no host) the first free sign-up launches one 
 | `TDCLOUD_PAST_DUE_GRACE_DAYS`, `_CANCELED_GRACE_DAYS`, `_DELETE_AFTER_DAYS` | 7, 3, 30 | |
 | `TDCLOUD_CADDY_ASK_KEY` | — | required in production |
 | `TDCLOUD_TRUSTED_PROXIES` | — | peers whose X-Forwarded-For is believed |
-| `TDCLOUD_MAX_TEAMS_PER_HOST` | 20 | slots per host (Team = 1, Business = 2) |
+| `TDCLOUD_MAX_TEAMS_PER_HOST` | 20 | slots per host (Team = 1, Business = 2): 10 for m7g.large, 20 for m7g.xlarge (Terraform's `control_env_template` follows `host_instance_type`) |
+| `TDCLOUD_HOST_DISK_ALERT_PCT` | 80 | `hosts check --alert` (hourly on the control host): ops mail when a host's data volume is this full ([Host disk](#host-disk)) |
 | `TDCLOUD_AUTOSCALE` | 1 (`0` with the fake driver) | the host scaler; `0`: a fixed pool ([Hosts](#hosts-scale-out-and-scale-in)) |
 | `TDCLOUD_MAX_HOSTS` | 3 | most hosts the scaler runs (also capped by the ASG's max size, `host_max`) |
 | `TDCLOUD_SPARE_SLOTS` | 0 | free slots kept ready ahead of sign-ups |
@@ -769,7 +1015,7 @@ is the first host: from hold mode (no host) the first free sign-up launches one 
 | `TDCLOUD_ROUTE53_ZONE_ID`, `TDCLOUD_SSM_PREFIX`, `TDCLOUD_AWS_HOST_TAG`, `AWS_REGION` | —, `/tdcloud`, `host`, `ap-northeast-2` | AWS driver |
 | `PADDLE_ENV`, `PADDLE_WEBHOOK_SECRET`, `PADDLE_CLIENT_TOKEN`, `PADDLE_CHECK_IP`, `PADDLE_WEBHOOK_TOLERANCE_SEC` | sandbox, —, —, off, 5 | |
 | `PADDLE_PRICE_{TEAM,BUSINESS}_{MONTHLY,YEARLY}` | — | price id → plan, and the dashboard's checkout buttons (also a free team's upgrade buttons) |
-| `TDCLOUD_MAX_FREE_TEAMS` | 50 | free teams that may exist; confirmed sign-ups past it join the waitlist ([Free plan](#free-plan)) |
+| `TDCLOUD_MAX_FREE_TEAMS` | 0 | free teams that may exist; confirmed sign-ups past it join the waitlist ([Free plan](#free-plan)). 0 = public free sign-up closed (v1, until Resend's daily limit is planned for) |
 | `TDCLOUD_FREE_HOST_SHARE`, `TDCLOUD_FREE_RESERVE_HOSTS` | 0.5, 1 | the share of a host's slots free teams may take; the last hosts of the limit free teams may not launch |
 | `TDCLOUD_FREE_VERIFY_TTL` | `24h` | the free sign-up's confirmation link |
 | `TDCLOUD_FREE_SIGNUPS_PER_IP_HOUR`, `_PER_IP_DAY` | 5, 20 | free sign-up requests per client address |
@@ -786,7 +1032,8 @@ The mail relay (`mail-relay`, on each host): `TDCLOUD_TEAM_MAIL_FROM`, `TDCLOUD_
 dev; unset: `ses`, or the older name `TDCLOUD_MAIL_RELAY_UPSTREAM`; the bootstrap passes `resend`), the Resend / SMTP
 settings above (on hosts `TDCLOUD_RESEND_API_KEY_PARAM=/tdcloud/hosts/resend-api-key`),
 `TDCLOUD_MAIL_RELAY_PER_HOUR` / `_PER_DAY` (60 / 500), `TDCLOUD_SES_CONFIGURATION_SET`, `AWS_REGION`. Caddy on the
-hosts: `TDCLOUD_FRONT_PROXIES` (empty; [Client addresses](#client-addresses)).
+hosts: `TDCLOUD_FRONT_PROXIES` (empty; [Client addresses](#client-addresses)), `TDCLOUD_TRUSTED_OFFICE_CIDRS` (office
+ranges with higher rate limits; Terraform `office_cidrs`), `TDCLOUD_DAV_MAX_BODY` (4GiB).
 
 ## Upgrade path: Business on its own VM
 
@@ -812,7 +1059,7 @@ Before a real AWS launch:
    host's other ports do not, the relay does; the relay refuses another From and passes the team From to SES (IAM
    allowed it; SES refused only because the identity is not verified yet); Caddy's `ask` (200 for the team, 404
    unknown, 403 without the key); manual backup to S3 (SSE-KMS) and `teams export` (KMS unwrap, decrypts); suspend;
-   the audit chain. **Not yet covered** (needs the Gabia NS records and SES production access): certificates,
+   the audit chain. **Not yet covered** (then: no NS delegation yet, and no SES production access): certificates,
    `https://` end to end, Claude.ai connecting, real mail (setup link, invites), a Paddle purchase, a host reboot
    (Caddy re-joining the team networks), two teams on one host. Fixed on the way: the firewall script was not
    executable (teams would have run unfirewalled; the bootstrap now stops instead), the aws CLI snap writes nothing to
@@ -828,9 +1075,10 @@ Before a real AWS launch:
    answers 502, the control plane reports the failed setup mail to ops: `teams resend-setup`). Team mail shows
    `Trina Drive` as the sender; the relay already accepts `<team> via Trina Drive`, but the control plane does not yet
    write the team's name into `TDRIVE_MAIL_FROM` (follow-up).
-3. **Host disk vs. plan size**: a Business team may hold 1 TB (XFS cap 2 TB) while hosts start with a 300 GB data
-   volume. Quotas are caps, not reservations: watch free space per host (`tdcloud-host info` reports it; nothing
-   alerts yet), grow volumes online, and give large Business teams their own host (see Upgrade path).
+3. **Host disk vs. plan size**: a Business team may hold 1 TB (XFS cap 2 TB) while hosts start with a 100 GB data
+   volume. Quotas are caps, not reservations: the control host checks every host's volume hourly and mails ops at 80%
+   ([Host disk](#host-disk)); grow volumes online, and give large Business teams their own host (see Upgrade path).
+   The dogfood team is complimentary **Team** (100 GB), not Business.
 4. The relay's per-team limits are in memory (reset on restart) and per host; its only log is stdout (team number and
    recipient domain).
 5. `serve` logs "public listener NOT started (gate)" on every team start: expected (the team is served through the
@@ -839,7 +1087,9 @@ Before a real AWS launch:
    restore drill yet.
 7. One control instance; one host per team (no failover). Control DB copied nightly.
 8. Monitoring: `/internal/metrics` (Prometheus text: teams by status, disk per team, pending/failed jobs, backup age)
-   exists but nothing scrapes it; no CloudWatch alarms yet.
+   exists but nothing scrapes it. Host disk: `hosts check --alert` hourly (ops mail through the control plane's
+   mailer, no CloudWatch: the deploy identity has no SNS). No alarm for a stopped control instance (its own mail
+   cannot report that): the smoke check and an outside uptime check are the watch.
 9. Paid seats (AI-connected people) are billed by Paddle, not enforced in the instance (Free's 3 people are: `TDRIVE_MAX_PEOPLE`).
 10. Local driver: no hard disk quota (named volumes have none); the product's storage quota still applies, and the
     metrics loop flags `/data` beyond it plus 20 GB.
@@ -848,8 +1098,11 @@ Before a real AWS launch:
     `-e USER=<you>` to `docker exec`.
 13. A team container can also reach the relay port on the host's VPC address (not only its gateway); the relay still
     accepts only a team container's address and the team From.
-14. No `teams restore`: bringing a team back after hold mode or a lost host is the manual procedure above. Free teams'
-    final backups are restored the same way within their 30 days.
+14. No `teams restore`: bringing a team back after hold mode or a lost host is `teams retry --reset-host` (empty) plus
+    the manual procedure above. Free teams' final backups are restored the same way within their 30 days.
+18. A host reboot restarts team containers by themselves and Caddy keeps its team networks: they serve again without
+    the before-serve step (the console's member sync, `Driver.beforeServe`); the console's sync retries are what
+    catch up. A host-side gate (Caddy joining a team only after the control plane says so) is a follow-up.
 15. Hosts are packed (the fullest host that fits) but teams are never moved: a host with one team left stays until
     that team goes. A `teams move` (backup → restore on another host → DNS) would let the scaler consolidate.
 16. The scaler's first AWS run is still ahead: it is tested locally (simulated hosts) and against fake Auto Scaling /
