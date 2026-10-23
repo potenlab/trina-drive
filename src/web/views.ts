@@ -10,6 +10,7 @@ import { accountOf } from './auth'
 import { has2FA } from './mfa'
 import { mustEnroll } from './hosted'
 import { forbidden, notFound, type WebCtx } from './http'
+import { meExtras } from './me-extras'
 import { visibleFolder, type Op } from './ops'
 import { ensureWebSchema } from './schema'
 import { managedMountIds } from '../managed/core'
@@ -21,7 +22,8 @@ const groups = (w: WebCtx) => w.db.query<{ id: number; name: string }, []>('SELE
 export function me(w: WebCtx, a: Actor) {
   const p = w.db.query<{ id: number; name: string; admin: number }, [number]>('SELECT id, name, admin FROM people WHERE id = ?').get(a.personId)!
   const unread = w.db.query<{ n: number }, [number]>('SELECT count(*) AS n FROM notices WHERE person_id = ? AND read_at IS NULL').get(a.personId)!.n
-  return { id: p.id, name: p.name, admin: !!p.admin, email: accountOf(w.db, a.personId)?.email ?? null, unread_notices: unread,
+  // module hooks first (me-extras.ts: Trina Cloud, sharing), so a base field below always wins
+  return { ...meExtras(w, a), id: p.id, name: p.name, admin: !!p.admin, email: accountOf(w.db, a.personId)?.email ?? null, unread_notices: unread,
     approvals: decidableCount(w.db, a.personId), second_factor: has2FA(w.db, a.personId),
     // hosted mode: the app shows only enrolment until this is false (hosted.ts enforces it)
     second_factor_required: mustEnroll(w, p.id, !!p.admin),

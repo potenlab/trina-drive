@@ -1,6 +1,7 @@
 // Tables the web side adds (people's sign-in, sessions, links, notices, folder history). Kept apart from db.ts so the
 // core schema stays the agent side's; ensureWebSchema is idempotent and runs when the web handler is made.
 import type { DB } from '../db'
+import { runMigrations } from '../migrations'
 
 const WEB_SCHEMA = `
 -- a person who can sign in on the web; people made only by the CLI have no row here until invited
@@ -34,6 +35,8 @@ const done = new WeakSet<DB>()
 export function ensureWebSchema(db: DB) {
   if (done.has(db)) return
   db.exec(WEB_SCHEMA)
+  // feature modules' columns on the web tables (src/migrations.ts)
+  runMigrations(db, 'web')
   done.add(db)
 }
 

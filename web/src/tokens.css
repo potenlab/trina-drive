@@ -1,0 +1,144 @@
+/* Trina brand tokens — THE source. Edit only this file, then run `bun scripts/sync-brand.ts`; it copies it to
+   website/src/styles/tokens.css, web/src/tokens.css and cloud/control/src/ui/tokens.css, and test/brand-tokens.test.ts
+   fails when a copy differs. Values are the live landing's (website/src/styles/global.css, 2026-10-23).
+
+   Signal Orange on warm paper. Rules (plan 2.5):
+   - One Signal Orange call to action per screen (console "Open drive", drive "+ New", landing "Start free"):
+     background var(--signal), text var(--signal-fg) — ink, never white (6.06:1).
+   - Links, selection and icons: var(--accent) (#c43d0a on light, AA 5.2:1; #ff6a33 on dark).
+   - Status: Running = --ok, Paused / Payment needed = --warn, Failed = --danger.
+   - Dark mode: the system preference, or data-theme="dark" | "light" on <html> (the website's theme.js toggle).
+   - Fonts: Geist / Geist Mono (self-hosted, brand/fonts, OFL; Latin subset), Hangul from Pretendard when the page ships
+     it, else the system's Korean font. @font-face lives in each app (font paths differ), not here.
+   - The mark: Star Pillar (brand/mark.svg on light, brand/mark-dark.svg on dark, brand/favicon.svg as a tile);
+     inline it with fill var(--logo-ink) for the sides and var(--logo-top) for the top. */
+
+:root {
+  color-scheme: light;
+  /* surfaces */
+  --bg: #fcfbf8;
+  --bg-soft: #f6f2ea;
+  --bg-tint: #f9f6f0;
+  --bg-elev: #ffffff;
+  --card: #ffffff;
+  --inset: #f3efe7;
+  /* text */
+  --fg: #14110f;
+  --fg-muted: #514b45;
+  --fg-faint: #6b645d;
+  /* lines */
+  --border: #e9e3d8;
+  --border-strong: #d8d0c3;
+  --hair: rgba(20, 17, 15, 0.07);
+  /* accent: text, links, icons, selection */
+  --accent: #c43d0a;
+  --accent-strong: #a3320a;
+  --accent-soft: #fdf0e8;
+  --accent-fg: #14110f;
+  /* Signal Orange fill (the one call to action), always with ink text */
+  --signal: #ff5b1f;
+  --signal-hover: #ff7440;
+  --signal-fg: #14110f;
+  --cta: var(--signal);
+  --cta-fg: var(--signal-fg);
+  --cta-hover: var(--signal-hover);
+  /* neutral buttons */
+  --btn: #14110f;
+  --btn-fg: #fcfbf8;
+  --btn-hover: #2b2622;
+  /* status */
+  --ok: #2f7a4f;
+  --warn: #8a5300;
+  --warn-soft: #fdf3e2;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  /* the mark */
+  --logo-ink: #14110f;
+  --logo-top: #ff5b1f;
+  /* depth */
+  --shadow-sm: 0 1px 2px rgba(20, 17, 15, 0.05);
+  --shadow: 0 1px 2px rgba(20, 17, 15, 0.04), 0 10px 30px -10px rgba(20, 17, 15, 0.14);
+  --shadow-lg: 0 2px 4px rgba(20, 17, 15, 0.04), 0 30px 80px -20px rgba(40, 24, 14, 0.26);
+  --radius: 14px;
+  --radius-lg: 22px;
+  --radius-sm: 9px;
+  /* type */
+  --font-sans: "Geist", "Pretendard", "Pretendard Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas,
+    "D2Coding", "Noto Sans Mono CJK KR", monospace;
+}
+
+/* Dark: the system preference unless the page says light, and data-theme="dark" always. Keep the two blocks equal. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e0c0b;
+    --bg-soft: #151210;
+    --bg-tint: #110f0d;
+    --bg-elev: #1a1714;
+    --card: #151210;
+    --inset: #1d1916;
+    --fg: #f6f2ea;
+    --fg-muted: #b3aaa0;
+    --fg-faint: #958c82;
+    --border: rgba(246, 242, 234, 0.08);
+    --border-strong: rgba(246, 242, 234, 0.15);
+    --hair: rgba(246, 242, 234, 0.06);
+    --accent: #ff6a33;
+    --accent-strong: #ff8a5c;
+    --accent-soft: rgba(255, 106, 51, 0.12);
+    --accent-fg: #14110f;
+    --signal: #ff6a33;
+    --signal-hover: #ff8352;
+    --signal-fg: #14110f;
+    --btn: #f6f2ea;
+    --btn-fg: #14110f;
+    --btn-hover: #e3ddd2;
+    --ok: #7fcf9a;
+    --warn: #f0b45a;
+    --warn-soft: rgba(240, 180, 90, 0.1);
+    --danger: #ff8b7e;
+    --danger-soft: rgba(255, 139, 126, 0.1);
+    --logo-ink: #f6f2ea;
+    --logo-top: #ff6a33;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 30px 80px -20px rgba(0, 0, 0, 0.8);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e0c0b;
+  --bg-soft: #151210;
+  --bg-tint: #110f0d;
+  --bg-elev: #1a1714;
+  --card: #151210;
+  --inset: #1d1916;
+  --fg: #f6f2ea;
+  --fg-muted: #b3aaa0;
+  --fg-faint: #958c82;
+  --border: rgba(246, 242, 234, 0.08);
+  --border-strong: rgba(246, 242, 234, 0.15);
+  --hair: rgba(246, 242, 234, 0.06);
+  --accent: #ff6a33;
+  --accent-strong: #ff8a5c;
+  --accent-soft: rgba(255, 106, 51, 0.12);
+  --accent-fg: #14110f;
+  --signal: #ff6a33;
+  --signal-hover: #ff8352;
+  --signal-fg: #14110f;
+  --btn: #f6f2ea;
+  --btn-fg: #14110f;
+  --btn-hover: #e3ddd2;
+  --ok: #7fcf9a;
+  --warn: #f0b45a;
+  --warn-soft: rgba(240, 180, 90, 0.1);
+  --danger: #ff8b7e;
+  --danger-soft: rgba(255, 139, 126, 0.1);
+  --logo-ink: #f6f2ea;
+  --logo-top: #ff6a33;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 30px 80px -20px rgba(0, 0, 0, 0.8);
+}

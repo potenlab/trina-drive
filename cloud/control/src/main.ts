@@ -20,6 +20,7 @@ import { MAX_BODY_BYTES, relayFromEnv } from './relay'
 import { seal, unseal } from './seal'
 import { iso } from './util'
 import { makeHandler } from './web'
+import { findCommand, registeredHelp } from './cli'
 
 const HELP = `Trina Cloud control plane
 
@@ -212,7 +213,7 @@ async function hostsList(c: Cloud, all: boolean) {
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv]
   const [cmd, sub] = args
-  if (!cmd || cmd === 'help' || cmd === '--help') { console.log(HELP); return 0 }
+  if (!cmd || cmd === 'help' || cmd === '--help') { console.log(HELP + registeredHelp()); return 0 }
   const h = await helper(cmd, args.slice(1))
   if (h >= 0) return h
   if (cmd === 'mail-relay') {
@@ -227,6 +228,14 @@ export async function main(argv: string[]): Promise<number> {
   const actor = `admin:${process.env.SUDO_USER || process.env.USER || 'unknown'}`
   const rest = args.slice(2)
   const team = () => { const t = rest[0] ? teamBySlug(cloud.db, rest[0]) : null; if (!t) throw new CloudError('usage', `no team ${rest[0] ?? '(give a slug)'}`); return t }
+  // commands the feature modules register (cli/index.ts: operations, the console): asked first, so one may take over a
+  // built-in below
+  const reg = findCommand(cmd, sub)
+  if (reg) {
+    const regRest = args.slice(reg.name.split(' ').length)
+    const regTeam = () => { const t = regRest[0] ? teamBySlug(cloud.db, regRest[0]) : null; if (!t) throw new CloudError('usage', `no team ${regRest[0] ?? '(give a slug)'}`); return t }
+    return reg.run({ cloud, cfg, actor, rest: regRest, team: regTeam, take: (name) => take(regRest, name) })
+  }
   switch (`${cmd} ${sub ?? ''}`.trim()) {
     case 'teams list':
       console.log(TEAM_HEAD)
@@ -385,7 +394,7 @@ export async function main(argv: string[]): Promise<number> {
       return 0
     }
     default:
-      console.error(`unknown command: ${args.join(' ')}\n\n${HELP}`)
+      console.error(`unknown command: ${args.join(' ')}\n\n${HELP}${registeredHelp()}`)
       return 2
   }
 }

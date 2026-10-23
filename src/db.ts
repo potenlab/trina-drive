@@ -5,6 +5,7 @@ import { detectLayout } from './layout'
 import { INPLACE_SCHEMA } from './inplace/schema'
 import { MANAGED_SCHEMA } from './managed/schema'
 import { ensureOAuthSchema } from './oauth/schema'
+import { runMigrations } from './migrations'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -82,5 +83,7 @@ export function openDb(dataDir: string): DB {
   db.exec(INPLACE_SCHEMA)
   db.exec(MANAGED_SCHEMA)
   ensureOAuthSchema(db)
+  // feature modules' own tables and columns (src/migrations.ts)
+  runMigrations(db, 'core')
   return db
 }

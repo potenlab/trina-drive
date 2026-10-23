@@ -1,236 +1,24 @@
 // Changes made from the web. Each one: find what it is about (404 when the caller may not see it), ask rights.ts
 // whether the caller may do it (403), change it in one transaction together with its audit row, then send the
 // notices R5/R7/R9 ask for. No permission logic lives in the HTTP handlers.
+// This module: registering folders (and their owner, subfolders, NAS readers) and the caller's own tokens. People and
+// groups are in people-ops.ts, rules / flags / managers / the Everyone group in src/share/rules.ts (W0 seams).
 import fs from 'node:fs'
 import path from 'node:path'
-import { appendAudit } from '../audit'
 import { isSystemName, nfc } from '../names'
-import { Rights, type Actor } from '../rights'
-import { addPerson, checkPeopleRoom, createToken, ensureFolder, LEVELS, registerFolder as storeRegister, StoreError, type FolderRow, type LevelName } from '../store'
-import { revokeAppPasswordsOf } from '../dav/apppw'
-import { accountOf, checkPasswordRules, createLink, freshLogin, FRESH_LOGIN_MS, markReauth, revokeSessionsOf, revokeTokensOf, setPassword, verifyPassword } from './auth'
-import { ApiError, bad, forbidden, notFound, rateLimited, type WebCtx } from './http'
-import { notify, type NoticeKind } from './notices'
-import { ensureWebSchema, metaGet, metaSet } from './schema'
+import { Rights } from '../rights'
+import { createToken, ensureFolder, LEVELS, registerFolder as storeRegister, StoreError, type FolderRow } from '../store'
+import { freshLogin } from './auth'
+import { ApiError, bad, forbidden, notFound } from './http'
 import { ManagedError } from '../managed/core'
 import { isManagedFolder, makeMountDir, registerManaged, removeManagedMount } from '../managed/folders'
 import { storageSettings } from '../managed/settings'
+import { appendAudit } from '../audit'
+import { everyoneGroup, upsertRule } from '../share/rules'
+import { reauth } from './people-ops'
+import { checkName, folderLink, groupRow, isUnique, label, now, personRow, record, requireAdmin, tell, visibleFolder, type Op } from './op-common'
 
-export interface Op { w: WebCtx; actor: Actor; base: string }
-
-const PERSON_NAME = /^[^\s/\\@#][^/\\\p{Cc}]{0,63}$/u
-const EMAIL = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]{2,}$/
-
-const now = () => Date.now()
-const isUnique = (e: unknown) => /UNIQUE/.test(String((e as Error)?.message)) || (e as { code?: string })?.code === 'SQLITE_CONSTRAINT_UNIQUE'
-
-function record(op: Op, command: string, files: string[] = []) {
-  appendAudit(op.w.db, { personId: op.actor.personId, tokenId: null, tool: 'web', command, files, outcome: 'ok' })
-}
-const tell = (op: Op, ids: Iterable<number>, kind: NoticeKind, link: string, opts?: Parameters<typeof notify>[4]) =>
-  notify({ db: op.w.db, mailer: op.w.mailer, baseUrl: op.base }, ids, kind, link, opts)
-
-function requireAdmin(op: Op) { if (!op.actor.admin) throw forbidden('only an admin can do this') }
-function personRow(op: Op, id: unknown) {
-  const p = op.w.db.query<{ id: number; name: string; admin: number; active: number }, [number]>('SELECT id, name, admin, active FROM people WHERE id = ?').get(Number(id))
-  if (!p) throw notFound()
-  return p
-}
-function groupRow(op: Op, id: unknown) {
-  const g = op.w.db.query<{ id: number; name: string }, [number]>('SELECT id, name FROM groups WHERE id = ?').get(Number(id))
-  if (!g) throw notFound()
-  return g
-}
-function checkName(name: unknown): string {
-  if (typeof name !== 'string' || !PERSON_NAME.test(nfc(name.trim()))) throw bad('bad_name', 'names are 1–64 characters, without / \\ and not starting with @ or #')
-  return nfc(name.trim())
-}
-function checkEmail(email: unknown): string {
-  if (typeof email !== 'string' || email.length > 254 || !EMAIL.test(email.trim())) throw bad('bad_email', 'a valid mail address is required')
-  return email.trim()
-}
-/** A folder the caller can see (else 404). */
-export function visibleFolder(op: Op, r: Rights, id: unknown): FolderRow {
-  const f = r.folders.get(Number(id))
-  if (!f || !r.canSee(op.actor, f)) throw notFound()
-  return f
-}
-const folderLink = (f: FolderRow) => `/#/folders/${f.id}`
-const label = (r: Rights, f: FolderRow) => r.vpath(f) ?? f.path
-
-function activeAdmins(op: Op) { return op.w.db.query<{ id: number }, []>('SELECT id FROM people WHERE admin = 1 AND active = 1').all().map((p) => p.id) }
-
-/** The group every new person joins (the "everyone" of the public template). */
-export function everyoneGroup(w: WebCtx): number {
-  const db = w.db
-  const known = metaGet(db, 'everyone_group')
-  if (known && db.query('SELECT 1 FROM groups WHERE id = ?').get(Number(known))) return Number(known)
-  const g = db.query<{ id: number }, []>(`SELECT id FROM groups WHERE name IN ('everyone', '전체', '전원') ORDER BY id LIMIT 1`).get()
-  let id = g?.id
-  if (id == null) {
-    id = Number(db.query('INSERT INTO groups (name) VALUES (?)').run('everyone').lastInsertRowid)
-    db.query('INSERT OR IGNORE INTO memberships (group_id, person_id) SELECT ?, id FROM people WHERE active = 1').run(id)
-  }
-  metaSet(db, 'everyone_group', String(id))
-  return id
-}
-
-// ---------- people ----------
-async function sendInvite(op: Op, personId: number, email: string) {
-  const secret = createLink(op.w.db, 'invite', personId, op.actor.personId)
-  const url = `${op.base}/#/invite/${secret}`
-  await op.w.mailer.send({ to: email, subject: 'You are invited', text: `You were invited to the team file server. Choose a password here (valid 7 days, once):\n${url}\n` })
-  return url
-}
-
-export async function createPerson(op: Op, body: { name?: unknown; email?: unknown; admin?: unknown; groups?: unknown; everyone?: unknown }) {
-  requireAdmin(op)
-  ensureWebSchema(op.w.db)
-  const name = checkName(body.name), email = checkEmail(body.email)
-  const groups = Array.isArray(body.groups) ? body.groups.map((g) => groupRow(op, g).id) : []
-  if (body.everyone !== false) groups.push(everyoneGroup(op.w))
-  const db = op.w.db
-  let id = 0
-  try {
-    db.transaction(() => {
-      id = addPerson(db, name, body.admin === true).id
-      db.query('INSERT INTO accounts (person_id, email, created_at) VALUES (?, ?, ?)').run(id, email, now())
-      for (const g of new Set(groups)) db.query('INSERT OR IGNORE INTO memberships (group_id, person_id) VALUES (?, ?)').run(g, id)
-      record(op, `person add ${name}${body.admin === true ? ' --admin' : ''}`)
-    })()
-  } catch (e) { if (isUnique(e)) throw new ApiError(409, 'exists', 'that name or mail address is taken'); throw e }
-  const invite_url = await sendInvite(op, id, email)
-  return { id, invite_url }
-}
-
-/** A new invite for someone who has not chosen a password yet (people made by the CLI get their address here). */
-export async function invitePerson(op: Op, id: unknown, body: { email?: unknown }) {
-  requireAdmin(op)
-  const p = personRow(op, id)
-  const acc = accountOf(op.w.db, p.id)
-  if (acc?.password_hash) throw new ApiError(409, 'has_password', 'this person already has a password; use a reset link')
-  const email = acc?.email ?? checkEmail(body.email)
-  try {
-    if (!acc) op.w.db.query('INSERT INTO accounts (person_id, email, created_at) VALUES (?, ?, ?)').run(p.id, email, now())
-  } catch (e) { if (isUnique(e)) throw new ApiError(409, 'exists', 'that mail address is taken'); throw e }
-  record(op, `person invite ${p.name}`)
-  return { invite_url: await sendInvite(op, p.id, email) }
-}
-
-export async function updatePerson(op: Op, id: unknown, body: { admin?: unknown; active?: unknown; email?: unknown }) {
-  requireAdmin(op)
-  const p = personRow(op, id)
-  const db = op.w.db
-  const admins = activeAdmins(op)
-  const losesAdmin = (body.admin === false && p.admin) || (body.active === false && p.admin)
-  if (losesAdmin && admins.length === 1 && admins[0] === p.id) throw bad('last_admin', 'there must be at least one admin')
-  if (body.active === false && p.id === op.actor.personId) throw bad('self', 'you cannot deactivate yourself')
-  // turning someone back on counts against the plan's people limit like a new person
-  if (body.active === true && !p.active) checkPeopleRoom(db)
-  let oldEmail: string | undefined
-  try {
-    db.transaction(() => {
-      if (typeof body.admin === 'boolean') { db.query('UPDATE people SET admin = ? WHERE id = ?').run(body.admin ? 1 : 0, p.id); record(op, `person ${p.name} admin=${body.admin}`) }
-      if (typeof body.active === 'boolean') {
-        db.query('UPDATE people SET active = ? WHERE id = ?').run(body.active ? 1 : 0, p.id)
-        if (!body.active) revokeSessionsOf(db, p.id)
-        record(op, `person ${p.name} active=${body.active}`)
-      }
-      if (body.email !== undefined) {
-        const email = checkEmail(body.email)
-        const acc = accountOf(db, p.id)
-        oldEmail = acc?.email
-        if (acc) db.query('UPDATE accounts SET email = ? WHERE person_id = ?').run(email, p.id)
-        else db.query('INSERT INTO accounts (person_id, email, created_at) VALUES (?, ?, ?)').run(p.id, email, now())
-        record(op, `person ${p.name} email changed`)
-      }
-    })()
-  } catch (e) { if (isUnique(e)) throw new ApiError(409, 'exists', 'that mail address is taken'); throw e }
-  // R9: an address change is told at the old address
-  if (oldEmail) await tell(op, [p.id], 'email_changed', '/#/settings', { to: oldEmail })
-  return { ok: true }
-}
-
-/**
- * R9: the admin never sets someone else's password. A one-time link goes to the person's own address only; at that
- * moment all their tokens and sessions are cut and they are told.
- */
-export async function resetPassword(op: Op, id: unknown) {
-  requireAdmin(op)
-  const p = personRow(op, id)
-  const acc = accountOf(op.w.db, p.id)
-  if (!acc) throw bad('no_account', 'this person has no sign-in address yet; send an invite')
-  const db = op.w.db
-  let secret = '', tokens = 0
-  db.transaction(() => {
-    tokens = revokeTokensOf(db, p.id)
-    revokeSessionsOf(db, p.id)
-    revokeAppPasswordsOf(db, p.id)
-    secret = createLink(db, 'reset', p.id, op.actor.personId)
-    record(op, `person ${p.name} password reset (tokens revoked: ${tokens})`)
-  })()
-  await op.w.mailer.send({ to: acc.email, subject: 'Set a new password', text:
-    `An admin started a password reset for your account. Your access tokens and sessions were cut.\n` +
-    `Set a new password here (valid 1 hour, once):\n${op.base}/#/reset/${secret}\n\nIf you did not expect this, tell your team now.\n` })
-  await tell(op, [p.id], 'password_reset', '/#/tokens', { mail: false })
-  return { ok: true, tokens_revoked: tokens }
-}
-
-export async function changeOwnPassword(op: Op, sessionIdHash: string, body: { current?: unknown; password?: unknown }) {
-  const acc = accountOf(op.w.db, op.actor.personId)
-  if (!acc || typeof body.current !== 'string' || !(await verifyPassword(body.current, acc.password_hash))) throw bad('wrong_password', 'the current password is not right')
-  await setPassword(op.w.db, op.actor.personId, checkPasswordRules(body.password))
-  revokeSessionsOf(op.w.db, op.actor.personId, sessionIdHash)
-  record(op, 'password changed')
-  return { ok: true }
-}
-
-// ---------- groups ----------
-export function createGroup(op: Op, body: { name?: unknown }) {
-  requireAdmin(op)
-  const name = checkName(body.name)
-  try {
-    let id = 0
-    op.w.db.transaction(() => { id = Number(op.w.db.query('INSERT INTO groups (name) VALUES (?)').run(name).lastInsertRowid); record(op, `group add ${name}`) })()
-    return { id }
-  } catch (e) { if (isUnique(e)) throw new ApiError(409, 'exists', 'a group with that name exists'); throw e }
-}
-
-export function deleteGroup(op: Op, id: unknown) {
-  requireAdmin(op)
-  const g = groupRow(op, id)
-  const db = op.w.db
-  db.transaction(() => {
-    db.query(`DELETE FROM rules WHERE subject_type = 'group' AND subject_id = ?`).run(g.id)
-    db.query('DELETE FROM memberships WHERE group_id = ?').run(g.id)
-    db.query('DELETE FROM groups WHERE id = ?').run(g.id)
-    if (metaGet(db, 'everyone_group') === String(g.id)) metaSet(db, 'everyone_group', null)
-    record(op, `group delete ${g.name}`)
-  })()
-  return { ok: true }
-}
-
-export async function setMember(op: Op, groupId: unknown, personId: unknown, member: boolean) {
-  requireAdmin(op)
-  const g = groupRow(op, groupId), p = personRow(op, personId)
-  const db = op.w.db
-  db.transaction(() => {
-    if (member) db.query('INSERT OR IGNORE INTO memberships (group_id, person_id) VALUES (?, ?)').run(g.id, p.id)
-    else db.query('DELETE FROM memberships WHERE group_id = ? AND person_id = ?').run(g.id, p.id)
-    record(op, `group member ${g.name} ${member ? '+' : '-'}${p.name}`)
-  })()
-  // R9: an admin putting themselves in a group tells the managers of every folder that group reads, and themselves
-  if (member && p.id === op.actor.personId && op.actor.admin) {
-    const r = new Rights(db)
-    const managers = new Set<number>([op.actor.personId])
-    for (const [fid, rules] of r.rules) if (rules.some((x) => x.subject_type === 'group' && x.subject_id === g.id && x.level >= 1)) {
-      const f = r.folders.get(fid)
-      if (f) r.managersOf(f).forEach((m) => managers.add(m))
-    }
-    await tell(op, managers, 'self_grant', '/#/people')
-  }
-  return { ok: true }
-}
+export { visibleFolder, type Op } from './op-common'
 
 // ---------- folders ----------
 export type Template = 'public' | 'team' | 'management' | 'personal' | 'custom'
@@ -254,11 +42,6 @@ function nasValue(r: Rights, f: FolderRow, mode: unknown, people: unknown): stri
   }
 }
 const nasIncludes = (v: string | null, id: number) => v === 'all' || (!!v && v.startsWith('[') && (JSON.parse(v) as number[]).includes(id))
-
-function upsertRule(op: Op, f: FolderRow, type: 'person' | 'group', id: number, level: number) {
-  if (level === 0) op.w.db.query('DELETE FROM rules WHERE folder_id = ? AND subject_type = ? AND subject_id = ?').run(f.id, type, id)
-  else op.w.db.query('INSERT INTO rules (folder_id, subject_type, subject_id, level) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET level = excluded.level').run(f.id, type, id, level)
-}
 
 export async function registerFolder(op: Op, body: { path?: unknown; name?: unknown; template?: unknown; group?: unknown; owner?: unknown; nas?: { mode?: unknown; people?: unknown }; no_ai?: unknown; managed?: unknown; read_only?: unknown }) {
   requireAdmin(op)
@@ -385,57 +168,6 @@ export function ensureSubfolder(op: Op, id: unknown, body: { rel?: unknown }) {
   return { id: sub }
 }
 
-export async function setRule(op: Op, id: unknown, body: { subject_type?: unknown; subject_id?: unknown; level?: unknown }) {
-  const db = op.w.db
-  const r = new Rights(db)
-  const f = visibleFolder(op, r, id)
-  if (!r.canEditRules(op.actor, f)) throw forbidden(r.personal(f) ? 'only the owner reads a personal folder' : 'you do not manage this folder')
-  const type = body.subject_type === 'group' ? 'group' : body.subject_type === 'person' ? 'person' : null
-  if (!type) throw bad('bad_subject')
-  const subj = type === 'group' ? groupRow(op, body.subject_id) : personRow(op, body.subject_id)
-  const level = typeof body.level === 'string' && body.level in LEVELS ? LEVELS[body.level as LevelName] : typeof body.level === 'boolean' ? (body.level ? 1 : 0) : null
-  if (level === null) throw bad('bad_level', 'level: none, read or write')
-  const vp = label(r, f)
-  db.transaction(() => {
-    upsertRule(op, f, type, subj.id, level)
-    record(op, `rule ${type === 'group' ? '@' : ''}${subj.name} ${['none', 'read', 'write'][level]}`, [vp])
-  })()
-  // R7: other manage holders hear of it; R9: an admin putting themselves in a rule tells managers and themselves
-  const others = r.managersOf(f).filter((m) => m !== op.actor.personId)
-  if (others.length) await tell(op, others, 'rules_changed', folderLink(f))
-  const self = op.actor.admin && level >= 1 && (type === 'person' ? subj.id === op.actor.personId : r.groupsOf(op.actor.personId).has(subj.id))
-  if (self) await tell(op, [...r.managersOf(f), op.actor.personId], 'self_grant', folderLink(f))
-  return { ok: true }
-}
-
-export async function setFlags(op: Op, id: unknown, body: { no_ai?: unknown; inherit_break?: unknown; quarantine?: unknown; name?: unknown }) {
-  const db = op.w.db
-  const r = new Rights(db)
-  const f = visibleFolder(op, r, id)
-  const vp = label(r, f)
-  const changes: [string, number][] = []
-  if (typeof body.no_ai === 'boolean') { if (!r.canSetNoAi(op.actor, f, body.no_ai)) throw forbidden(body.no_ai ? 'not allowed' : 'only an admin can turn "no AI" off'); changes.push(['no_ai', body.no_ai ? 1 : 0]) }
-  if (typeof body.inherit_break === 'boolean') { if (!r.canEditRules(op.actor, f)) throw forbidden(); if (!f.registered) changes.push(['inherit_break', body.inherit_break ? 1 : 0]) }
-  if (typeof body.quarantine === 'boolean') { if (!op.actor.admin) throw forbidden('only an admin can change quarantine'); changes.push(['quarantine', body.quarantine ? 1 : 0]) }
-  let rename: string | undefined
-  if (body.name !== undefined) { requireAdmin(op); if (!f.registered) throw bad('not_registered'); rename = checkName(body.name) }
-  db.transaction(() => {
-    for (const [k, v] of changes) {
-      if ((f as unknown as Record<string, number>)[k] === v) continue
-      db.query(`UPDATE folders SET ${k} = ? WHERE id = ?`).run(v, f.id)
-      db.query('INSERT INTO folder_history (folder_id, at, by_person, field, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?)').run(f.id, now(), op.actor.personId, k, String((f as unknown as Record<string, number>)[k]), String(v))
-      record(op, `folder ${vp} ${k}=${v}`, [vp])
-    }
-    if (rename) { db.query('UPDATE folders SET mount_name = ? WHERE id = ?').run(rename, f.id); record(op, `folder ${vp} renamed to ${rename}`, [vp]) }
-  })()
-  const managers = r.managersOf(f).filter((m) => m !== op.actor.personId)
-  if (changes.some(([k, v]) => k === 'no_ai' && v === 0 && f.no_ai)) {
-    const owner = r.personal(f)?.personal_owner
-    await tell(op, [...r.managersOf(f), op.actor.personId, ...(owner != null ? [owner] : [])], 'no_ai_off', folderLink(f))
-  } else if (changes.some(([k, v]) => (f as unknown as Record<string, number>)[k] !== v) && managers.length) await tell(op, managers, 'rules_changed', folderLink(f))
-  return { ok: true }
-}
-
 export async function setNas(op: Op, id: unknown, body: { mode?: unknown; people?: unknown }) {
   const db = op.w.db
   const r = new Rights(db)
@@ -453,25 +185,6 @@ export async function setNas(op: Op, id: unknown, body: { mode?: unknown; people
   await tell(op, managers.filter((m) => m !== op.actor.personId), 'nas_readers_changed', folderLink(f))
   if (op.actor.admin && nasIncludes(v, op.actor.personId) && !nasIncludes(f.nas_readers, op.actor.personId) && f.personal_owner !== op.actor.personId)
     await tell(op, [...managers, op.actor.personId], 'self_grant', folderLink(f))
-  return { ok: true }
-}
-
-export async function setManage(op: Op, id: unknown, personId: unknown, on: boolean) {
-  requireAdmin(op)
-  const db = op.w.db
-  const r = new Rights(db)
-  const f = visibleFolder(op, r, id)
-  if (r.personal(f)) throw bad('personal', 'a personal folder has no managers')
-  const p = personRow(op, personId)
-  const vp = label(r, f)
-  db.transaction(() => {
-    if (on) db.query('INSERT OR IGNORE INTO manage_grants (folder_id, person_id) VALUES (?, ?)').run(f.id, p.id)
-    else db.query('DELETE FROM manage_grants WHERE folder_id = ? AND person_id = ?').run(f.id, p.id)
-    record(op, `manage ${on ? 'grant' : 'revoke'} ${p.name}`, [vp])
-  })()
-  const managers = r.managersOf(f)
-  if (on && p.id === op.actor.personId) await tell(op, [...managers, p.id], 'self_grant', folderLink(f))
-  else await tell(op, [...managers.filter((m) => m !== op.actor.personId), p.id], 'manage_changed', folderLink(f))
   return { ok: true }
 }
 
@@ -507,21 +220,7 @@ export function revokeOwnToken(op: Op, id: unknown) {
 }
 
 
-// ---------- fresh login and provenance reset ("출처 초기화", plan 5.1) ----------
-/** Type the password again (rate limited like sign-in, per person). */
-export async function reauth(op: Op, sessionIdHash: string, body: { password?: unknown }) {
-  const key = `reauth:${op.actor.personId}`
-  if (op.w.loginByName.blocked(key)) throw rateLimited(op.w.loginByName.retryAfter(key))
-  const acc = accountOf(op.w.db, op.actor.personId)
-  if (typeof body.password !== 'string' || !(await verifyPassword(body.password, acc?.password_hash))) {
-    op.w.loginByName.hit(key)
-    throw bad('wrong_password', 'the password is not right')
-  }
-  op.w.loginByName.reset(key)
-  markReauth(op.w.db, sessionIdHash)
-  return { ok: true, fresh_for_s: FRESH_LOGIN_MS / 1000 }
-}
-
+// ---------- provenance reset ("출처 초기화", plan 5.1) ----------
 /**
  * Clear one of the caller's own tokens' 8-hour provenance window (R3). Needs a fresh login (the password typed within
  * the last 5 minutes; `password` in the body counts). Drafts already written keep their sources (they never shrink).
