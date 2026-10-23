@@ -125,17 +125,24 @@ class Model {
     return !this.flagged(f.parent, a.agent) && this.inScope(a, f.parent) && Math.max(this.level(a.person, f.parent), this.fileLevel(a.person, f)) >= 1
   }
   under(n: MNode | MFile, top: MNode): boolean { let x: MNode | MFile | null = n; while (x) { if (x === top) return true; x = x.kind === 'mount' ? null : x.parent } return false }
-  visible(a: Aud, d: MNode): boolean {
+  /**
+   * Files the walk can reach through a grant's remembered location: wherever a location of one of this person's grants
+   * points (read from the database: where it points is data, not a decision), the file THERE must be readable by the
+   * model on its own (identity: its own grant or its folder) for the folders above it to show.
+   */
+  anchorsFn: ((a: Aud) => MFile[]) | null = null
+  visible(a: Aud, d: MNode, anchors: MFile[]): boolean {
     if (this.trashed(d)) return false
     if (this.canReadDir(a, d)) return true
     if (this.dirs.some((x) => x !== d && this.under(x, d) && this.canReadDir(a, x))) return true
-    return this.files.some((f) => f.located && !f.stale && this.under(f.parent, d) && this.canReadFile(a, f))
+    return anchors.some((f) => this.under(f.parent, d) && this.canReadFile(a, f))
   }
   /** what the walk must find: visible folders and reachable readable files, by virtual path */
   expected(a: Aud): { dirs: Set<string>; files: Map<string, MFile> } {
     const dirs = new Set<string>(), out = new Map<string, MFile>()
     const vis = new Map<MNode, boolean>()
-    const v = (n: MNode) => { let x = vis.get(n); if (x === undefined) { x = this.visible(a, n); vis.set(n, x) } return x }
+    const anchors = this.anchorsFn ? this.anchorsFn(a) : []
+    const v = (n: MNode) => { let x = vis.get(n); if (x === undefined) { x = this.visible(a, n, anchors); vis.set(n, x) } return x }
     const allVisible = (n: MNode) => this.chain(n).every(v)
     for (const m of this.mounts) if (v(m)) dirs.add(this.vpath(m))
     for (const d of this.dirs) if (!this.trashed(d) && allVisible(d)) dirs.add(this.vpath(d))
@@ -205,6 +212,22 @@ function freshWorld(run: number, seed: number): World {
   const persons: Aud[] = [O, ...P].map((pid, i) => ({ person: pid, agent: false, scope: null, label: ['O', 'P1', 'P2', 'P3'][i]! }))
   const auds = [...persons, tok('P1', P[0]!, null), tok('P2', P[1]!, null), tok('P3', P[2]!, null), tok('P1', P[0]!, T1)]
   const world: World = { dir, db, ctx, w, m, r, log: [], people: { O, P }, G, E, tokens, persons, auds, canaryN: 0, run }
+  m.anchorsFn = (a) => {
+    if (a.person <= 0) return []
+    const rows = db.query<{ subject_type: string; subject_id: number; subject_uid: string | null; dir: string; name: string; guid: string | null }, []>(`
+      SELECT g.subject_type, g.subject_id, g.subject_uid, f.path AS dir, m.name, x.uid AS guid FROM file_grants g JOIN mfiles m ON m.uid = g.file_uid
+      JOIN folders f ON f.id = m.folder_id LEFT JOIN groups x ON g.subject_type = 'group' AND x.id = g.subject_id WHERE m.name IS NOT NULL`).all()
+    const out: MFile[] = []
+    for (const r of rows) {
+      const mine = r.subject_type === 'person' ? r.subject_id === a.person
+        : r.guid != null && r.guid === r.subject_uid && !!m.groups.get(r.subject_id)?.alive && m.groups.get(r.subject_id)!.members.has(a.person)
+      if (!mine) continue
+      const node = [...m.mounts, ...m.dirs].find((x) => !m.trashed(x) && m.real(x) === r.dir)
+      const f = node && m.files.find((x) => !m.trashed(x) && !x.closed && x.parent === node && x.name === r.name)
+      if (f) out.push(f)
+    }
+    return out
+  }
   // a random tree, made by O through the real API
   for (const t of mounts) {
     const nDirs = 1 + r.int(4)
@@ -219,6 +242,8 @@ function freshWorld(run: number, seed: number): World {
 
 // ---------------------------------------------------------------- operations ----------------------------------------
 class Skip extends Error {}
+/** Pick one, or skip the operation when there is nothing to pick from. */
+function pk<T>(w: World, xs: readonly T[]): T { if (!xs.length) throw new Skip(); return w.r.pick(xs) }
 const canary = (w: World) => `CANARY-${w.run}-${++w.canaryN}-${sha256(String(Math.random())).slice(0, 6)}`
 
 function fileByReal(w: World, real: string) { return w.m.files.find((f) => !w.m.trashed(f) && w.m.real(f) === real) }
@@ -237,8 +262,8 @@ function managedCall<T>(f: () => T): T | null {
 function opMkdir(w: World, mount?: MMount) {
   const parents = liveDirs(w, { team: true }).filter((d) => !mount || w.m.mountOf(d) === mount).filter((d) => w.m.chain(d).length < 3)
   if (!parents.length) throw new Skip()
-  const p = w.r.pick(parents)
-  const name = w.r.pick(DIR_NAMES)
+  const p = pk(w, parents)
+  const name = pk(w, DIR_NAMES)
   const res = managedCall(() => mgd(w, w.people.O).mkdir(w.m.vpath(p), name))
   if (res?.created) w.m.dirs.push({ kind: 'dir', id: w.m.nextId++, name, parent: p, trash: null, rules: new Map(), brk: false, noai: false, quar: false })
   return `mkdir ${w.m.vpath(p)}/${name} -> ${res ? 'ok' : 'refused'}`
@@ -251,14 +276,14 @@ function uploadInto(w: World, p: MNode, by: number, name: string) {
   return res
 }
 function opUploadNew(w: World) {
-  const p = w.r.pick(liveDirs(w, { team: true }))
-  const res = uploadInto(w, p, w.people.O, w.r.pick(FILE_NAMES))
+  const p = pk(w, liveDirs(w, { team: true }))
+  const res = uploadInto(w, p, w.people.O, pk(w, FILE_NAMES))
   return `upload ${w.m.vpath(p)} -> ${res ? res.path : 'refused'}`
 }
 /** A new version, by O or by a person the model says may write this file (a folder writer or a file Editor). */
 function opReplace(w: World) {
-  const f = w.r.pick(liveFiles(w))
-  const by = w.r.chance(0.5) ? w.people.O : w.r.pick(w.people.P)
+  const f = pk(w, liveFiles(w))
+  const by = w.r.chance(0.5) ? w.people.O : pk(w, w.people.P)
   const a = w.persons.find((x) => x.person === by)!
   const may = reachable(w, by, f) && w.m.mountOf(f).personal == null && Math.max(w.m.level(by, f.parent), w.m.fileLevel(by, f)) >= 2
   const pMay = w.m.mountOf(f).personal === by && reachable(w, by, f)
@@ -272,8 +297,8 @@ function opReplace(w: World) {
   return `replace ${w.m.vpath(f)} by ${by} -> ${res ? 'ok' : 'refused'}`
 }
 function opRestoreVersion(w: World) {
-  const f = w.r.pick(liveFiles(w).filter((x) => x.versions > 1).concat(liveFiles(w)).slice(0, 50))
-  const by = w.r.chance(0.6) ? w.people.O : w.r.pick(w.people.P)
+  const f = pk(w, liveFiles(w).filter((x) => x.versions > 1).concat(liveFiles(w)).slice(0, 50))
+  const by = w.r.chance(0.6) ? w.people.O : pk(w, w.people.P)
   const a = w.persons.find((x) => x.person === by)!
   const res = managedCall(() => mgd(w, by).restoreVersion(w.m.vpath(f), 1 + w.r.int(Math.max(1, f.versions - 1))))
   void a
@@ -287,7 +312,7 @@ function opFileEditorOverreach(w: World) {
   const cands: [MFile, number][] = []
   for (const f of liveFiles(w)) for (const p of w.people.P) if (w.m.fileLevel(p, f) >= 1 && w.m.level(p, f.parent) < 2 && w.m.mountOf(f).personal == null) cands.push([f, p])
   if (!cands.length) throw new Skip()
-  const [f, p] = w.r.pick(cands)
+  const [f, p] = pk(w, cands)
   const mg = mgd(w, p)
   const dirReal = w.m.real(f.parent)
   const before = fs.readdirSync(dirReal).sort().join('|')
@@ -297,24 +322,24 @@ function opFileEditorOverreach(w: World) {
     ['upload-new', () => mg.put(w.m.vpath(f.parent), 'new-by-editor.md', stageBytes(mg.s.root, Buffer.from('x')), 'fail')],
     ['mkdir', () => mg.mkdir(w.m.vpath(f.parent), 'sub-by-editor')],
   ]
-  const [what, fn] = w.r.pick(tries)
+  const [what, fn] = pk(w, tries)
   const res = managedCall(fn)
   if (res !== null) throw violation('I10', `file-only ${w.m.fileLevel(p, f) >= 2 ? 'Editor' : 'Viewer'} ${p} could ${what} ${w.m.vpath(f)}`)
   if (fs.readdirSync(dirReal).sort().join('|') !== before) throw violation('I10', `refused ${what} changed ${w.m.vpath(f.parent)}`)
   return `overreach ${what} ${w.m.vpath(f)} by ${p} -> refused`
 }
 function opRename(w: World) {
-  const it: Item = w.r.chance(0.7) ? w.r.pick(liveFiles(w)) : w.r.pick<Item>(w.m.live(w.m.dirs).length ? w.m.live(w.m.dirs) : liveFiles(w))
-  const name = it.kind === 'file' ? w.r.pick(FILE_NAMES) : w.r.pick(DIR_NAMES)
+  const it: Item = w.r.chance(0.7) ? pk(w, liveFiles(w)) : pk<Item>(w, w.m.live(w.m.dirs).length ? w.m.live(w.m.dirs) : liveFiles(w))
+  const name = it.kind === 'file' ? pk(w, FILE_NAMES) : pk(w, DIR_NAMES)
   const by = w.m.mountOf(it).personal ?? w.people.O
   const res = managedCall(() => mgd(w, by).rename(w.m.vpath(it), name))
   if (res && res.path !== w.m.vpath(it)) { it.name = name; if (it.kind === 'file') it.stale = false }
   return `rename ${it.kind} -> ${name}: ${res ? 'ok' : 'refused'}`
 }
 function opMove(w: World) {
-  const it: Item = w.r.chance(0.65) ? w.r.pick(liveFiles(w)) : w.r.pick<Item>(w.m.live(w.m.dirs).length ? w.m.live(w.m.dirs) : liveFiles(w))
+  const it: Item = w.r.chance(0.65) ? pk(w, liveFiles(w)) : pk<Item>(w, w.m.live(w.m.dirs).length ? w.m.live(w.m.dirs) : liveFiles(w))
   const targets = liveDirs(w).filter((d) => !(it.kind === 'dir' && w.m.under(d, it)))
-  const to = w.r.pick(targets)
+  const to = pk(w, targets)
   const from = w.m.vpath(it)
   // O moves within team folders; P1 (the owner) moves between PM and team folders where they may write
   const by = w.m.mountOf(it).personal != null || w.m.mountOf(to).personal != null ? w.people.P[0]! : w.people.O
@@ -331,8 +356,8 @@ function opMove(w: World) {
   return `move ${from} -> ${w.m.vpath(to)} by ${by}: ${r0?.to ?? r0?.error ?? 'refused'}`
 }
 function opCopy(w: World) {
-  const f = w.r.pick(liveFiles(w).filter((x) => w.m.mountOf(x).personal == null))
-  const to = w.r.pick(liveDirs(w, { team: true }))
+  const f = pk(w, liveFiles(w).filter((x) => w.m.mountOf(x).personal == null))
+  const to = pk(w, liveDirs(w, { team: true }))
   const res = managedCall(() => mgd(w, w.people.O).copy([w.m.vpath(f)], w.m.vpath(to)))
   const r0 = res?.results[0]
   if (r0?.to && !r0.error) w.m.files.push({ kind: 'file', id: w.m.nextId++, name: r0.to.slice(r0.to.lastIndexOf('/') + 1), parent: to, trash: null, canary: f.canary, closed: false, grants: new Map(), located: false, stale: false, inert: false, versions: 1 })
@@ -340,16 +365,16 @@ function opCopy(w: World) {
 }
 const trashItems = new WeakMap<World, Map<number, Item>>()
 function opTrash(w: World) {
-  const it: Item = w.r.chance(0.7) ? w.r.pick(liveFiles(w)) : w.r.pick<Item>(w.m.live(w.m.dirs).length ? w.m.live(w.m.dirs) : liveFiles(w))
+  const it: Item = w.r.chance(0.7) ? pk(w, liveFiles(w)) : pk<Item>(w, w.m.live(w.m.dirs).length ? w.m.live(w.m.dirs) : liveFiles(w))
   const by = w.m.mountOf(it).personal ?? w.people.O
   const id = managedCall(() => mgd(w, by).removeOne(w.m.vpath(it)))
   if (id) { it.trash = id; trashItems.get(w)!.set(id, it) }
   return `trash ${w.m.vpath(it)}: ${id ?? 'refused'}`
 }
 function opRestore(w: World) {
-  const items = [...trashItems.get(w)!].filter(([, it]) => it.trash != null)
+  const items = [...trashItems.get(w)!].filter(([id, it]) => it.trash === id)
   if (!items.length) throw new Skip()
-  const [id, it] = w.r.pick(items)
+  const [id, it] = pk(w, items)
   const by = w.m.mountOf(it).personal ?? w.people.O
   const res = managedCall(() => mgd(w, by).restore(id))
   if (res) { it.trash = null; it.name = res.path.slice(res.path.lastIndexOf('/') + 1); if (it.kind === 'file') it.stale = false }
@@ -361,9 +386,9 @@ function forget(w: World, it: Item) {
   w.m.dirs = w.m.dirs.filter((d) => !gone(d))
 }
 function opPurge(w: World) {
-  const items = [...trashItems.get(w)!].filter(([, it]) => it.trash != null)
+  const items = [...trashItems.get(w)!].filter(([id, it]) => it.trash === id)
   if (!items.length) throw new Skip()
-  const [id, it] = w.r.pick(items)
+  const [id, it] = pk(w, items)
   const by = w.m.mountOf(it).personal ?? w.people.O
   const res = managedCall(() => mgd(w, by).purge(id))
   // refused only when the purger cannot reach the folder it came from (a crash — e.g. a foreign key — fails the run)
@@ -372,7 +397,7 @@ function opPurge(w: World) {
 }
 function opExpire(w: World) {
   purgeExpired(w.ctx, Date.now() + 400 * 86400_000)
-  for (const [id, it] of trashItems.get(w)!) if (it.trash != null) { forget(w, it); trashItems.get(w)!.delete(id) }
+  for (const [id, it] of trashItems.get(w)!) if (it.trash === id) { forget(w, it); trashItems.get(w)!.delete(id) }
   return 'expire all'
 }
 function opRescan(w: World) {
@@ -386,16 +411,16 @@ function opRelocate(w: World) { relocateShared(w.db); for (const f of w.m.files)
 // ---- sharing through the real API (POST /api/share), with O1's yes/no predicted ----
 const LEVEL = { viewer: 1, editor: 2 } as const
 async function opShare(w: World) {
-  const f = w.r.pick(liveFiles(w))
-  const actor = w.r.chance(0.6) ? w.people.O : w.r.pick(w.people.P)
+  const f = pk(w, liveFiles(w))
+  const actor = w.r.chance(0.6) ? w.people.O : pk(w, w.people.P)
   const a = w.persons.find((x) => x.person === actor)!
-  const subjects = [`p:${w.r.pick(w.people.P)}`, `p:${w.people.O}`, `g:${w.G}`]
+  const subjects = [`p:${pk(w, w.people.P)}`, `p:${w.people.O}`, `g:${w.G}`]
   const kindPick = w.r.int(10)
   let body: Record<string, unknown>
   let key: string, want: number | 'remove' | 'leave'
-  const role = w.r.pick(['viewer', 'editor'] as const)
-  if (kindPick < 5) { key = w.r.pick(subjects); want = LEVEL[role]; body = { add: [{ subject: { type: key[0] === 'p' ? 'person' : 'group', id: Number(key.slice(2)) }, role }] } }
-  else if (kindPick < 7) { key = w.r.pick([...f.grants.keys(), ...subjects].filter((k) => k !== `g:${w.E}`)); want = 'remove'; body = { set: [{ subject: { type: key[0] === 'p' ? 'person' : 'group', id: Number(key.slice(2)) }, role: 'remove' }] } }
+  const role = pk(w, ['viewer', 'editor'] as const)
+  if (kindPick < 5) { key = pk(w, subjects); want = LEVEL[role]; body = { add: [{ subject: { type: key[0] === 'p' ? 'person' : 'group', id: Number(key.slice(2)) }, role }] } }
+  else if (kindPick < 7) { key = pk(w, [...f.grants.keys(), ...subjects].filter((k) => k !== `g:${w.E}`)); want = 'remove'; body = { set: [{ subject: { type: key[0] === 'p' ? 'person' : 'group', id: Number(key.slice(2)) }, role: 'remove' }] } }
   else if (kindPick < 9) {
     key = `g:${w.E}`
     const team = w.r.chance(0.6)
@@ -460,9 +485,9 @@ function folderRow(w: World, n: MNode): number {
   return ensureFolder(w.db, real, st.dev, st.ino, st.birthtimeNs)
 }
 function opRule(w: World) {
-  const d = w.r.pick(liveDirs(w, { team: true }))
-  const subj = w.r.pick([...w.people.P.map((p) => `p:${p}`), `g:${w.G}`, `g:${w.E}`])
-  const lv = w.r.pick([0, 1, 1, 2])
+  const d = pk(w, liveDirs(w, { team: true }))
+  const subj = pk(w, [...w.people.P.map((p) => `p:${p}`), `g:${w.G}`, `g:${w.E}`])
+  const lv = pk(w, [0, 1, 1, 2])
   const id = folderRow(w, d)
   if (lv === 0) w.db.query('DELETE FROM rules WHERE folder_id = ? AND subject_type = ? AND subject_id = ?').run(id, subj[0] === 'p' ? 'person' : 'group', Number(subj.slice(2)))
   else w.db.query('INSERT INTO rules (folder_id, subject_type, subject_id, level) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET level = excluded.level').run(id, subj[0] === 'p' ? 'person' : 'group', Number(subj.slice(2)), lv)
@@ -471,8 +496,8 @@ function opRule(w: World) {
   return `rule ${w.m.vpath(d)} ${subj}=${lv}`
 }
 function opFlag(w: World) {
-  const d = w.r.pick(liveDirs(w, { team: true }))
-  const flag = w.r.pick(['inherit_break', 'no_ai', 'no_ai', 'quarantine'] as const)
+  const d = pk(w, liveDirs(w, { team: true }))
+  const flag = pk(w, ['inherit_break', 'no_ai', 'no_ai', 'quarantine'] as const)
   if (flag === 'inherit_break' && d.kind === 'mount') throw new Skip()
   const id = folderRow(w, d)
   const cur = d.kind === 'mount' ? (flag === 'no_ai' ? w.m.mountFlags.get(d.id)!.noai : w.m.mountFlags.get(d.id)!.quar) : flag === 'inherit_break' ? d.brk : flag === 'no_ai' ? d.noai : d.quar
@@ -484,7 +509,7 @@ function opFlag(w: World) {
 }
 function opMembership(w: World) {
   const g = w.m.groups.get(w.G)!
-  const p = w.r.pick(w.people.P)
+  const p = pk(w, w.people.P)
   if (g.members.has(p)) { w.db.query('DELETE FROM memberships WHERE group_id = ? AND person_id = ?').run(w.G, p); g.members.delete(p) }
   else { w.db.query('INSERT OR IGNORE INTO memberships (group_id, person_id) VALUES (?, ?)').run(w.G, p); g.members.add(p) }
   return `membership G ${p} -> ${g.members.has(p)}`
@@ -495,7 +520,7 @@ function opGroupReuse(w: World) {
   w.db.query('DELETE FROM memberships WHERE group_id = ?').run(w.G)
   w.db.query('DELETE FROM groups WHERE id = ?').run(w.G)
   w.db.query('INSERT INTO groups (id, name) VALUES (?, ?)').run(w.G, `G${g.gen + 1}`)
-  const p = w.r.pick(w.people.P)
+  const p = pk(w, w.people.P)
   w.db.query('INSERT INTO memberships (group_id, person_id) VALUES (?, ?)').run(w.G, p)
   g.gen++; g.members = new Set([p])
   return `group G deleted and remade (id ${w.G}) with ${p}`
@@ -504,7 +529,7 @@ function opGroupReuse(w: World) {
 // ---- an older image's writes ----
 /** Old upload: the file and a row without uid (the trigger gives one), no location, no grants. */
 function opOldUpload(w: World) {
-  const p = w.r.pick(liveDirs(w, { team: true }))
+  const p = pk(w, liveDirs(w, { team: true }))
   const name = `old-${w.r.int(1000)}.md`
   const real = path.join(w.m.real(p), name)
   if (fs.existsSync(real) || fs.readdirSync(w.m.real(p)).some((n) => nfc(n).toLowerCase() === name)) throw new Skip()
@@ -520,9 +545,9 @@ function opOldUpload(w: World) {
 }
 /** Old purge: rows (and versions) deleted without their grants; the trash item's bytes removed. */
 function opOldPurge(w: World) {
-  const items = [...trashItems.get(w)!].filter(([, it]) => it.trash != null)
+  const items = [...trashItems.get(w)!].filter(([id, it]) => it.trash === id)
   if (!items.length) throw new Skip()
-  const [id, it] = w.r.pick(items)
+  const [id, it] = pk(w, items)
   const t = w.db.query<{ trash_path: string }, [number]>('SELECT trash_path FROM mtrash WHERE id = ?').get(id)!
   const walk: string[] = []
   const visit = (p: string) => { const st = fs.lstatSync(p); if (st.isDirectory()) for (const c of fs.readdirSync(p)) visit(path.join(p, c)); else walk.push(p) }
@@ -539,8 +564,8 @@ function opOldPurge(w: World) {
 }
 /** Old move: a file renamed on disk into another team folder; its location is not updated (stale until relocate). */
 function opOldMove(w: World) {
-  const f = w.r.pick(liveFiles(w).filter((x) => w.m.mountOf(x).personal == null))
-  const to = w.r.pick(liveDirs(w, { team: true }).filter((d) => d !== f.parent))
+  const f = pk(w, liveFiles(w).filter((x) => w.m.mountOf(x).personal == null))
+  const to = pk(w, liveDirs(w, { team: true }).filter((d) => d !== f.parent))
   if (!to) throw new Skip()
   const name = `moved-${w.r.int(1000)}.md`
   const dest = path.join(w.m.real(to), name)
@@ -554,10 +579,10 @@ function opOldMove(w: World) {
 function opForceIdentity(w: World) {
   const shared = liveFiles(w).filter((f) => f.grants.size)
   if (!shared.length) throw new Skip()
-  const a = w.r.pick(shared)
+  const a = pk(w, shared)
   const others = liveFiles(w).filter((f) => f !== a)
   if (!others.length) throw new Skip()
-  const b = w.r.pick(others)
+  const b = pk(w, others)
   const sa = fs.lstatSync(w.m.real(a), { bigint: true }), sb = fs.lstatSync(w.m.real(b), { bigint: true })
   const ra = w.db.query<{ id: number }, [string, string]>('SELECT id FROM mfiles WHERE dev = ? AND ino = ?').get(String(sa.dev), String(sa.ino))
   if (!ra) throw new Skip()
@@ -568,7 +593,7 @@ function opForceIdentity(w: World) {
 }
 /** The operator edits a file by hand: its row no longer matches (size/mtime), so its grants open nothing (then rescan drops them). */
 function opHandEdit(w: World) {
-  const f = w.r.pick(liveFiles(w))
+  const f = pk(w, liveFiles(w))
   const c = canary(w) + '-hand-edited'
   fs.writeFileSync(w.m.real(f), c)
   f.canary = c; f.grants.clear()
@@ -576,16 +601,16 @@ function opHandEdit(w: World) {
 }
 /** Hand-made names the policy closes: a system name and an NFC twin (both twins close). */
 function opHandNames(w: World) {
-  const d = w.r.pick(liveDirs(w, { team: true }))
+  const d = pk(w, liveDirs(w, { team: true }))
   const real = w.m.real(d)
   if (w.r.chance(0.5)) {
-    const name = '._' + w.r.pick(FILE_NAMES)
+    const name = '._' + pk(w, FILE_NAMES)
     if (fs.existsSync(path.join(real, name))) throw new Skip()
     fs.writeFileSync(path.join(real, name), canary(w))
     w.m.files.push({ kind: 'file', id: w.m.nextId++, name, parent: d, trash: null, canary: fs.readFileSync(path.join(real, name), 'utf8'), closed: true, grants: new Map(), located: false, stale: false, inert: false, versions: 1 })
     return `hand system name ${w.m.vpath(d)}/${name}`
   }
-  const nfcName = w.r.pick(liveFiles(w).filter((f) => f.parent === d && nfc(f.name) !== f.name.normalize('NFD')))
+  const nfcName = pk(w, liveFiles(w).filter((f) => f.parent === d && nfc(f.name) !== f.name.normalize('NFD')))
   if (!nfcName) throw new Skip()
   const twin = nfcName.name.normalize('NFD')
   if (fs.readdirSync(real).includes(twin)) throw new Skip()
@@ -603,9 +628,9 @@ function opHandNames(w: World) {
 function opForgeLocation(w: World) {
   const shared = liveFiles(w).filter((f) => f.located && f.grants.size)
   if (!shared.length) throw new Skip()
-  const f = w.r.pick(shared)
+  const f = pk(w, shared)
   const st = fs.lstatSync(w.m.real(f), { bigint: true })
-  const other = w.r.pick(liveFiles(w))
+  const other = pk(w, liveFiles(w))
   w.db.query('UPDATE mfiles SET folder_id = ?, name = ? WHERE dev = ? AND ino = ?').run(folderRow(w, other.parent), other.name, String(st.dev), String(st.ino))
   f.stale = other !== f
   return `forge location of ${w.m.vpath(f)} -> ${w.m.vpath(other)}`
@@ -614,11 +639,11 @@ function opForgeLocation(w: World) {
 function opForgePersonal(w: World) {
   const pf = liveFiles(w).filter((f) => w.m.mountOf(f).personal != null)
   if (!pf.length) throw new Skip()
-  const f = w.r.pick(pf)
+  const f = pk(w, pf)
   const st = fs.lstatSync(w.m.real(f), { bigint: true })
   const row = w.db.query<{ uid: string }, [string, string]>('SELECT uid FROM mfiles WHERE dev = ? AND ino = ?').get(String(st.dev), String(st.ino))
   if (!row) throw new Skip()
-  const p = w.r.pick(w.people.P.slice(1))
+  const p = pk(w, w.people.P.slice(1))
   w.db.query("INSERT OR REPLACE INTO file_grants (file_uid, subject_type, subject_id, level, granted_at) VALUES (?, 'person', ?, 2, 0)").run(row.uid, p)
   w.db.query("UPDATE mfiles SET folder_id = ?, name = ? WHERE uid = ?").run(folderRow(w, f.parent), f.name, row.uid)
   f.grants.set(`p:${p}`, { level: 2, gen: 0 }) // the model ignores grants in personal folders (fileLevel → 0)
@@ -758,7 +783,7 @@ async function checkSurfaces(w: World): Promise<number> {
     n += 2
   }
   // WebDAV: PROPFIND Depth: infinity and GET, for one person per run
-  n += await checkDav(w, w.r.pick(w.persons.filter((a) => a.person !== w.people.O)))
+  n += await checkDav(w, pk(w, w.persons.filter((a) => a.person !== w.people.O)))
   // MCP shell per token
   for (const a of w.auds.filter((x) => x.token)) {
     const exp = w.m.expected(a)
@@ -791,7 +816,7 @@ async function checkSurfaces(w: World): Promise<number> {
       // I3 on the shell: a hidden path and a missing one give the same message (one sample)
       const hidden = w.m.files.filter((f) => !w.m.trashed(f) && !exp.files.has(w.m.vpath(f)))
       if (hidden.length) {
-        const h = w.r.pick(hidden)
+        const h = pk(w, hidden)
         const hp = w.m.vpath(h)
         const mp = hp.slice(0, hp.lastIndexOf('/') + 1) + 'x'.repeat(Math.max(1, [...h.name].length))
         const s3 = new Session(w.ctx, a.token!)
