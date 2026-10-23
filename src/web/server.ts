@@ -12,6 +12,7 @@ import { McpLimiter } from '../ratelimit'
 import { RateLimiter } from './auth'
 import type { WebCtx, WebOptions } from './http'
 import { OutboxMailer } from './mail'
+import { forwardedClient } from './proxy'
 import { ensureWebSchema } from './schema'
 import { handleConsentApi, handleOAuth, isOAuthPath, makeOAuthRuntime, mcpOAuth } from '../oauth'
 import { oauthOptionsFromSettings, readPublicSettings } from '../oauth/settings'
@@ -89,7 +90,7 @@ export function serveWeb(ctx: Ctx, port: number, hostname = '127.0.0.1', opts: W
     // bodies without a Content-Length are cut here too
     maxRequestBodySize: LIMITS.requestBytes,
     fetch: async (req, srv) => {
-      try { return await handleWeb(w, req, srv.requestIP(req)?.address) } catch (e) {
+      try { return await handleWeb(w, req, forwardedClient(req, srv.requestIP(req)?.address, w.opts.trustedProxy)) } catch (e) {
         console.error(`[${NAME}] request failed:`, e)
         return Response.json({ error: 'internal error' }, { status: 500 })
       }

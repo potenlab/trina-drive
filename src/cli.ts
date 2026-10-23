@@ -12,6 +12,7 @@ import { addShareRoot, reconcile, shareRoots, startReconciler, summary } from '.
 import { listWidened, rejudgeWidened } from './inplace/widened'
 import { issueSetupToken } from './web/auth'
 import { serveWeb } from './web/server'
+import { trustedProxiesFrom } from './web/proxy'
 import { makeCtx, Session } from './session'
 import { runShell } from './shell'
 import { closeDefaultExecutor } from './worker'
@@ -50,6 +51,9 @@ ${NOTIFY_HELP}
   demo seed                              sample company tree, people, rules and tokens
   sh --token <pat> -c <command>          run one shell command as that token (audited)
   serve [--port 8787] [--host 127.0.0.1] [--allow-origin URL] [--public-url URL]   web admin at /, MCP at /mcp
+        [--trusted-proxy IP|CIDR,…] [--client-ip-header x-forwarded-for|cf-connecting-ip]
+                                         believe the client address a reverse proxy forwards, only from these peers
+                                         (env $${ENV_PREFIX}_TRUSTED_PROXY, $${ENV_PREFIX}_CLIENT_IP_HEADER)
   backup …                 (encrypted backups; see: backup help)
 ${PUBLIC_HELP}
 
@@ -248,6 +252,9 @@ async function main(argv: string[]) {
       const port = Number(takeFlag(rest, '--port') ?? 8787)
       const host = takeFlag(rest, '--host') ?? '127.0.0.1'
       const origin = takeFlag(rest, '--allow-origin')
+      const proxyFlag = takeFlag(rest, '--trusted-proxy'), ipHeader = takeFlag(rest, '--client-ip-header')
+      let trustedProxy: ReturnType<typeof trustedProxiesFrom>
+      try { trustedProxy = trustedProxiesFrom(proxyFlag, ipHeader, process.env, ENV_PREFIX) } catch (e) { throw new StoreError((e as Error).message) }
       // the public address (`public enable --url`) is also the passkeys' RP ID and the base of mailed links, unless given here
       const configuredPublic = readPublicSettings(db).url ?? undefined
       const publicUrl = takeFlag(rest, '--public-url') ?? configuredPublic
@@ -257,8 +264,9 @@ async function main(argv: string[]) {
       const ctx = makeCtx(db, dataDir)
       const notify = attachNotify(ctx)
       notify.start()
-      const { server, w } = serveWeb(ctx, port, host, { allowedOrigins: origin ? [origin] : [], publicUrl, onRequest: notify.onMcpRequest, emit: notify.emit })
+      const { server, w } = serveWeb(ctx, port, host, { allowedOrigins: origin ? [origin] : [], publicUrl, onRequest: notify.onMcpRequest, emit: notify.emit, trustedProxy })
       console.log(`${PRODUCT} ${VERSION} web: http://${host}:${server.port}/   MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
+      if (trustedProxy) console.log(`client addresses: ${trustedProxy.header} when the peer is ${trustedProxy.spec}`)
       // the public listener (plan 5.2): a separate port for the tunnel, only when `public enable` was run and the gate passes
       const pub = startPublicListener(w)
       if (pub.server) console.log(publicBanner(readPublicSettings(db), pub.server.port ?? 0))
