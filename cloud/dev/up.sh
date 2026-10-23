@@ -92,6 +92,14 @@ for _ in $(seq 30); do
   docker exec tdc-mail bun -e "fetch('http://127.0.0.1:8025/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))" 2>/dev/null && break
   sleep 1
 done
+# colima (virtiofs) can hand a container started right after .state was removed and made again a stale, empty view of
+# it: the relay then cannot write team-mail.log ("ENOENT … open"). Check from inside, restart the container if so.
+touch "$STATE/.mount-check"
+for c in tdc-mail; do
+  if ! docker exec "$c" test -e "$STATE/.mount-check" 2>/dev/null; then
+    say "$c sees a stale $STATE: restarting it"; docker restart "$c" >/dev/null; sleep 2
+  fi
+done
 # Caddy's local CA (made when it issued https://cloud.localhost's certificate)
 for _ in $(seq 30); do
   docker exec tdc-caddy cat /data/caddy/pki/authorities/local/root.crt > "$STATE/caddy-root.crt" 2>/dev/null && [ -s "$STATE/caddy-root.crt" ] && break

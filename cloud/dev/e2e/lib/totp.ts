@@ -20,8 +20,8 @@ export function totp(secretB32: string, ms = Date.now()): string {
 }
 
 /**
- * A code nobody has used yet for this secret: servers refuse a code twice (replay), so successive sign-ins in one
- * run take the next 30 s step's code — accepted within the usual ±1 step window — and wait for a fresh step after that.
+ * A code nobody has used yet for this secret: servers refuse a code twice (replay), so a second sign-in within the
+ * same 30 s step waits for the next step.
  */
 const lastStep = new Map<string, number>()
 let store: string | null = null
@@ -36,7 +36,8 @@ export async function freshTotp(secret: string): Promise<string> {
     const now = Date.now()
     const step = Math.floor(now / 30_000)
     const last = lastStep.get(key(secret)) ?? -Infinity
-    for (const s of [step, step + 1]) {
+    // only the current step: some servers (the console) take no code from the next window
+    for (const s of [step]) {
       if (s > last) {
         lastStep.set(key(secret), s)
         if (store) try { fs.writeFileSync(store, JSON.stringify(Object.fromEntries(lastStep)), { mode: 0o600 }) } catch { /* best effort */ }

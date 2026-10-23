@@ -31,6 +31,7 @@ import { paddleHeader } from '../control/src/paddle'
 import { Console } from './e2e/lib/console'
 import { Http } from './e2e/lib/http'
 import { localTarget } from './e2e/lib/target'
+import { freshTotp } from './e2e/lib/totp'
 
 const DEV = import.meta.dir
 const STATE = path.join(DEV, '.state')
@@ -197,6 +198,8 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   const adminPat = pat.json().token as string
 
   step(`${slug}: the drive's mail through the host's mail relay; dana joins through the console`)
+  // the notice mail goes out after the sign-in answered: give the relay a moment
+  await until(() => teamMail().some((m) => m.to === buyer && /became an admin/.test(m.subject)), 20_000)
   const mail = teamMail().find((m) => m.to === buyer && /became an admin/.test(m.subject))
   check('"someone became an admin" arrived in the dev mail sink (team SES mailer → relay on the team gateway)', !!mail, teamMail().slice(-5))
   check('sent with the configured team From', mail?.from === env.TDCLOUD_TEAM_MAIL_FROM, mail?.from)
@@ -276,21 +279,22 @@ async function clientAddresses(a: Team) {
   const xtok = tdrive('acme', 'token', 'create', 'kim', '--name', 'xff-test').out.trim()
   const spoofs = ['203.0.113.7', '198.51.100.23', '192.0.2.99']
   const init = (n: string) => ({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: n, version: '1' } } })
-  const badSetup = { setup_token: 'tdrive_setup_wrongwrongwrongwrongwrong1', name: 'x', email: 'x@x.test', password: 'some-password-1' }
+  // a wrong invite link: answered 404 after the per-address link limiter counted it (SSO mode has no /api/setup)
+  const badLink = { kind: 'invite', token: 'wrongwrongwrongwrongwrongwrongwrong1', password: 'some-password-1' }
   for (const [i, spoof] of spoofs.slice(0, 2).entries()) {
     const r = await req('POST', `${teamUrl('acme')}/mcp`, { origin: false, headers: { authorization: `Bearer ${xtok}`, accept: 'application/json, text/event-stream', 'x-forwarded-for': spoof }, body: init(`xff-outside-${i}`) })
-    const s = await req('POST', `${teamUrl('acme')}/api/setup`, { headers: { 'x-forwarded-for': spoof }, body: badSetup })
-    if (r.status !== 200 || s.status !== 403) check(`outside request ${i}`, false, `${r.status} ${s.status} ${s.text}`)
+    const s = await req('POST', `${teamUrl('acme')}/api/links/accept`, { headers: { 'x-forwarded-for': spoof }, body: badLink })
+    if (r.status !== 200 || s.status !== 404) check(`outside request ${i}`, false, `${r.status} ${s.status} ${s.text}`)
   }
   // a second client: a container on the Docker network in front of Caddy, at 10.250.250.50, also forging the header
   const script = `const https = require('node:https');
 const post = (path, body, headers) => new Promise((res, rej) => { const q = https.request({ host: '10.250.250.10', port: 443, servername: process.env.H, ca: process.env.CA, method: 'POST', path,
   headers: { host: process.env.H + ':' + process.env.P, origin: 'https://' + process.env.H + ':' + process.env.P, 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-forwarded-for': '${spoofs[2]}', ...headers } },
   (s) => { let d = ''; s.on('data', (c) => d += c); s.on('end', () => res(s.statusCode)) }); q.on('error', rej); q.end(JSON.stringify(body)) });
-(async () => { console.log(await post('/mcp', ${JSON.stringify(init('xff-inside'))}, { authorization: 'Bearer ' + process.env.T }), await post('/api/setup', ${JSON.stringify(badSetup)}, {})) })().catch((e) => { console.log('error', e.message); process.exit(1) })`
+(async () => { console.log(await post('/mcp', ${JSON.stringify(init('xff-inside'))}, { authorization: 'Bearer ' + process.env.T }), await post('/api/links/accept', ${JSON.stringify(badLink)}, {})) })().catch((e) => { console.log('error', e.message); process.exit(1) })`
   const inside = sh(['docker', 'run', '--rm', '--network', 'tdc-control', '--ip', '10.250.250.50', '-e', `CA=${CA}`, '-e', `T=${xtok}`, '-e', `H=acme.${DOMAIN}`, '-e', `P=${PORT}`,
     '--entrypoint', 'bun', 'tdcloud-control:dev', '-e', script])
-  check('a client at 10.250.250.50 reaches acme through Caddy', inside.out.trim() === '200 403', inside.out + inside.err)
+  check('a client at 10.250.250.50 reaches acme through Caddy', inside.out.trim() === '200 404', inside.out + inside.err)
 
   const conns = tdrive('acme', 'connections', 'list').out.split('\n').map((l) => l.split('\t')).filter((c) => / xff-test$/.test(c[0] ?? ''))
   const ips = [...new Set(conns.map((c) => c[3]!))]
@@ -300,8 +304,8 @@ const post = (path, body, headers) => new Promise((res, rej) => { const q = http
   check(`the recorded address is the client's, not Caddy's (${caddyIp})`, !ips.includes(caddyIp) && !ips.includes(gateway))
   const rows = JSON.parse(sh(['docker', 'exec', 'tdc-acme', '/usr/local/bin/bun', '-e',
     `const { Database } = require('bun:sqlite'); console.log(JSON.stringify(new Database('/data/db/store.db').query("SELECT key_hash, n FROM rate_limits WHERE scope = 'link_addr'").all()))`]).out || '[]') as { key_hash: string; n: number }[]
-  const hits = (ip: string) => rows.find((r) => r.key_hash === sha256(`setup:${ip}`))?.n ?? 0
-  check('setup rate-limit keys are client addresses: this machine (all its tries in one bucket) and 10.250.250.50 (one)', hits(outsideIp) >= 4 && hits('10.250.250.50') === 1, { outside: hits(outsideIp), inside: hits('10.250.250.50') })
+  const hits = (ip: string) => rows.find((r) => r.key_hash === sha256(`link:${ip}`))?.n ?? 0
+  check('link rate-limit keys are client addresses: this machine (all its tries in one bucket) and 10.250.250.50 (one)', hits(outsideIp) >= 2 && hits('10.250.250.50') === 1, { outside: hits(outsideIp), inside: hits('10.250.250.50') })
   check("…and never a forged address or Caddy's", [...spoofs, caddyIp].every((ip) => hits(ip) === 0), [...spoofs, caddyIp].map(hits))
 
   // the relay takes mail only from a team container, only with the team From
@@ -424,7 +428,7 @@ async function freePlan() {
   const lt = outbox().filter((m) => m.to === owner && /login\/link\?token=/.test(m.text)).at(-1)?.text.match(/login\/link\?token=(\S+)/)?.[1]
   let lc = await req('POST', `${CONTROL}/api/login/link/confirm`, { body: { token: lt } })
   // the owner has a console authenticator now: the link is the first step, the code the second
-  if (lc.status === 200 && lc.json().totp_required) lc = await req('POST', `${CONTROL}/api/login/totp`, { body: { ticket: lc.json().ticket, code: totp(fc.creds?.totp ?? '', Date.now() + 30_000) } })
+  if (lc.status === 200 && lc.json().totp_required) lc = await req('POST', `${CONTROL}/api/login/totp`, { body: { ticket: lc.json().ticket, code: await freshTotp(fc.creds?.totp ?? '') } })
   check('signed in with the link (and the authenticator code)', lc.status === 200 && /^(__Host-)?tdcloud_session=/.test(cookieOf(lc)), lc.text)
   const ownerCookie = cookieOf(lc)
   const mine = (await req('GET', `${CONTROL}/api/teams`, { cookie: ownerCookie })).json().teams as { id: string; slug: string; plan: string; paused?: boolean }[]
@@ -542,7 +546,7 @@ async function main() {
   const audit = admin('audit', 'verify')
   check('control-plane audit chain verifies', audit.code === 0 && audit.out.includes('audit chain ok'), audit.out)
   const log = admin('audit', 'list', '--limit', '200').out
-  for (const action of ['user.signup', 'team.create', 'billing.subscription.created', 'team.provisioned', 'team.setup_link_sent', 'team.suspend', 'team.resume', 'team.backup.manual', 'team.exported', 'team.upgrade']) check(`audit has ${action}`, log.includes(action))
+  for (const action of ['user.signup', 'team.create', 'billing.subscription.created', 'team.provisioned', 'team.ready_mail_sent', 'team.suspend', 'team.resume', 'team.backup.manual', 'team.exported', 'team.upgrade']) check(`audit has ${action}`, log.includes(action))
   const afterUpgrade = JSON.parse(sh(['docker', 'inspect', 'tdc-acme']).out)[0]
   const acmeNet = JSON.parse(sh(['docker', 'network', 'inspect', 'tdc-net-acme']).out)[0].IPAM.Config[0].Subnet as string
   const [o1, o2, o3, o4] = acmeNet.split('/')[0]!.split('.').map(Number) as [number, number, number, number]

@@ -30,9 +30,11 @@ export default {
       const off = await share(kim, { path: '/프로젝트/비밀', restrict_here: { on: false, keep: [] } })
       t.check('Restrict here off (kim, Manager)', off.status === 200, off.text)
       await expectSight(t, 'mina', f, CANARY.비밀, { human: true, ai: true }, 'inherited again', ['web', 'mcp'])
+      const pre = (await shareView(kim, '/프로젝트/비밀')).json()
+      const losing = (pre.entries ?? []).filter((e: { source: string; role: string }) => e.source === 'inherited' && e.role !== 'manager')
+      t.check(`the dialog can show who would lose access (${losing.length} inherited entries + Anyone in the team)`, !!pre.general?.effective || losing.length > 0, pre)
       const on = await share(kim, { path: '/프로젝트/비밀', restrict_here: { on: true, keep: [{ type: 'person', id: sd.people.boss }, { type: 'person', id: sd.people.sam }] } })
-      const lost = on.status === 200 ? JSON.stringify(on.json().warnings ?? on.json()) : on.text
-      t.check('Restrict here on, keeping boss and sam; the answer counts who loses access', on.status === 200 && /lose|lost|drop/i.test(lost), lost)
+      t.check('Restrict here on, keeping boss and sam', on.status === 200 && on.json().general?.restricted_here === true, on.text)
       await expectSight(t, 'mina', f, CANARY.비밀, { human: false, ai: false }, 'restricted again')
       await expectSight(t, 'kim', f, CANARY.비밀, { human: true, ai: true }, 'Manager from above, restricted again', ['web', 'mcp'])
     }

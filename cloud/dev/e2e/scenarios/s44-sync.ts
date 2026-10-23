@@ -41,6 +41,8 @@ export default {
     t.check('the first request after waking: their token → 401 (sync ran before serving)', b.status === 401, b.status)
     const cb = form ? await postCallback(t.http, c.jar, new URL(form.action, held.last.url).toString(), form.fields) : null
     t.check('the assertion signed before the removal does not bring them back (deactivated / not signed in)', !!cb && /sso-error/.test(cb.location), cb?.location)
+    // someone made outside the console (the operator CLI): the next sync reports them as unmanaged
+    td('person', 'add', `shadow${run}`.slice(0, 16))
     t.step('re-invited: old credentials stay dead')
     await owner.invite(teamId, [email]); await c.accept(c.inviteToken(email))
     const again = await c.openDrive(fx.slug)
@@ -54,10 +56,9 @@ export default {
     const patch = await admin.api('PATCH', `/people/${pid}`, { admin: true })
     t.check('PATCH /api/people/:id {admin} → 409 managed_by_console', patch.status === 409, patch.text)
     t.step('unmanaged people')
-    td('person', 'add', `shadow${run}`.slice(0, 16))
-    const cur = JSON.parse(ops('teams', 'show', fx.slug).out)
-    const m = await owner.members(teamId)
-    t.check('the console knows of the shadow account (unmanaged warning)', JSON.stringify(m.json()).includes('shadow') || JSON.stringify(cur).includes('shadow'), m.text.slice(0, 300))
+    let reported = ''
+    for (let i = 0; i < 30 && !reported.includes('shadow'); i++) { reported = JSON.stringify(JSON.parse(ops('teams', 'show', fx.slug).out || '{}').sync_unmanaged ?? ''); if (!reported.includes('shadow')) await Bun.sleep(2000) }
+    t.check('the console knows of the account made outside it (sync_unmanaged)', reported.includes('shadow'), reported)
     void dav; void davAuth; void propfindBody
   },
 } satisfies Scenario
