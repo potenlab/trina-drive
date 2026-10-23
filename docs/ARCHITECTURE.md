@@ -56,6 +56,8 @@ web/               the admin app (Vite + React, en/ko)
 src/samples.ts     generated sample office files            src/demo.ts     demo seed       src/cli.ts  CLI
 src/redact.ts      secrets out of audit rows                src/ratelimit.ts  sign-in (SQLite) and /mcp limits
 src/client/mcp.ts  `mcp add claude|codex|cursor` (runs on the person's computer)
+src/managed/       managed storage (cloud mode): settings, file system side (core.ts), what people do decided by the
+                   policy (ops.ts), resumable uploads, team folders, the HTTP side (web.ts)
 src/notify/        events, recipients, messages (R11), notifier (inbox, coalescing, rate limit, digest), channels
                    (Slack, outbox, smtp), bulk-read alarm, connections, audit anchor, its CLI and tables (schema.ts)
 sim/provenance-day.ts   plan ★8 replay                      test/           bun test
@@ -131,7 +133,8 @@ or `src/policy.ts` (drafts, R4 with the session as a full-scope token). What the
 | tokens (own only) | `GET tokens`, `POST tokens` (shown once), `DELETE tokens/:id`, `POST tokens/:id/provenance-reset` ("출처 초기화", below) |
 | fresh login | `POST me/reauth` `{password}`: the password typed again counts as a fresh login for 5 minutes (as does signing in) |
 | drafts (own, R4) | `GET drafts` (+ locked count and dates), `GET drafts/:id/download` |
-| files (read only, R1) | `GET files?path=` (list), `GET files/stat`, `GET files/download` (attachment only), `GET files/text` (extracted, 1 MB), `GET files/who`, `GET search?q=&path=` — see "Files on the web" |
+| files (read, R1) | `GET files?path=` (list; `writable`/`managed` per folder), `GET files/stat`, `GET files/download` (attachment only; streamed in managed storage), `GET files/text` (extracted, 1 MB), `GET files/who`, `GET search?q=&path=` — see "Files on the web" |
+| managed storage (write, R0/R1) | `POST files/folder` `{path, name, exist_ok?}`, `POST files/upload?path=&conflict=fail\|rename\|replace` (multipart, field `file`, ≤ 16 MB), `POST uploads` `{path, name, size, sha256?, conflict?}` → `PUT uploads/:id?offset=` (raw chunk ≤ 8 MB, `X-Chunk-Sha256`) → `POST uploads/:id/complete` `{conflict?}` (`GET`/`DELETE uploads/:id`), `POST files/rename` `{path, name}`, `POST files/move` `{paths, to, conflict?}`, `POST files/copy` `{paths, to}`, `POST files/delete` `{paths}` (→ trash), `GET files/versions?path=`, `GET files/versions/download?path=&v=`, `POST files/versions/restore` `{path, version}`, `GET trash`, `POST trash/:id/restore`, `DELETE trash/:id`, `POST trash/empty`, `POST files/share` `{path}` (→ folder page id, managers), `GET storage` (admin) — see "Managed storage" |
 | OAuth consent | `GET oauth/requests/:id`, `POST oauth/requests/:id/approve` `{folders \| all, read_only, ttl}`, `POST oauth/requests/:id/deny` → `{redirect_to}` (src/oauth/consent.ts) |
 | audit | `GET audit?view=mine` · `view=folders` (folders you manage; others' command lines hidden) · `view=summary` (admin: who, which connection, how many; hash-chain check) |
 | second step of sign-in | `POST login` answers `{second_factor: {ticket, methods, passkey}}` (no cookie) for someone with a second factor; `POST login/second` `{ticket, method: passkey\|totp\|recovery, response\|code}` → session. A reset link (`links/accept`) asks for it too |
@@ -225,6 +228,65 @@ Plan 5.2 "초안 반영 + 승인함", 4.1 R2 (v0.2), R6, R8, R11, principle 5. C
 - **Passkeys vs LAN.** Passkeys need the public https address (`serve --public-url https://…`; its host is the RP ID).
   With one, approvals require a passkey (an authenticator code is not accepted). Without one (LAN-only install), approvals
   step up with the authenticator app (TOTP, each code once) and the page says so. Recovery codes never approve.
+
+## Managed storage (cloud mode)
+
+Plan 2.2 "관리 모드": the server owns the team folders (a data folder only it writes, 0700), so people put files in
+through the web. Code: `src/managed/`, `web/src/pages/Files.tsx` (+ `files-ops.tsx`, `files-upload.ts`). The in-place
+mode (NAS / Mac folders read where they are) is unchanged; both can live on one server.
+
+- **Where.** The managed root is `<data>/files` (`TDRIVE_FILES_DIR`, or meta `managed_root`). Each team folder is a
+  directory there named by a random id and **registered** like any folder (a mount: rules, flags, `manage`, promote and
+  token scopes work unchanged), plus a row in `managed_mounts`. `<root>/.trina-drive/` holds the trash, the versions
+  store and upload staging (same disk: moves are renames). The admin makes team folders on the web (`POST /api/folders`
+  without a path in managed mode, or `managed: true`) or with `tdrive folder create <name>`. NAS readers do not exist
+  here: `nas_readers = []`, so R5's readers are exactly the rule readers; NAS columns and questions are hidden.
+- **Who may do what.** Every operation resolves paths with `Access.forPerson` (R1 for a person) — the same function as
+  every read. Hidden == missing (404 with the same body and headers, also for a target folder). A change needs
+  R0 effective rule `write` on the folder that changes (where a file is created, replaced, renamed, moved from or to,
+  deleted from, restored to); a folder you can see but not write answers 403 (`no_write`; in-place folders
+  `not_managed`). Top folders are the admin's. A folder is moved or deleted only by someone who sees and writes all of
+  it (`409 has_hidden` otherwise). In managed folders `read` = can view, `write` = can edit (the Folder page shows
+  "No access / Can view / Can edit"). R2 for agents is unchanged: they read by the same rules and write drafts only.
+- **Writing.** Bytes go to a staging file (`O_EXCL|O_NOFOLLOW`, fsync, sha256 on the way), then are placed in one step:
+  `link()` for a new name (refuses an existing one) or `rename()` over an existing file (a replace; its old bytes were
+  copied into the versions store first). Names: one path part, NFC, no control characters or system names (`~$*`,
+  `._*`, `.DS_Store` …), ≤ 255 bytes; a name equal after NFC and case folding is the same name. Content that looks
+  like an XSym / alias link is refused. Files are 0600. A file row (`mfiles`, by identity + size + mtime) carries the
+  current version and its sha256; renames and moves keep the inode and so the history.
+- **Uploads.** One request (multipart, ≤ 16 MB, several files) or resumable (`POST /api/uploads`, chunks at the offset
+  the server stands at — a wrong offset answers 409 with `X-Upload-Received`; a chunk whose `X-Chunk-Sha256` differs
+  answers 422; `complete` checks the size and the whole file's sha256, re-judges the folder and the name). A name that
+  exists: `conflict=fail` (409; a resumable upload stays open to be completed as `replace` or `rename`), `rename`
+  ("a (1).txt"), `replace` (a new version). Unfinished uploads expire after a day.
+- **Versions.** A replace keeps the old bytes (content-addressed, `versions/<aa>/<sha256>`); the last
+  `TDRIVE_VERSIONS_KEPT` (10) earlier versions stay, older ones and bytes no row needs are removed. Restoring a version
+  makes a new version. Seeing and downloading versions needs read on the file (R1); restoring needs write.
+- **Trash.** Delete renames the item into `trash/<uuid>/` (folder rows inside move with it, rules and all) and keeps it
+  `TDRIVE_TRASH_DAYS` (30) days; `serve` empties expired items hourly (and on every trash view). A trash item is shown
+  to people who can read the folder it came from now, and for a folder, every rule-bearing folder that was inside it;
+  restore and delete forever need write there. Purging retires the folder rows inside (an inode number that comes
+  back is never another folder's rules).
+- **Moves that widen.** R6/R10 for people: moving or copying something where more people read it is allowed (a person
+  decides, as on a NAS) and its audit row says `(widens: N more people read it)`. An upload whose content equals a
+  draft version is recorded as a tracked copy (`widened`, `sha256`), so agents that read it inherit the draft's
+  sources (R3/R4) — logged, not held. Agents' promotions that widen still wait for an approval (R8).
+- **Promote.** Into a managed folder a draft is placed through the same staging and recorded as a file row;
+  `overwrite: true` (MCP tool, web) replaces an existing file as a new version — no NAS race here and the old bytes are
+  kept. Approvals keep the choice and re-judge it at the click.
+- **Text mirror.** After every create, replace, copy or restored version, an extraction queue (2 at a time) fills the
+  text mirror for the new identity, so search, "view text" and agents' `cat` see the new content; the old text is
+  never served for the new bytes (the mirror is keyed by identity, size, mtime and ctime).
+- **Audit.** Every change is one row (`tool: web`, `files <op> <path> …`, the paths touched) written in the same
+  transaction as its records; if it cannot be written the change on disk is undone (unlink, rename back, old bytes put
+  back). Refused attempts on paths you cannot see are rows with outcome `not_found`.
+- **Quota.** One total per team (server): files + trash + earlier versions + unfinished uploads ≤
+  `TDRIVE_STORAGE_QUOTA` (or `tdrive storage quota 50GB`); over it → `507 quota_exceeded`. The largest file is
+  `TDRIVE_MAX_FILE_BYTES` (10 GB). The operator sets them (in Trina Cloud, the plan); the admin sees usage per kind and
+  per team folder (`GET /api/storage`, Folders page). `tdrive storage rescan` (and `serve` on start) brings file rows in
+  line with files put in by hand.
+- **The reconciler** never walks managed folders: only this server writes there, each change is audited as it is made,
+  and a person's move is not an R10 quarantine.
 
 ## In-place reconciler
 

@@ -88,6 +88,13 @@
 
 **[설치 상담 예약하기 →](mailto:contact@trina.app?subject=Trina%20Drive%20%EC%84%A4%EC%B9%98%20%EC%83%81%EB%8B%B4)** &nbsp;·&nbsp; [요금 보기](https://drive.trina.app/#pricing)
 
+### 관리형 저장소: Trina Cloud
+
+NAS가 없나요? 폴더를 Trina Drive가 직접 갖게 하세요. **관리형 저장소**에서는 팀원이 웹에서 파일을 올리고, 이름을 바꾸고,
+옮기고, 지웁니다(끌어다 놓기, 폴더째 올리기, 큰 파일, 버전 기록, 휴지통). 사람별 규칙과 기록은 그대로이고, 에이전트는 NAS
+폴더와 똑같이 읽습니다. Trina Cloud에서 팀마다 따로 호스팅하거나 직접 운영합니다: `tdrive init --managed` 뒤에 폴더 화면에서
+팀 폴더를 만드세요(또는 `tdrive folder create <이름>`). 자세한 내용: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#managed-storage-cloud-mode).
+
 ### 맥 미니에 직접 설치
 
 v0.1의 설치 방법이에요. 설치기가 서비스 계정, LaunchDaemon, 고정 버전 도구, 암호화된 일일 백업까지 준비해요

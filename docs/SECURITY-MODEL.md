@@ -63,6 +63,30 @@ and the token's scope is computed inside it.
   touches, draft writes and the audit row commit in one transaction, so if the audit row cannot be written the call
   fails and nothing it wrote is kept.
 
+## Managed storage (cloud mode)
+
+Plan 2.2 "관리 모드": the server owns the folders and people change files through the web (details:
+[ARCHITECTURE.md](ARCHITECTURE.md#managed-storage-cloud-mode)). What changes in the model:
+
+- **"Person's permission" is this product's.** No NAS readers: R5's readers are the rule readers; `read` = can view
+  (and their AI reads), `write` = can edit. Principle 3 holds exactly (an agent = its person's rules ∩ token scope).
+- **One decision point for writes too.** Every write resolves with `Access.forPerson` (R1) and needs effective rule
+  `write` on each folder it changes. Hidden == missing for every path, source or target (same status, body, headers).
+  A folder is moved or deleted only by someone who can see and write everything in it. Agents still write drafts only.
+- **Reversible.** Replace keeps the old bytes as a version; delete is a trash with a restore; both are audited.
+- **Widening by people is logged, not held** (R6/R10): a person may move or copy into a folder more people read; the
+  audit row says so. Draft copies uploaded by a person pass the draft's sources on to agents that read them (R3/R4).
+- **Atomic.** Readers see the old file or the new one, never a half-written one; an audit row that cannot be written
+  undoes the change.
+
+Known limits: a name taken by an item you cannot see (a hidden subfolder in a folder you can write) answers "exists",
+and `has_hidden` tells a person that a folder holds something they cannot see (principle 2's documented hole); the
+operator of the server (in Trina Cloud: us) can read the disk — encrypt what must stay unreadable to them before
+uploading, or self-host. File sizes and usage are not secret from the admin. The quota is checked when bytes arrive,
+not reserved atomically across processes (one server process writes). Only exact (sha256) draft copies are matched on
+upload (no paragraph matching), and copies made outside this server (download, edit, upload) are not tracked.
+Backups (`tdrive backup`) do not yet include the managed root: back it up with the data directory's disk.
+
 ## Alerts and audit
 
 Plan §4.1 R9/R11, §5.1, §7.1 (token leak, audit forgery). Code in `src/notify/`.
