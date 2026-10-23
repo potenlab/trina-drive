@@ -16,6 +16,11 @@
 //  9. hosts (simulated, one team each: compose.yml): every team above scaled out from 0; a third team takes the last
 //     host, a fourth waits at the limit (ops alerted), takes the host the third leaves, and once it is gone too the
 //     emptied host is scaled in after the grace period — never the hosts of acme or the suspended globex
+// 10. Free plan (compose.yml: cap 1, short idle timers): a disposable address is refused; email + team name → the
+//     confirmation link → a free team on a host launched for it (a quarter slot, small limits, 1 GB, 3 people) → setup
+//     link → a fourth person refused; a second mailbox waits on the waitlist (ops told); the owner signs in with an
+//     email link; nobody uses it → warned → paused (paused page with Wake up) → woken from the control plane in
+//     seconds → used again → upgraded to Team by a signed subscription.created: same team, data, address, new limits
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -338,6 +343,105 @@ async function autoscale() {
 }
 let globexBoss = ''
 
+async function freePlan() {
+  step('Free plan: sign-up without Paddle')
+  check('the /free page', (await req('GET', `${CONTROL}/free`)).text.includes('action="/free"'))
+  const disp = await req('POST', `${CONTROL}/api/free/signup`, { body: { email: 'x@mailinator.com', name: 'Spam' } })
+  check('a disposable address is refused', disp.status === 400 && disp.text.includes('disposable_email'), disp.text)
+  const owner = 'founder@freeco.test'
+  const su = await req('POST', `${CONTROL}/api/free/signup`, { body: { email: owner, name: 'Free Co', slug: 'freeco' } })
+  check('free sign-up: email + team name', su.status === 200, su.text)
+  const link = outbox().filter((m) => m.to === owner && /\/free\/verify\?token=/.test(m.text)).at(-1)?.text.match(/\/free\/verify\?token=(\S+)/)?.[1]
+  check('confirmation link in the outbox', !!link)
+  const v = await req('POST', `${CONTROL}/api/free/verify`, { body: { token: link } })
+  check('confirmed: the free team is starting', v.status === 200 && v.json().status === 'provisioning' && v.json().url === teamUrl('freeco'), v.text)
+  check('the link works once', (await req('POST', `${CONTROL}/api/free/verify`, { body: { token: link } })).status === 404)
+  const again = await req('POST', `${CONTROL}/api/free/signup`, { body: { email: 'Founder+2@freeco.test', name: 'Again' } })
+  check('the same mailbox again: a reminder of its team, no second link', again.status === 200 && outbox().filter((m) => m.to === 'founder+2@freeco.test').at(-1)?.subject === 'You already have a free Trina Drive')
+  check('freeco runs (a host launched for it)', await until(() => showTeam('freeco').status === 'active', 240_000), admin('hosts', 'list').out)
+  const row = showTeam('freeco') as { host?: string; plan?: string; public_id?: string }
+  check(`freeco is a free team on ${row.host}, a quarter of its slot`, row.plan === 'free' && / ready +0\.25\/1 /.test(hostLine(row.host)), hostLine(row.host))
+  const i = JSON.parse(sh(['docker', 'inspect', 'tdc-freeco']).out)[0]
+  const envs = i.Config.Env as string[]
+  check('free limits: 0.5 vCPU, 768 MiB, 256 processes', i.HostConfig.NanoCpus === 5e8 && i.HostConfig.Memory === 768 * 1024 * 1024 && i.HostConfig.PidsLimit === 256, { cpu: i.HostConfig.NanoCpus, mem: i.HostConfig.Memory, pids: i.HostConfig.PidsLimit })
+  check('free env: 1 GB storage quota, at most 3 people', envs.includes('TDRIVE_STORAGE_QUOTA=1GB') && envs.includes('TDRIVE_MAX_PEOPLE=3'))
+  const ready = outbox().filter((m) => m.to === owner && m.subject.startsWith('Your Trina Drive is ready')).at(-1)
+  const token = ready?.text.match(/\/#token=(\S+)/)?.[1]
+  check('setup mail with #token= and the free plan explained', !!token && ready!.text.includes('Free plan: 1 GB'))
+  const setup = await req('POST', `${teamUrl('freeco')}/api/setup`, { body: { setup_token: token, name: 'alex', email: owner, password: 'admin-freeco-password' } })
+  check('setup creates the admin', setup.status === 200, setup.text)
+  const adminCookie = cookieOf(setup)
+  sh(['docker', 'exec', 'tdc-freeco', 'sh', '-c', 'mkdir -p /data/keep && echo "freeco keeps this" > /data/keep/note.md'])
+  check('two more people fit', tdrive('freeco', 'person', 'add', 'pat').code === 0 && tdrive('freeco', 'person', 'add', 'sam').code === 0)
+  const fourth = tdrive('freeco', 'person', 'add', 'kai')
+  check('a fourth person is refused (TDRIVE_MAX_PEOPLE=3)', fourth.code !== 0 && /at most 3 people/.test(fourth.err + fourth.out), fourth.err + fourth.out)
+  // a personal token for MCP later (made by the operator CLI: not activity)
+  const freePat = tdrive('freeco', 'token', 'create', 'alex', '--name', 'free-e2e').out.trim()
+  const act = tdrive('freeco', 'activity', '--json')
+  check('the team reports its last activity (the setup session)', act.code === 0 && typeof JSON.parse(act.out).web === 'number', act.out + act.err)
+
+  step('Free plan: the cap and the waitlist')
+  await req('POST', `${CONTROL}/api/free/signup`, { body: { email: 'second@otherco.test', name: 'Other Co' } })
+  const l2 = outbox().filter((m) => m.to === 'second@otherco.test').at(-1)?.text.match(/\/free\/verify\?token=(\S+)/)?.[1]
+  const w = await req('POST', `${CONTROL}/api/free/verify`, { body: { token: l2 } })
+  check('a second free team past TDCLOUD_MAX_FREE_TEAMS=1 waits', w.json().status === 'waitlisted', w.text)
+  check('ops are told about the waitlist', outbox().some((m) => m.to === 'ops@trina.test' && m.subject.includes('free waitlist: second@otherco.test')))
+  check('free waitlist lists it', admin('free', 'waitlist').out.includes('second@otherco.test'))
+
+  step('Free plan: the owner signs in with an email link')
+  await req('POST', `${CONTROL}/api/login/link`, { body: { email: owner } })
+  const lt = outbox().filter((m) => m.to === owner && /login\/link\?token=/.test(m.text)).at(-1)?.text.match(/login\/link\?token=(\S+)/)?.[1]
+  const lc = await req('POST', `${CONTROL}/api/login/link/confirm`, { body: { token: lt } })
+  check('signed in with the link', lc.status === 200 && cookieOf(lc).startsWith('tdcloud_session='), lc.text)
+  const ownerCookie = cookieOf(lc)
+  const mine = (await req('GET', `${CONTROL}/api/teams`, { cookie: ownerCookie })).json().teams as { id: string; slug: string; plan: string; paused?: boolean }[]
+  const ft = mine.find((x) => x.slug === 'freeco')
+  check('the dashboard API shows the free team', ft?.plan === 'free' && ft.paused === false, mine)
+
+  step('Free plan: nobody uses it → warned → paused')
+  check('the owner is warned (25 s idle here; 6 days in production)', await until(() => outbox().some((m) => m.to === owner && m.subject.startsWith('Your free Trina Drive pauses')), 90_000))
+  check('paused (45 s idle here; 7 days in production)', await until(() => /^freeco +paused +free /m.test(admin('teams', 'list').out), 90_000), admin('teams', 'list').out)
+  check('the owner is told it is paused', outbox().some((m) => m.to === owner && m.subject === 'Your free Trina Drive is paused'))
+  check('its container is stopped, not removed', sh(['docker', 'inspect', '-f', '{{.State.Running}}', 'tdc-freeco']).out.trim() === 'false')
+  const pp = await req('GET', `${teamUrl('freeco')}/`)
+  check('the team address shows the paused page with Wake up', pp.text.includes('unavailable') && pp.text.includes('wake-link') && pp.text.includes("'/wake/'"), pp.status)
+  check(`its host still counts it (${row.host})`, / ready +0\.25\/1 /.test(hostLine(row.host)), hostLine(row.host))
+
+  step('Free plan: Wake up')
+  check('the wake page offers the button', (await req('GET', `${CONTROL}/wake/freeco`)).text.includes('Wake up'))
+  const t0 = Date.now()
+  const wk = await req('POST', `${CONTROL}/wake/freeco`, { raw: '' , headers: { 'content-type': 'application/x-www-form-urlencoded' } })
+  check('Wake up: the page polls until it runs', wk.status === 200 && wk.text.includes('/static/wake.js'), wk.text.slice(0, 300))
+  const woke = await until(() => { const r = sh(['curl', '-s', '--cacert', path.join(STATE, 'caddy-root.crt'), '--resolve', `${DOMAIN}:${PORT}:127.0.0.1`, `${CONTROL}/api/wake/freeco`]); return r.out.includes('"running"') }, 60_000)
+  check(`running again in ${Math.round((Date.now() - t0) / 1000)} s`, woke)
+  check('the admin session from before the pause still works', (await req('GET', `${teamUrl('freeco')}/api/session`, { cookie: adminCookie })).status === 200)
+  // the web session's last_seen_at moves at most once a minute; an MCP call always marks its token used
+  const used = await mcp('freeco', freePat, 'initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'free-e2e', version: '1' } })
+  check('an MCP call on the woken team', used.status === 200, used.text)
+  check('used again (MCP): the team is a normal running free team (no re-pause pending)', await until(() => { const r = showTeam('freeco') as { woke_at?: number | null; paused_at?: number | null; status?: string }; return r.status === 'active' && r.woke_at == null && r.paused_at == null }, 30_000), showTeam('freeco'))
+
+  step('Free plan: upgrade to Team with Paddle (same team, data, address)')
+  const ev = { event_id: `evt_dev_freeco_${Date.now()}`, event_type: 'subscription.created', occurred_at: new Date().toISOString(), notification_id: 'ntf_freeco',
+    data: { id: 'sub_dev_freeco', status: 'active', customer_id: 'ctm_dev_freeco', currency_code: 'USD', items: [{ price: { id: 'pri_dev_team_monthly' }, quantity: 1 }], custom_data: { tdcloud_team: ft?.id } } }
+  const raw = JSON.stringify(ev)
+  const wh = await req('POST', `${CONTROL}/paddle/webhook`, { raw, origin: false, headers: { 'content-type': 'application/json', 'paddle-signature': paddleHeader(env.PADDLE_WEBHOOK_SECRET!, raw) } })
+  check('signed subscription.created for the free team accepted', wh.status === 200, wh.text)
+  const upgraded = await until(() => { const x = JSON.parse(sh(['docker', 'inspect', 'tdc-freeco']).out || '[{}]')[0]; return x?.HostConfig?.Memory === 2048 * 1024 * 1024 && x.State?.Running }, 90_000)
+  check('the container is made again with the Team limits (2 GiB)', upgraded)
+  const after = showTeam('freeco') as { plan?: string; host?: string; public_id?: string; status?: string }
+  check('the same team: plan team, same host and id', after.plan === 'team' && after.host === row.host && after.public_id === row.public_id && after.status === 'active', after)
+  const envAfter = JSON.parse(sh(['docker', 'inspect', 'tdc-freeco']).out)[0].Config.Env as string[]
+  check('Team env: 100 GB, no people limit', envAfter.includes('TDRIVE_STORAGE_QUOTA=100GB') && !envAfter.some((e) => e.startsWith('TDRIVE_MAX_PEOPLE=')))
+  check('the data survived (a file, the people)', sh(['docker', 'exec', 'tdc-freeco', 'cat', '/data/keep/note.md']).out.includes('freeco keeps this') && tdrive('freeco', 'person', 'add', 'kai').code === 0)
+  check('the same address serves it, the admin session still works', (await req('GET', `${teamUrl('freeco')}/api/session`, { cookie: adminCookie })).status === 200)
+  check(`its host now shows a full slot (${row.host})`, / ready +1\/1 /.test(hostLine(row.host)), hostLine(row.host))
+  const stats = admin('free', 'stats')
+  check('free stats', stats.code === 0 && /free teams +0 of 1/.test(stats.out) && /1 upgraded/.test(stats.out) && /1 on the waitlist/.test(stats.out), stats.out + stats.err)
+  const log = admin('audit', 'list', '--limit', '400').out
+  for (const action of ['free.signup', 'free.waitlisted', 'free.idle_warned', 'free.paused', 'free.wake_requested', 'free.woke', 'free.active_again', 'free.upgraded']) check(`audit has ${action}`, log.includes(action))
+  check('control-plane audit chain verifies', admin('audit', 'verify').code === 0)
+}
+
 async function tlsOk(slug: string): Promise<boolean> {
   try { await fetch(`${teamUrl(slug)}/`, { tls: { ca: CA }, signal: AbortSignal.timeout(10_000) } as RequestInit); return true } catch { return false }
 }
@@ -412,6 +516,7 @@ async function main() {
   check('after the upgrade: the same fixed address and env', afterUpgrade.NetworkSettings.Networks['tdc-net-acme']?.IPAddress === `${o1}.${o2}.${o3}.${o4 + 3}` && (afterUpgrade.Config.Env as string[]).includes('TDRIVE_HOSTED=1'), afterUpgrade.NetworkSettings.Networks)
 
   await autoscale()
+  await freePlan()
 
   console.log(`\n${failed ? 'FAILED' : 'PASSED'}: ${passed} checks passed, ${failed} failed (${Math.round((Date.now() - t0) / 1000)}s)`)
   console.log(`\n  acme    ${teamUrl('acme')}    admin alex / admin-acme-password`)
