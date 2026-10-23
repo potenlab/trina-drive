@@ -101,6 +101,32 @@ export function stageBytes(root: string, bytes: Uint8Array): Staged {
   return { path: p, size: bytes.length, sha256: sha256(bytes) }
 }
 
+/**
+ * A byte stream (a WebDAV PUT body, a Google Drive download) into a fresh staging file, never in memory as a whole:
+ * fsynced, with its sha256. More than `maxBytes` → 413 and nothing is kept.
+ */
+export async function stageStream(root: string, body: ReadableStream<Uint8Array> | null, maxBytes: number, tag = 'stream'): Promise<Staged> {
+  const p = path.join(ensureRoot(root).uploads, `${tag}-${rand()}.part`)
+  const fd = fs.openSync(p, W_EXCL, 0o600)
+  const h = crypto.createHash('sha256')
+  let off = 0
+  try {
+    if (body) {
+      const reader = body.getReader()
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (!value?.length) continue
+        if (off + value.length > maxBytes) { await reader.cancel().catch(() => {}); throw new ManagedError(413, 'too_large', `files may be at most ${maxBytes} bytes`) }
+        writeAll(fd, value, off); h.update(value); off += value.length
+      }
+    }
+    fs.fsyncSync(fd)
+  } catch (e) { fs.closeSync(fd); try { fs.unlinkSync(p) } catch {} throw e }
+  fs.closeSync(fd)
+  return { path: p, size: off, sha256: h.digest('hex') }
+}
+
 /** sha256 of a file, read in 1 MB pieces (never the whole file in memory). */
 export function hashFd(fd: number): { sha256: string; size: number } {
   const h = crypto.createHash('sha256')

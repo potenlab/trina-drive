@@ -76,7 +76,8 @@ export class Managed {
   readonly ids: Set<number>
   readonly db: DB
 
-  constructor(readonly ctx: Pick<Ctx, 'db' | 'dataDir' | 'mirror'>, readonly personId: number) {
+  /** `tool`: how the person reached us, for the audit rows (the web app: 'web'; a mounted drive: 'webdav') */
+  constructor(readonly ctx: Pick<Ctx, 'db' | 'dataDir' | 'mirror'>, readonly personId: number, readonly tool = 'web') {
     this.db = ctx.db
     this.s = storageSettings(ctx.db, ctx.dataDir)
     this.access = Access.forPerson(ctx.db, personId)
@@ -85,7 +86,7 @@ export class Managed {
 
   // ---- audit (closed by default: appendAudit throws, and the caller's transaction with it) ----
   audit(command: string, files: string[], outcome = 'ok') {
-    appendAudit(this.db, { personId: this.personId, tokenId: null, tool: 'web', command, files, outcome })
+    appendAudit(this.db, { personId: this.personId, tokenId: null, tool: this.tool, command, files, outcome })
   }
   /** 404, with the attempt in the person's own audit trail. */
   missing(command: string): never {
@@ -168,20 +169,20 @@ export class Managed {
   }
 
   /** Commit records + audit for a placed file; undo the placement if that fails. Then GC and index. */
-  private commitPlaced(p: Placed, node: Node, command: string, vpath: string): { version: number } {
+  private commitPlaced(p: Placed, node: Node, command: string, vpath: string): { version: number; fileId: number } {
     const now = Date.now()
-    let version = 1, dropped: string[] = []
+    let version = 1, dropped: string[] = [], fileId = 0
     try {
       this.db.transaction(() => {
-        if (p.replaced) ({ version, dropped } = trackReplace(this.db, p, this.personId, now, this.s.versionsKept))
-        else trackNew(this.db, p, this.personId, now)
+        if (p.replaced) ({ version, dropped, fileId } = trackReplace(this.db, p, this.personId, now, this.s.versionsKept))
+        else fileId = trackNew(this.db, p, this.personId, now)
         const copies = this.noteDraftCopies(p, node, now)
         this.audit(command + copies, [vpath])
       })()
     } catch (e) { p.undo(); throw e }
     gcBlobs(this.db, this.s.root, dropped)
     indexLater(this.ctx, p)
-    return { version }
+    return { version, fileId }
   }
 
   // ---------- operations ----------
@@ -214,16 +215,16 @@ export class Managed {
         if (!e || e.kind !== 'file') throw new ManagedError(409, 'exists', `${there} exists here and is not a file you can replace`)
         ensureRoom(this.db, this.s, staged.size)
         const p = placeReplace(this.s.root, node, e, staged)
-        const { version } = this.commitPlaced(p, node, `files ${via} ${e.vpath} (new version, ${staged.size} bytes, sha256 ${staged.sha256})`, e.vpath)
-        return { path: e.vpath, name: e.name, version, replaced: true }
+        const { version, fileId } = this.commitPlaced(p, node, `files ${via} ${e.vpath} (new version, ${staged.size} bytes, sha256 ${staged.sha256})`, e.vpath)
+        return { path: e.vpath, name: e.name, version, replaced: true, file_id: fileId }
       }
       if (there && conflict === 'rename') n = freeName(node.real, n)
       else if (there) throw new ManagedError(409, 'exists', `${there} already exists here`)
       ensureRoom(this.db, this.s, staged.size)
       const p = placeNew(node, n, staged)
       const vpath = `${node.vpath}/${n}`
-      this.commitPlaced(p, node, `files ${via} ${vpath} (${staged.size} bytes, sha256 ${staged.sha256})`, vpath)
-      return { path: vpath, name: n, version: 1, replaced: false }
+      const { fileId } = this.commitPlaced(p, node, `files ${via} ${vpath} (${staged.size} bytes, sha256 ${staged.sha256})`, vpath)
+      return { path: vpath, name: n, version: 1, replaced: false, file_id: fileId }
     } finally { dropStaged(staged) }
   }
 
@@ -262,19 +263,24 @@ export class Managed {
     }
     return { results: out }
   }
-  private moveOne(vpath: string, target: Node, conflict: Conflict) {
+  /** One item into a folder under a new name (a mounted drive's MOVE): the same checks as move, then the name. */
+  moveTo(vpath: string, to: unknown, name: unknown) {
+    const target = this.writable(to, 'move')
+    return this.moveOne(vpath, target, 'fail', checkName(name))
+  }
+  private moveOne(vpath: string, target: Node, conflict: Conflict, newName?: string) {
     const e = this.entry(vpath)
     if (!e) this.missing(`files move ${vpath}`)
     const parent = this.parentOf(e)
     if (!parent) throw new ManagedError(403, 'top_folder', 'team folders are moved by the admin')
     this.mayWrite(parent)
     const real = e.kind === 'dir' ? e.node.real : e.real
-    if (parent.real === target.real) return { to: vpath }
+    if (parent.real === target.real) return newName === undefined ? { to: vpath } : { to: this.rename(vpath, newName).path, widens: 0 }
     if (e.kind === 'dir') {
       if (target.real === real || target.real.startsWith(real + '/')) throw new ManagedError(400, 'into_itself', 'a folder cannot be moved into itself')
       this.subtree(e.node)
     }
-    let n = entryName(e)
+    let n = newName ?? entryName(e)
     if (taken(target.real, n)) {
       if (conflict !== 'rename') throw new ManagedError(409, 'exists', `${n} already exists in ${target.vpath}`)
       n = freeName(target.real, n)
@@ -329,7 +335,8 @@ export class Managed {
     }
     return { results: out }
   }
-  private removeOne(vpath: string): number {
+  /** One item to the trash (throws, with its status); returns the trash item's id. */
+  removeOne(vpath: string): number {
     const e = this.entry(vpath)
     if (!e) this.missing(`files delete ${vpath}`)
     const parent = this.parentOf(e)
