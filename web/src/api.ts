@@ -11,7 +11,8 @@ export const signedOut = () => onSignedOut()
 export const whenSignedOut = (f: () => void) => { onSignedOut = f }
 
 export class ApiError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) { super(message) }
+  /** the whole JSON body of the error answer (e.g. a 409 widening carries `count`) */
+  constructor(readonly status: number, readonly code: string, message: string, readonly data: Record<string, unknown> | null = null) { super(message) }
 }
 
 export async function api<T = any>(method: string, path: string, body?: unknown): Promise<T> {
@@ -19,9 +20,9 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
   if (body !== undefined) headers['content-type'] = 'application/json'
   if (method !== 'GET') headers['x-csrf-token'] = csrf
   const res = await fetch('/api' + path, { method, headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body) })
-  const data = await res.json().catch(() => null)
+  const data: any = await res.json().catch(() => null)
   if (res.status === 401 && path !== '/login' && path !== '/session') onSignedOut()
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? 'error', data?.message ?? res.statusText)
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? 'error', data?.message ?? res.statusText, data && typeof data === 'object' ? data : null)
   if (data && typeof data.csrf === 'string') csrf = data.csrf
   return data as T
 }
@@ -31,7 +32,11 @@ export const get = <T = any>(path: string) => api<T>('GET', path)
 // shapes the server returns (src/web/views.ts)
 export interface Me { id: number; name: string; admin: boolean; email: string | null; unread_notices: number; approvals?: number; second_factor?: boolean; storage?: 'managed' | 'inplace'
   /** hosted server: this admin must add a second factor before anything else (src/web/hosted.ts) */
-  second_factor_required?: boolean }
+  second_factor_required?: boolean
+  /** Trina Cloud mode (src/tdcloud/me.ts, workstream B1): the console's address for "Back to console", the team's name */
+  cloud?: { sso_only?: boolean; console_url?: string; managed?: boolean; has_password?: boolean; display_name?: string | null; reauth_url?: string | null; team_name?: string }
+  /** sharing (src/share/me.ts, workstream A1) */
+  share?: Record<string, unknown> }
 export interface FolderSummary {
   /** in managed storage (the server owns it): no NAS, rules decide who views and who edits */
   managed?: boolean

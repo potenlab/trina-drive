@@ -34,6 +34,7 @@ const en = {
   folder_promote_inherited: 'On from a folder above.', folder_promote_admin: 'Only the admin turns this on or off.', folder_promote_cannot_write: 'The server cannot write to this folder on disk: give its NAS account write permission here.',
   // approvals
   ap_title: 'Approvals', ap_intro: 'Drafts waiting to go into folders that more people read than the folders they came from. You see one when you can read every source folder and manage the target (or every source).',
+  ap_skills: 'Skill changes', ap_skills_help: 'New or changed team skills you may approve. AI keeps the last approved version until then.',
   ap_empty: 'Nothing to approve.', ap_others: '{n} pending in folders you manage, which you cannot approve (you cannot read every source folder).',
   ap_status_pending: 'Waiting', ap_status_approved: 'Approved', ap_status_rejected: 'Rejected', ap_status_expired: 'Expired', ap_status_closed: 'No one can approve',
   ap_status_cancelled: 'Cancelled', ap_status_stale: 'Draft changed', ap_status_failed: 'Failed',
@@ -80,6 +81,7 @@ const ko: Record<ApKey, string> = {
   folder_promote: '여기로 초안 반영 허용', folder_promote_help: '여기에 "쓰기"가 있는 사람은 자기 초안을 이 폴더와 아래에 새 파일로 넣을 수 있습니다. 넓어지는 반영은 승인을 기다립니다. 서버의 NAS 계정에 이 폴더 쓰기 권한이 있어야 합니다.',
   folder_promote_inherited: '위 폴더에서 켜져 있습니다.', folder_promote_admin: '전체 관리자만 켜고 끕니다.', folder_promote_cannot_write: '서버가 디스크에서 이 폴더에 쓸 수 없습니다: NAS 계정에 쓰기 권한을 주세요.',
   ap_title: '승인', ap_intro: '초안이 나온 폴더보다 더 많은 사람이 읽는 폴더로 들어가려고 기다리는 초안입니다. 출처 폴더를 모두 읽을 수 있고 대상 폴더(또는 출처 폴더 모두)를 관리하면 보입니다.',
+  ap_skills: '스킬 변경', ap_skills_help: '내가 승인할 수 있는 새 스킬·바뀐 스킬입니다. 승인 전까지 AI는 마지막으로 승인된 버전을 씁니다.',
   ap_empty: '승인할 것이 없습니다.', ap_others: '관리하는 폴더에 승인 대기 {n}건이 있지만 승인할 수 없습니다(출처 폴더를 모두 읽지 못함).',
   ap_status_pending: '대기', ap_status_approved: '승인됨', ap_status_rejected: '거절됨', ap_status_expired: '만료', ap_status_closed: '승인할 사람 없음',
   ap_status_cancelled: '취소됨', ap_status_stale: '초안이 바뀜', ap_status_failed: '실패',

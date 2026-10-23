@@ -1,11 +1,12 @@
-// My tokens: connect an AI client with `<cli> mcp add claude|codex|cursor` (src/client/mcp.ts; no token on a command
-// line or in a client file), or make one here per computer/client (shown once), see last use, revoke.
+// Access tokens (on the "Connect your AI" page, drive/ConnectAI.tsx): make one per computer/client (shown once, then
+// connected with `<cli> mcp add … --token-stdin`: no token on a command line), see last use, revoke. OAuth connections
+// that apps made on the consent page are listed here too.
 import { useState } from 'react'
 import { api, get, type FolderSummary } from '../api'
 import { useSession } from '../App'
 import { BRAND_CTX, CLIENT_LABEL, CLIENTS, manualConfig, recommendedCommand, tokenStdinCommand, type Client, type ConnectCtx } from '../connect'
 import { fmtDate, t, type Key } from '../i18n'
-import { Badge, ErrorLine, Loading, Page, Secret, useAction, useLoad } from '../ui'
+import { Badge, ErrorLine, Loading, Secret, useAction, useLoad } from '../ui'
 
 interface Token {
   id: number; name: string; hint: string; read_only: boolean; created_at: number; expires_at: number | null; revoked_at: number | null
@@ -15,7 +16,7 @@ interface Token {
 }
 const TTLS = ['8h', '1d', '7d', '30d', '90d'] as const
 
-export function Tokens() {
+export function TokenManager() {
   const { data, error, reload } = useLoad(() => get<{ tokens: Token[] }>('/tokens'))
   const folders = useLoad(() => get<{ folders: FolderSummary[] }>('/folders'))
   const a = useAction()
@@ -31,20 +32,16 @@ export function Tokens() {
   const readable = (folders.data?.folders ?? []).filter((f) => f.mine.ai)
 
   return (
-    <Page title={t('tokens_title')}>
-      <p className="muted">{t('tokens_intro')}</p>
-      {made ? (
+    <section className="tokens" id="tokens" aria-labelledby="tokens-h">
+      <h2 id="tokens-h">{t('tokens_title')}</h2>
+      <p className="muted small">{t('tokens_intro')}</p>
+      {made && (
         <div className="card highlight">
           <h2>{made.name}</h2>
           <p className="warn">{t('token_once')}</p>
           <Secret text={made.token} />
           <Connect token={made.token} />
           <button className="btn small ghost" onClick={() => setMade(null)}>{t('close')}</button>
-        </div>
-      ) : (
-        <div className="card">
-          <h2>{t('connect_title')}</h2>
-          <Connect />
         </div>
       )}
       <form className="card" onSubmit={async (e) => {
@@ -114,7 +111,7 @@ export function Tokens() {
           ))}
         </ul>
       )}
-    </Page>
+    </section>
   )
 }
 

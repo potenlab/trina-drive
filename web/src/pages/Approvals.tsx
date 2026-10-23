@@ -9,6 +9,7 @@ import { getPasskey } from '../webauthn'
 import { Badge, ErrorLine, Loading, Page, useAction, useLoad } from '../ui'
 import { at, type ApKey } from './approve-i18n'
 import './approve.css'
+import { st } from '../drive/SkillsText'
 
 interface StepUp { method: 'passkey' | 'totp' | null; missing: 'passkey' | 'totp' | null; lan_only: boolean; public_url: string | null }
 interface Item { id: number; status: string; created_at: number; expires_at: number; decided_at: number | null; target: string; name: string; size: number; gain: number; can_decide: boolean; mine: boolean; requester: string; via: 'agent' | 'web'; overwrite?: boolean }
@@ -61,9 +62,36 @@ function ApprovalList() {
         </ul>
         {data.others_pending > 0 && <p className="card muted">{at('ap_others', { n: data.others_pending })}</p>}
       </>}
+      <SkillChanges />
     </Page>
   )
 }
+
+/** Pending team-skill versions this person may decide (GET /api/skills, workstream I1); each opens #/skills/v/<id>. */
+function SkillChanges() {
+  const { data } = useLoad(() => get<{ skills: SkillItem[] }>('/skills').catch(() => ({ skills: [] })))
+  const mine = (data?.skills ?? []).filter((s) => s.pending?.can_decide)
+  if (!mine.length) return null
+  return (
+    <section className="ap-skills">
+      <h2>{at('ap_skills')}</h2>
+      <p className="muted small">{at('ap_skills_help')}</p>
+      <ul className="rows">
+        {mine.map((s) => (
+          <li key={s.qname}>
+            <div className="row-main">
+              <a href={`#/skills/v/${s.pending!.id}`}><strong className="mono">{s.qname}</strong></a> <Badge kind="accent">{st(s.status === 'new' ? 'sk_status_new' : 'sk_status_changed')}</Badge>
+              {s.pending!.has_scripts && <> <Badge kind="warn" title={st('sk_scripts')}>{'</>'}</Badge></>}
+              <div className="muted small">{st('sk_editors', { names: [...new Set(s.pending!.editors.map((e) => e ?? st('sk_editor_unknown')))].join(', ') })} · {fmtDate(s.pending!.proposed_at)}</div>
+            </div>
+            <div className="row-actions"><a className="btn small primary" href={`#/skills/v/${s.pending!.id}`}>{st('sk_review')}</a></div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+interface SkillItem { qname: string; status: string; pending: { id: number; can_decide: boolean; editors: (string | null)[]; proposed_at: number; has_scripts: boolean } | null }
 
 function ApprovalPage({ id }: { id: number }) {
   const { refresh } = useSession()

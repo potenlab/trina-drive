@@ -23,7 +23,8 @@ export function FolderBadges({ f }: { f: FolderSummary }) {
 export function Folders() {
   const { me } = useSession()
   const { data, error, reload } = useLoad(() => get<{ folders: FolderSummary[] }>('/folders'))
-  const [adding, setAdding] = useState(false)
+  // the sidebar's "+ New" at the top level opens the form (#/folders?new=1)
+  const [adding, setAdding] = useState(() => !!me?.admin && /[?&]new=1/.test(window.location.hash))
   const managedMode = me?.storage === 'managed'
   const showNas = !data || data.folders.some((f) => !f.managed)
   return (

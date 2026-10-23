@@ -1,5 +1,6 @@
 // People and groups. Everyone sees names and groups; the admin adds people (invite link), resets passwords (the link
-// goes only to the person's mail), and manages groups.
+// goes only to the person's mail), and manages groups. In Trina Cloud's SSO-only mode the console owns people: the
+// admin invites by mail through it (POST /api/cloud/invite, always a member) and person rows are read-only here.
 import { useState } from 'react'
 import { api, get, type Group, type Person } from '../api'
 import { useSession } from '../App'
@@ -14,6 +15,8 @@ export function People() {
   const [notice, setNotice] = useState<string | null>(null)
   if (!data) return <Page title={t('people_title')}><ErrorLine error={error} /><Loading /></Page>
   const admin = !!me?.admin
+  const consoleUrl = me?.cloud?.console_url
+  const ssoOnly = !!me?.cloud?.sso_only
   const act = async (fn: () => Promise<unknown>) => { const r = await a.run(fn); if (r !== undefined) reload(); return r }
   const groupName = (id: number) => data.groups.find((g) => g.id === id)?.name ?? '?'
   const status = (p: Person) => !p.active ? t('status_inactive') : p.signed_up === false ? (p.email ? t('status_invited') : t('status_no_account')) : t('status_active')
@@ -27,7 +30,9 @@ export function People() {
         const n = data.people.filter((p) => p.active).length
         return <p className={n >= data.max_people ? 'err' : 'muted small'}>{n >= data.max_people ? t('people_limit_full', { max: data.max_people }) : t('people_limit', { n, max: data.max_people })}</p>
       })()}
-      {admin && <AddPerson groups={data.groups} onAdded={(url) => { setInvite(url); reload() }} run={a.run} busy={a.busy} />}
+      {ssoOnly && <p className="card note-card small">{t('console_members_note')} {consoleUrl && <a href={consoleUrl}>{t('console_open')} →</a>}</p>}
+      {admin && ssoOnly && <InviteByMail run={a.run} busy={a.busy} onSent={(email) => { setNotice(t('console_invite_sent', { email })); reload() }} />}
+      {admin && !ssoOnly && <AddPerson groups={data.groups} onAdded={(url) => { setInvite(url); reload() }} run={a.run} busy={a.busy} />}
       {invite && <div className="card"><p>{t('invite_link')}</p><Secret text={invite} /><button className="btn small ghost" onClick={() => setInvite(null)}>{t('close')}</button></div>}
 
       <section className="card">
@@ -40,7 +45,8 @@ export function People() {
                 {p.email !== undefined && <span className="muted small"> {p.email ?? ''} · {status(p)}</span>}
                 <div className="muted small">{t('in_groups')}: {p.groups.map(groupName).join(', ') || t('none')}</div>
               </div>
-              {admin && (
+              {admin && ssoOnly && <span className="muted small row-actions">{t('console_managed')}</span>}
+              {admin && !ssoOnly && (
                 <div className="row-actions">
                   {p.signed_up === false && <button className="btn small" disabled={a.busy} onClick={async () => {
                     const email = p.email ?? prompt(t('email'))
@@ -116,6 +122,22 @@ function AddPerson({ groups, onAdded, run, busy }: { groups: Group[]; onAdded: (
       </div>
       <label className="check"><input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} /> {t('admin')}</label>
       <button className="btn primary" disabled={busy}>{t('add_person')}</button>
+    </form>
+  )
+}
+
+function InviteByMail({ run, busy, onSent }: { run: ReturnType<typeof useAction>['run']; busy: boolean; onSent: (email: string) => void }) {
+  const [email, setEmail] = useState('')
+  return (
+    <form className="card" onSubmit={async (e) => {
+      e.preventDefault()
+      const sent = email.trim()
+      if (await run(() => api('POST', '/cloud/invite', { email: sent })) !== undefined) { setEmail(''); onSent(sent) }
+    }}>
+      <h2>{t('console_invite_title')}</h2>
+      <p className="muted small">{t('console_invite_help')}</p>
+      <div className="inline-row"><label>{t('email')}<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="off" /></label>
+        <button className="btn primary" disabled={busy || !email.trim()}>{t('console_invite_send')}</button></div>
     </form>
   )
 }

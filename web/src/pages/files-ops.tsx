@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import { api, ApiError, get } from '../api'
 import { fmtDate } from '../i18n'
 import { Badge } from '../ui'
+import { FileGlyph } from '../drive/FileGlyph'
 import { ft } from './files-i18n'
 import { uploads, type UploadItem } from './files-upload'
 
@@ -71,7 +72,7 @@ export function UploadPanel() {
 }
 
 // ---------- context menu ----------
-export interface MenuAction { label: string; icon?: string; onClick: () => void; danger?: boolean; hidden?: boolean; kbd?: string }
+export interface MenuAction { label: string; icon?: ReactNode; onClick: () => void; danger?: boolean; hidden?: boolean; kbd?: string }
 export function Menu({ x, y, actions, onClose }: { x: number; y: number; actions: MenuAction[]; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ x, y })
@@ -206,7 +207,7 @@ export function FolderPicker({ title, action, start, exclude, onPick, onClose }:
           : list.entries.filter((x) => x.kind === 'folder').map((x) => (
             <li key={x.path}>
               <button type="button" disabled={inside(x.path)} onClick={() => setAt(x.path)} className={x.writable ? '' : 'ro'}>
-                <span aria-hidden="true">📁</span> {show(x.name)} {!x.writable && <span className="muted small">· {ft('read_only_here')}</span>}
+                <FileGlyph type="folder" size={20} /> {show(x.name)} {!x.writable && <span className="muted small">· {ft('read_only_here')}</span>}
               </button>
             </li>
           ))}
@@ -224,7 +225,8 @@ export function FolderPicker({ title, action, start, exclude, onPick, onClose }:
 
 // ---------- version history (detail panel) ----------
 interface Version { version: number; size: number; at: number; by: string | null; current: boolean }
-export function Versions({ path, name, onChanged }: { path: string; name: string; onChanged: () => void }) {
+/** `onChanged(note)`: the file changed; the page reloads it (and may remount this panel, so it shows the note). */
+export function Versions({ path, name, onChanged }: { path: string; name: string; onChanged: (note?: string) => void }) {
   const [v, setV] = useState<{ versions: Version[]; writable: boolean; kept: number } | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [n, setN] = useState(0)
@@ -246,7 +248,7 @@ export function Versions({ path, name, onChanged }: { path: string; name: string
               {!x.current && <div className="fv-version-actions">
                 <a className="linkish" href={`/api/files/versions/download?path=${enc(path)}&v=${x.version}`} download>{ft('download')}</a>
                 {v.writable && <button type="button" className="linkish" onClick={async () => {
-                  try { const r = await api<{ version: number }>('POST', '/files/versions/restore', { path, version: x.version }); setMsg(ft('version_restored', { n: r.version })); setN(n + 1); onChanged() } catch (e) { setMsg(errMsg(e)) }
+                  try { const r = await api<{ version: number }>('POST', '/files/versions/restore', { path, version: x.version }); setMsg(ft('version_restored', { n: r.version })); setN(n + 1); onChanged(ft('version_restored', { n: r.version })) } catch (e) { setMsg(errMsg(e)) }
                 }}>{ft('restore_version')}</button>}
               </div>}
             </li>
@@ -279,11 +281,12 @@ export function TrashView() {
   const [confirm, setConfirm] = useState<null | { title: string; text: string; run: () => Promise<void> }>(null)
   const load = () => get<{ items: TrashItem[]; days: number }>('/trash').then(setD, (e) => setErr(errMsg(e)))
   useEffect(() => { load() }, [])
-  const act = async (f: () => Promise<unknown>, ok?: string) => { try { await f(); setMsg(ok ?? null); setErr(null); await load() } catch (e) { setErr(errMsg(e)) } }
+  // f answers the note to show ("Restored to …"), or nothing
+  const act = async (f: () => Promise<string | void>) => { try { const m = await f(); setMsg(m || null); setErr(null); await load() } catch (e) { setErr(errMsg(e)) } }
   return (
     <div className="fv-trash">
       <div className="fv-trash-head">
-        <h2><span aria-hidden="true">🗑️</span> {ft('trash')}</h2>
+        <h2>{ft('trash')}</h2>
         {d && d.items.some((x) => x.can_restore) && <button type="button" className="btn small danger" onClick={() => setConfirm({ title: ft('empty_trash'), text: ft('confirm_empty'), run: () => api('POST', '/trash/empty').then(load) })}>{ft('empty_trash')}</button>}
       </div>
       {d && <p className="muted small">{ft('trash_help', { days: d.days })}</p>}
@@ -293,14 +296,14 @@ export function TrashView() {
         <ul className="fv-items list fv-trash-list">
           {d.items.map((x) => (
             <li key={x.id}>
-              <span className="fv-icon" aria-hidden="true">{x.kind === 'folder' ? '📁' : '📄'}</span>
+              <span className="fv-icon" aria-hidden="true"><FileGlyph type={x.kind === 'folder' ? 'folder' : 'other'} /></span>
               <span className="fv-trash-main">
                 <span className="fv-name">{show(x.name)}</span>
                 <span className="muted small">{ft('from_folder', { folder: show(x.from) })} · {fmtDate(x.deleted_at)}{x.deleted_by ? ` · ${ft('deleted_by', { name: x.deleted_by })}` : ''} · {x.kind === 'folder' ? ft('items_n', { n: x.files }) : bytes(x.size)} · {ft('gone_after', { date: fmtDate(x.purge_after) })}</span>
               </span>
               <span className="fv-trash-actions">
                 {x.can_restore ? <>
-                  <button type="button" className="btn small" onClick={() => act(() => api<{ path: string }>('POST', `/trash/${x.id}/restore`).then((r) => setMsg(ft('restored_to', { path: show(r.path) }))))}>{ft('restore')}</button>
+                  <button type="button" className="btn small" onClick={() => act(() => api<{ path: string }>('POST', `/trash/${x.id}/restore`).then((r) => ft('restored_to', { path: show(r.path) })))}>{ft('restore')}</button>
                   <button type="button" className="btn small ghost danger-text" onClick={() => setConfirm({ title: ft('delete_forever'), text: ft('confirm_forever', { name: show(x.name) }), run: () => api('DELETE', `/trash/${x.id}`).then(load) })}>{ft('delete_forever')}</button>
                 </> : <span className="muted small">{ft('read_only_here')}</span>}
               </span>
