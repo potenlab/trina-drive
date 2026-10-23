@@ -12,8 +12,14 @@ export class FakeDriver implements Driver {
   failCreate = false
   /** teams whose traffic is held (holdTraffic) */
   readonly held = new Set<string>()
-  async holdTraffic(_h: string, spec: TeamSpec) { this.calls.push(`hold ${spec.slug}`); this.held.add(spec.slug) }
-  async serveTraffic(_h: string, spec: TeamSpec) { this.calls.push(`serve ${spec.slug}`); this.held.delete(spec.slug) }
+  holdTraffic?: (h: string, spec: TeamSpec) => Promise<void>
+  serveTraffic?: (h: string, spec: TeamSpec) => Promise<void>
+  /** the traffic hold (cli/ops-serve.ts) is off on the fake driver unless a test turns it on, so tests that list the
+   * driver's calls see the same sequence whether or not the hook is registered in this process */
+  enableTrafficHold() {
+    this.holdTraffic = async (_h, spec) => { this.calls.push(`hold ${spec.slug}`); this.held.add(spec.slug) }
+    this.serveTraffic = async (_h, spec) => { this.calls.push(`serve ${spec.slug}`); this.held.delete(spec.slug) }
+  }
   /** what `runOnHost` answers per host and argv[1] (e.g. 'info', 'check'); unset = exit 1 */
   readonly hostAnswers = new Map<string, ExecResult>()
   constructor(private readonly dir?: string) {}

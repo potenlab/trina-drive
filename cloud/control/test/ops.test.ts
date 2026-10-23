@@ -258,7 +258,10 @@ describe('traffic hold (sync.ts serveHooks)', () => {
     registerCaddyHold()
     expect(serveHooks.filter((h) => h === caddyHold)).toHaveLength(1)
     env = setup()
-    await env.cloud.adminCreateTeam({ email: 'o@acme.test', slug: 'acme', actor: 'admin:test' })
+    // off on the fake driver unless turned on: other tests' call lists stay as they were
+    await caddyHold.hold!(env.cloud, { ...(await env.cloud.adminCreateTeam({ email: 'o@acme.test', slug: 'acme', actor: 'admin:test' })), host: 'fake-host' })
+    expect(env.driver.calls.filter((c) => c.startsWith('hold'))).toEqual([])
+    env.driver.enableTrafficHold()
     await jobs()
     const t = team('acme')
     await caddyHold.hold!(env.cloud, t)
@@ -272,6 +275,7 @@ describe('traffic hold (sync.ts serveHooks)', () => {
     await import('../src/cli/ops-serve')
     const { setupConsole, opsTeam, runJobs } = await import('./console-helpers')
     const cenv = setupConsole()
+    cenv.driver.enableTrafficHold()
     try {
       await opsTeam(cenv, 'owner@acme.test', 'acme')
       await runJobs(cenv)
