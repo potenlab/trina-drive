@@ -10,12 +10,17 @@
 #               Store), Caddy (Caddyfile.control) for https://<domain>, nightly copy of the control database to S3.
 #
 # No SSH: the security groups have no port 22 and there are no keys; operators use SSM Session Manager.
+#
+# A host's last step writes /etc/tdcloud/ready: the control plane's scaler places teams only on a host whose
+# `tdcloud-host info` says ready (a host still booting, or whose bootstrap stopped, gets none and is replaced).
 set -euxo pipefail
 exec > >(tee -a /var/log/tdcloud-bootstrap.log) 2>&1
 # shellcheck source=/dev/null
 . /etc/tdcloud/host.conf
 : "${ROLE:?}" "${REGION:?}" "${ARTIFACTS_BUCKET:?}" "${ECR_REGISTRY:?}" "${DOMAIN:?}"
 [ "$ROLE" = host ] && : "${TEAM_MAIL_FROM:?}" "${TEAM_SUBNETS:?}"
+# a rerun (new images, a changed script) is not "ready" until it has finished again
+rm -f /etc/tdcloud/ready
 export DEBIAN_FRONTEND=noninteractive AWS_DEFAULT_REGION=$REGION PATH=$PATH:/snap/bin
 
 # ---- packages (unattended-upgrades is on by default on Ubuntu; security updates apply daily)
@@ -120,14 +125,22 @@ EOF
   # the team isolation rules are not optional: stop here if they are not in place
   iptables -C INPUT -j TDCLOUD-INPUT && iptables -C DOCKER-USER -i tdcb+ -d 169.254.0.0/16 -j DROP
 
-  # ---- Elastic IP from the pool (stable address for the teams' DNS records)
+  # ---- Elastic IP from the pool (stable address for the teams' DNS records). The control plane allocates one per host
+  # it launches (before raising the group's size); another host booting at the same moment may take the same one
+  # first, so try every free one, for up to five minutes. No address: the bootstrap stops (no ready mark), and the
+  # scaler replaces this host and alerts ops — team DNS records must not point at an address that changes on a stop.
   token=$(curl -sf -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
   iid=$(curl -sf -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/instance-id)
-  if ! aws ec2 describe-addresses --filters "Name=instance-id,Values=$iid" --query 'Addresses[0].AllocationId' --output text | grep -q eipalloc; then
+  has_eip() { aws ec2 describe-addresses --filters "Name=instance-id,Values=$iid" --query 'Addresses[0].AllocationId' --output text | grep -q eipalloc; }
+  for _ in $(seq 30); do
+    has_eip && break
     for alloc in $(aws ec2 describe-addresses --filters "Name=tag:tdcloud:pool,Values=$EIP_POOL" --query 'Addresses[?AssociationId==null].AllocationId' --output text); do
       aws ec2 associate-address --instance-id "$iid" --allocation-id "$alloc" --no-allow-reassociation && break || true
     done
-  fi
+    has_eip && break
+    sleep 10
+  done
+  has_eip || { echo "no free Elastic IP in the pool (tag tdcloud:pool=$EIP_POOL)" >&2; exit 1; }
 fi
 
 # ---- Caddy
@@ -192,4 +205,6 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
 23 2 * * * root f=/var/lib/tdcloud/control-snapshot.db; rm -f \$f; docker exec tdc-control bun /app/src/main.ts db snapshot \$f && aws s3 cp --only-show-errors \$f s3://$BACKUP_BUCKET/control/control-\$(date -u +\%Y\%m\%dT\%H\%M\%SZ).db; rm -f \$f
 EOF
 fi
+# the scaler's signal: everything above is in place (the firewall, the data volume, the address, Caddy, the relay)
+[ "$ROLE" = host ] && date -u +%FT%TZ > /etc/tdcloud/ready
 echo "tdcloud bootstrap done ($ROLE)"

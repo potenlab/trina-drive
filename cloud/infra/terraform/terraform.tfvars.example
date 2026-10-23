@@ -3,7 +3,7 @@ region     = "ap-northeast-2"
 domain     = "cloud.trina.app"
 acme_email = "contact@trina.app"
 # mail_domain = ""                 # empty = domain: SES DKIM/DMARC records go into the Route 53 zone
-host_count = 1                     # 0 = hold mode (README, "Hold mode")
+host_max   = 3                     # the scaler runs 0..host_max hosts (README, "Hosts: scale-out and scale-in")
 # host_instance_type = "m7g.xlarge"
 # host_data_gb       = 300
 trina_image_tag   = "0.2.0-<commit>" # tags are immutable: a new tag per build

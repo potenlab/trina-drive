@@ -6,7 +6,8 @@
 #   tdcloud-host prepare <slug> <uid> <disk-gb> <ssm-parameter>   team directory, XFS project quota, env file (0600)
 #   tdcloud-host cleanup <slug>                                   remove the quota and the team directory
 #   tdcloud-host ship <slug> <s3://bucket/prefix/> <file>...      upload backup files from staging, print JSON lines
-#   tdcloud-host info                                             JSON: instance, Elastic IP, free space, teams
+#   tdcloud-host info                                             JSON: instance, Elastic IP, free space, teams,
+#                                                                 team containers, bootstrap done (ready)
 set -euo pipefail
 export PATH=$PATH:/usr/local/sbin:/snap/bin
 ROOT=/srv/tdcloud
@@ -81,8 +82,12 @@ case $cmd in
   info)
     ip=$(imds meta-data/public-ipv4)
     free=$(df -B1 --output=avail "$ROOT" | tail -1 | tr -d ' ')
+    free=${free:-0}
+    # the scaler terminates an empty host only when both are 0 (and no team row names it)
     teams=$(find "$TEAMS" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
-    printf '{"instanceId":"%s","publicIp":%s,"freeBytes":%s,"teams":%s}\n' "$(imds meta-data/instance-id)" "$([ -n "$ip" ] && echo "\"$ip\"" || echo null)" "$free" "$teams"
+    containers=$(docker ps -aq --filter label=tdcloud.team 2>/dev/null | wc -l)
+    ready=$([ -f /etc/tdcloud/ready ] && echo true || echo false)
+    printf '{"instanceId":"%s","publicIp":%s,"freeBytes":%s,"teams":%s,"containers":%s,"ready":%s}\n' "$(imds meta-data/instance-id)" "$([ -n "$ip" ] && echo "\"$ip\"" || echo null)" "$free" "$teams" "$containers" "$ready"
     ;;
   *) sed -n '2,10p' "$0"; exit 2 ;;
 esac

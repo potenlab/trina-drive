@@ -1,15 +1,15 @@
-# The team host pool: a launch template and an Auto Scaling group of fixed size (host_count). Hosts are long-lived
-# (teams' data is on them): scale-in protection is on and the ASG only replaces a host that AWS reports dead. To add
-# capacity raise host_count; the control plane puts new teams on the least-loaded host.
+# The team host pool: a launch template and an Auto Scaling group whose size the control plane's scaler owns
+# (cloud/control/src/scaler.ts): it raises the desired count when a paid team finds no host with room, and terminates a
+# host that has had no team for TDCLOUD_EMPTY_HOST_GRACE (protection off, terminate with decrement, data volume
+# deleted). Terraform sets only the bounds: min 0, max host_max. Hosts are long-lived (teams' data is on them):
+# scale-in protection is on, so the group never picks one by itself; it only replaces a host that AWS reports dead.
+#
+# Each host takes an Elastic IP tagged tdcloud:pool=hosts at boot. The control plane allocates them (one per host
+# about to launch) and releases them after a scale-in: none exist, and none cost anything, while there are no hosts.
 #
 # Each host: Ubuntu 24.04 arm64, IMDSv2 only with hop limit 1 (containers on Docker bridges cannot reach the instance
-# role), root and data volumes encrypted with the KMS key, the data volume kept if the instance is terminated.
-resource "aws_eip" "hosts" {
-  count  = var.host_count
-  domain = "vpc"
-  tags   = { Name = "${var.name}-host-${count.index}", "tdcloud:pool" = "hosts" }
-}
-
+# role), root and data volumes encrypted with the KMS key, the data volume kept if the instance is terminated (the
+# scaler deletes it after a scale-in of an empty host; after any other termination it holds the teams' data).
 resource "aws_launch_template" "host" {
   name_prefix            = "${var.name}-host-"
   image_id               = data.aws_ssm_parameter.ubuntu.value
@@ -84,10 +84,12 @@ resource "aws_launch_template" "host" {
 }
 
 resource "aws_autoscaling_group" "hosts" {
-  name                  = "${var.name}-hosts"
-  min_size              = var.host_count
-  max_size              = var.host_count
-  desired_capacity      = var.host_count
+  name = "${var.name}-hosts"
+  # the scaler never goes below 0 or above min(host_max, TDCLOUD_MAX_HOSTS)
+  min_size = 0
+  max_size = var.host_max
+  # only the initial value: from then on the control plane sets it (a Terraform value here would undo its choice)
+  desired_capacity      = 0
   vpc_zone_identifier   = aws_subnet.public[*].id
   health_check_type     = "EC2"
   protect_from_scale_in = true
@@ -103,5 +105,9 @@ resource "aws_autoscaling_group" "hosts" {
     propagate_at_launch = true
   }
 
-  depends_on = [aws_iam_service_linked_role.autoscaling, aws_eip.hosts]
+  lifecycle {
+    ignore_changes = [desired_capacity]
+  }
+
+  depends_on = [aws_iam_service_linked_role.autoscaling]
 }

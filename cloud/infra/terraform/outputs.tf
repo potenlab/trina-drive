@@ -11,8 +11,9 @@ output "control_public_ip" {
   value = aws_eip.control.public_ip
 }
 
-output "host_elastic_ips" {
-  value = aws_eip.hosts[*].public_ip
+output "hosts_asg_name" {
+  description = "The team hosts' Auto Scaling group (its size belongs to the control plane's scaler)."
+  value       = aws_autoscaling_group.hosts.name
 }
 
 output "ecr_repositories" {
@@ -56,6 +57,10 @@ output "control_env_template" {
     TDCLOUD_BACKUP_TARGET=s3://${aws_s3_bucket.backups.id}
     TDCLOUD_BACKUP_KEEP=7
     TDCLOUD_MAX_TEAMS_PER_HOST=20
+    TDCLOUD_ASG_NAME=${aws_autoscaling_group.hosts.name}
+    TDCLOUD_MAX_HOSTS=${var.host_max}
+    TDCLOUD_SPARE_SLOTS=0
+    TDCLOUD_EMPTY_HOST_GRACE=6h
     TDCLOUD_ROUTE53_ZONE_ID=${aws_route53_zone.cloud.zone_id}
     TDCLOUD_SSM_PREFIX=/${var.name}
     AWS_REGION=${var.region}
