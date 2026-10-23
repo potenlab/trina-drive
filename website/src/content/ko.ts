@@ -60,7 +60,7 @@ const ko: Copy = {
     nav: ['파일', '초안함', '기록', '연결'],
     crumb: '전체 폴더',
     search: 'PDF, 한글, 오피스 본문까지 검색',
-    cols: { name: '이름', access: 'NAS에서 여는 사람', ai: 'AI' },
+    cols: { name: '이름', access: 'NAS 권한', ai: 'AI' },
     rows: [
       { name: '경영', access: '경영 그룹', ai: 'on', selected: true },
       { name: '프로젝트', access: '전체', ai: 'on' },
@@ -249,6 +249,7 @@ const ko: Copy = {
     billingLabel: '결제 주기',
     monthly: '월 결제',
     yearly: '연 결제',
+    yearlyBadge: '2개월 무료',
     seatsLabel: 'AI 연결 인원',
     trialNote: '설치 상담 뒤 팀 요금제를 14일 무료로 써 보실 수 있어요. 연간 결제는 2개월 무료예요.',
     perMonth: '/ 월',

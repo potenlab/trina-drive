@@ -66,7 +66,7 @@ const en = {
     nav: ['Files', 'Drafts', 'Audit log', 'Connections'],
     crumb: 'All folders',
     search: 'Search inside PDF, HWP, Office…',
-    cols: { name: 'Name', access: 'Opens on the NAS', ai: 'AI' },
+    cols: { name: 'Name', access: 'NAS access', ai: 'AI' },
     rows: [
       { name: '경영', access: '경영 group', ai: 'on', selected: true },
       { name: '프로젝트', access: 'Everyone', ai: 'on' },
@@ -256,6 +256,7 @@ const en = {
     billingLabel: 'Billing period',
     monthly: 'Monthly',
     yearly: 'Yearly',
+    yearlyBadge: '2 months free',
     seatsLabel: 'AI-connected people',
     trialNote: '14-day free trial of Team after a setup call. Annual billing = 2 months free.',
     perMonth: '/ month',

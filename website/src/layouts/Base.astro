@@ -11,8 +11,10 @@ interface Props {
   alternates?: { en: string; ko: string }
   noindex?: boolean
   jsonLd?: object
+  /** Landing page: preload the hero's display font. */
+  preloadHero?: boolean
 }
-const { t, title = t.meta.title, description = t.meta.description, alternates, noindex = false, jsonLd } = Astro.props
+const { t, title = t.meta.title, description = t.meta.description, alternates, noindex = false, jsonLd, preloadHero = false } = Astro.props
 const path = Astro.url.pathname.replace(/\.html$/, '').replace(/\/index$/, '/')
 const canonical = new URL(path, SITE_URL).href
 const ogImage = new URL(t.meta.ogImage, SITE_URL).href
@@ -35,6 +37,8 @@ const ogImage = new URL(t.meta.ogImage, SITE_URL).href
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0a0b0d" media="(prefers-color-scheme: dark)" />
     <meta name="color-scheme" content="light dark" />
+    <link rel="preload" href="/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin />
+    {preloadHero && <link rel="preload" href="/fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin />}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

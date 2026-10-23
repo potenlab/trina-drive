@@ -1,0 +1,83 @@
+---
+// Features as a bento grid. Each card: icon, title, body (the facts), and a small decorative product illustration
+// whose strings come from t.features.minis. Layout (which cards are wide) is by position, so copy can change freely.
+import type { Copy } from '../content/en'
+import Icon from './Icon.astro'
+interface Props { t: Copy }
+const { t } = Astro.props
+const f = t.features
+const mi = f.minis
+const wide = new Set(['filter', 'log', 'search'])
+---
+<ul class="bento">
+  {f.items.map((it) => (
+    <li class={`bento-card bento-${it.icon}${wide.has(it.icon) ? ' bento-wide' : ''}`} data-reveal>
+      <div class="bento-art" aria-hidden="true">
+        {it.icon === 'filter' && (
+          <div class="mini mini-filter">
+            {mi.filter.rows.map((r) => (
+              <div class="mini-term" data-who={r.who}>
+                <span class="mini-who"><span class="mini-dot"></span>{r.who} · {r.role}</span>
+                <code><span class="mini-prompt">$ </span>{mi.filter.cmd}</code>
+                <code class="mini-out">{r.out}</code>
+              </div>
+            ))}
+            <span class="mini-rule"><Icon name="filter" />{mi.filter.rule}</span>
+          </div>
+        )}
+        {it.icon === 'draft' && (
+          <div class="mini mini-draft">
+            <div class="mini-file">
+              <span class="mini-file-icon"><Icon name="draft" /></span>
+              <span class="mini-file-name"><small>{mi.draft.path}</small>{mi.draft.file}</span>
+            </div>
+            <div class="mini-sources">
+              <span class="mini-label">{mi.draft.sourcesLabel}</span>
+              {mi.draft.sources.map((s) => <span class="mini-chip"><Icon name="folder" />{s}</span>)}
+            </div>
+            <p class="mini-visible"><Icon name="lock" />{mi.draft.visible}</p>
+            <span class="mini-move">{mi.draft.move}<small>{mi.draft.moveNote}</small></span>
+          </div>
+        )}
+        {it.icon === 'shell' && (
+          <div class="mini mini-shell">
+            <pre>{mi.shell.lines.map((l, i) => <span class={i === 0 ? 'mini-cmd' : ''}>{l}</span>)}</pre>
+            <div class="mini-chips">{mi.shell.chips.map((c) => <span class="mini-chip">{c}</span>)}</div>
+          </div>
+        )}
+        {it.icon === 'log' && (
+          <div class="mini mini-log">
+            {mi.log.rows.map((r, i) => (
+              <div class="mini-log-row">
+                <span class="mini-t">{r.t}</span>
+                <span class="mini-who-s">{r.who}<small>{r.via}</small></span>
+                <code>{r.cmd}</code>
+                <span class="mini-hash">#{r.h}{i < mi.log.rows.length - 1 && <span class="mini-link"></span>}</span>
+              </div>
+            ))}
+            <span class="mini-anchor"><Icon name="shield" />{mi.log.anchor}</span>
+          </div>
+        )}
+        {it.icon === 'nas' && (
+          <div class="mini mini-nas">
+            <div class="mini-device"><Icon name="mac" /><span>{mi.nas.device}</span></div>
+            <div class="mini-shares">{mi.nas.shares.map((s) => <span class="mini-chip"><Icon name="nas" />{s}</span>)}</div>
+            <span class="mini-apps">{mi.nas.apps}</span>
+          </div>
+        )}
+        {it.icon === 'search' && (
+          <div class="mini mini-search">
+            <div class="mini-types">{mi.search.types.map((x) => <span class={`mini-type mini-type-${x.toLowerCase()}`}>{x}</span>)}</div>
+            <div class="mini-query"><span class="mini-prompt">$ </span>{mi.search.query}</div>
+            <div class="mini-hit"><code>{mi.search.hit}</code><span>{mi.search.line}</span></div>
+          </div>
+        )}
+      </div>
+      <div class="bento-text">
+        <span class="bento-icon"><Icon name={it.icon} /></span>
+        <h3>{it.title}</h3>
+        <p>{it.body}</p>
+      </div>
+    </li>
+  ))}
+</ul>
