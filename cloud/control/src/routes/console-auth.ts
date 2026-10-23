@@ -11,7 +11,7 @@ import { FRESH_AUTH_MS } from '../totp'
 import { userPublicId } from '../team-members'
 import { csrfField, dateTime, when } from '../ui/components'
 import { esc, page, shell } from '../ui/layout'
-import { random, sha256 } from '../util'
+import { EMAIL_RE, random, sha256 } from '../util'
 import { sessionCookie } from './console-http'
 import { act, flashOf, OK, rerender, safeNext } from './console-guard'
 import type { ControlRoute, RouteCtx } from './types'
@@ -72,9 +72,43 @@ const totpPage = (ticket: string, error?: string, status?: number) => page('Two-
 <button class="btn-primary">Continue</button></form>
 <p class="alt">Lost your phone? Type one of your recovery codes instead.</p>`, { status })
 
-const signupPage = (c: RouteCtx, error?: string, status?: number) => page('Create an account', `<h1>Create your account</h1>
+/** Early access (coordinator, E1): while Free sign-up is closed (TDCLOUD_MAX_FREE_TEAMS = 0) and payment is not live,
+ * /signup asks for a team instead of making an account; the landing links /signup and /signup?plan=team|business. */
+const earlyAccess = (c: RouteCtx) => c.cloud.free.full() && !c.cfg.paddle.clientToken && c.url.searchParams.get('account') !== '1'
+const PLAN_NAMES: Record<string, string> = { free: 'Free', team: 'Team', business: 'Business' }
+const accessPage = (c: RouteCtx, error?: string, status?: number, v: Record<string, string> = {}) => {
+  const plan = c.url.searchParams.get('plan') ?? v.plan ?? ''
+  const planName = PLAN_NAMES[plan]
+  const sel = (x: string) => (v.team_size === x ? ' selected' : '')
+  return page('Request early access', `<h1>Request early access</h1><p>Trina Cloud is opening team by team. Tell us about yours${planName ? ` (the <b>${esc(planName)}</b> plan)` : ''} and we set it up with you.</p>
+${error ? `<div class="flash flash-err" role="alert">${esc(error)}</div>` : ''}<form method="post" action="/signup"><input type="hidden" name="kind" value="access"><input type="hidden" name="plan" value="${esc(planName ? plan : '')}">
+<label>Work email<input type="email" name="email" required autocomplete="email" value="${esc(v.email ?? '')}"></label>
+<label>Team or company name<input name="team" required maxlength="80" autocomplete="organization" value="${esc(v.team ?? '')}"></label>
+<label>Team size<select name="team_size"><option value="1-5"${sel('1-5')}>1–5 people</option><option value="6-20"${sel('6-20')}>6–20</option><option value="21-100"${sel('21-100')}>21–100</option><option value="100+"${sel('100+')}>More than 100</option></select></label>
+<label>Anything we should know? <span class="hint" style="display:inline">(optional)</span><textarea name="note" rows="3" maxlength="2000">${esc(v.note ?? '')}</textarea></label>
+<button class="btn-primary">Request access</button></form>
+<p class="alt">Invited by a teammate? Use the link in your invite. <a href="/signup?account=1">Just create an account</a> · <a href="/login">Sign in</a></p>`, { status })
+}
+
+async function requestAccess(c: RouteCtx, b: Record<string, string>): Promise<Response> {
+  c.limited('access-request', 5, 3600_000)
+  const email = String(b.email ?? '').trim().toLowerCase()
+  const team = String(b.team ?? '').trim().replace(/\s+/g, ' ')
+  const v = { ...b, email, team }
+  if (!EMAIL_RE.test(email) || email.length > 254) return accessPage(c, 'a valid email address is required', 400, v)
+  if (!team || team.length > 80 || /[\p{Cc}]/u.test(team)) return accessPage(c, 'a team name of 1–80 characters', 400, v)
+  const size = ['1-5', '6-20', '21-100', '100+'].includes(b.team_size ?? '') ? b.team_size! : null
+  const note = String(b.note ?? '').slice(0, 2000)
+  const plan = PLAN_NAMES[b.plan ?? ''] ? b.plan! : null
+  const id = Number(c.cloud.db.query('INSERT INTO access_requests (email, team_name, team_size, note, plan, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(email, team, size, note || null, plan, c.ip, Date.now()).lastInsertRowid)
+  audit(c.cloud.db, { actor: 'web', action: 'access.requested', detail: { request: id, plan, size, domain: email.slice(email.indexOf('@') + 1) } })
+  await c.cloud.alertOps(`early access: ${team} (${size ?? '?'} people${plan ? `, ${plan}` : ''})`, `${email} asks for Trina Cloud.\n\nTeam: ${team}\nSize: ${size ?? '-'}\nPlan: ${plan ?? '-'}\nNote: ${note || '-'}\n\nSet it up: teams create <slug> --owner ${email} --name ${JSON.stringify(team)} --plan team\nAll requests: access list (request #${id})`)
+  return page('Thanks', `<h1>Thanks — we got it</h1><p>We'll write to <b>${esc(email)}</b> to set up ${esc(team)}. Usually within a day.</p><p class="alt"><a href="https://drive.trina.app">Back to drive.trina.app</a></p>`)
+}
+
+const signupPage = (c: RouteCtx, error?: string, status?: number) => earlyAccess(c) ? accessPage(c, error, status) : page('Create an account', `<h1>Create your account</h1>
 <p>One account for the console and every team drive you belong to.</p>${error ? `<div class="flash flash-err" role="alert">${esc(error)}</div>` : ''}
-<form method="post" action="/signup"><label>Work email<input type="email" name="email" required autocomplete="email"></label>
+<form method="post" action="/signup?account=1"><label>Work email<input type="email" name="email" required autocomplete="email"></label>
 <label>Password<input type="password" name="password" required minlength="10" autocomplete="new-password"><span class="hint">At least 10 characters.</span></label>
 <button class="btn-primary">Create account</button></form>
 ${c.url.searchParams.get('plan') === 'free' && c.cloud.free.full() ? '<p class="alt">Free teams are by invitation right now: create your account and join the waitlist from the console.</p>' : ''}
@@ -206,10 +240,11 @@ export const authRoutes: ControlRoute[] = [
     return c.redirect('/login', { 'set-cookie': setCookie(c, '', 0) })
   } },
   // sign-up (an account; teams are made in the console)
-  { method: 'GET', path: '/signup', fn: (c) => c.session ? c.redirect('/') : signupPage(c) },
+  { method: 'GET', path: '/signup', fn: (c) => c.session && !earlyAccess(c) ? c.redirect('/') : signupPage(c) },
   { method: 'POST', path: '/signup', async fn(c) {
-    c.limited('signup', 10, 3600_000)
     const b = await c.form()
+    if (b.kind === 'access') return requestAccess(c, b)
+    c.limited('signup', 10, 3600_000)
     try { await c.cloud.signup(b.email, b.password) } catch (e) { if (e instanceof CloudError) return signupPage(c, e.message, e.status); throw e }
     return checkMail(String(b.email ?? ''), 'We sent a confirmation link to {email}. It works once, for 48 hours.')
   } },

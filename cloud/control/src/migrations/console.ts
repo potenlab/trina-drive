@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS sync_events (
   id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL REFERENCES teams(id), type TEXT NOT NULL,
   cloud_user TEXT, invite TEXT, reason TEXT, at INTEGER NOT NULL, sent_seq INTEGER, delivered_seq INTEGER);
 CREATE INDEX IF NOT EXISTS sync_events_pending ON sync_events (team_id, delivered_seq);
+-- early-access requests from /signup while Free sign-up is closed and payment is not live (plan 10.1, O2)
+CREATE TABLE IF NOT EXISTS access_requests (
+  id INTEGER PRIMARY KEY, email TEXT NOT NULL COLLATE NOCASE, team_name TEXT NOT NULL, team_size TEXT, note TEXT,
+  plan TEXT, ip TEXT, created_at INTEGER NOT NULL, handled_at INTEGER);
 -- the second step of a sign-in (password or email link, then the authenticator code); only the hash is kept
 CREATE TABLE IF NOT EXISTS login_tickets (
   id_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), amr TEXT NOT NULL, next TEXT,
