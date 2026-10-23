@@ -47,8 +47,15 @@ aws s3 cp "s3://$ARTIFACTS_BUCKET/docker/seccomp-bwrap.json" /etc/tdcloud/seccom
 aws s3 cp "s3://$ARTIFACTS_BUCKET/docker/apparmor-trina-drive-bwrap" /etc/apparmor.d/trina-drive-bwrap
 apparmor_parser -r /etc/apparmor.d/trina-drive-bwrap
 
-# ---- images (ECR in this account)
-aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+# ---- images (ECR in this account). `docker login` tokens last 12 hours, and the control plane pulls new images over
+# SSM long after boot (`teams upgrade`): the ECR credential helper signs every pull with this instance's role instead.
+apt-get install -y -q amazon-ecr-credential-helper || echo "WARNING: no ECR credential helper; pulls after 12 h need a new docker login" >&2
+if command -v docker-credential-ecr-login >/dev/null; then
+  mkdir -p /root/.docker && chmod 0700 /root/.docker
+  printf '{ "credHelpers": { "%s": "ecr-login" } }\n' "$ECR_REGISTRY" > /root/.docker/config.json
+else
+  aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+fi
 docker pull "$CADDY_IMAGE"
 docker pull "$CONTROL_IMAGE"
 [ "$ROLE" = host ] && docker pull "$TRINA_IMAGE"
@@ -106,8 +113,12 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target docker.service
 EOF
+  chmod 0755 /usr/local/sbin/tdcloud-firewall
   systemctl daemon-reload
-  systemctl enable --now tdcloud-firewall.service
+  systemctl enable tdcloud-firewall.service
+  systemctl restart tdcloud-firewall.service
+  # the team isolation rules are not optional: stop here if they are not in place
+  iptables -C INPUT -j TDCLOUD-INPUT && iptables -C DOCKER-USER -i tdcb+ -d 169.254.0.0/16 -j DROP
 
   # ---- Elastic IP from the pool (stable address for the teams' DNS records)
   token=$(curl -sf -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
@@ -153,10 +164,13 @@ EOF
     -e AWS_REGION="$REGION" -e TDCLOUD_TEAM_MAIL_FROM="$TEAM_MAIL_FROM" -e TDCLOUD_TEAM_SUBNETS="$TEAM_SUBNETS" \
     -e TDCLOUD_MAIL_RELAY_LISTEN="0.0.0.0:${MAIL_RELAY_PORT:-8025}" -e TDCLOUD_MAIL_RELAY_UPSTREAM=ses \
     --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 256m --pids-limit 128 \
-    "$CONTROL_IMAGE" mail-relay
+    --no-healthcheck "$CONTROL_IMAGE" mail-relay
 else
   # ---- control host: the control plane (127.0.0.1:8790) and Caddy in front of it, host network for both
-  aws ssm get-parameter --with-decryption --name "$CONTROL_ENV_PARAM" --query Parameter.Value --output text > /etc/tdcloud/control.env
+  # through a pipe: the aws CLI snap run from the SSM agent (a rerun of this script) writes nothing when its stdout is
+  # a file (0 bytes, exit 0), and the control plane then started with an empty env (local driver, cloud.localhost)
+  aws ssm get-parameter --with-decryption --name "$CONTROL_ENV_PARAM" --query Parameter.Value --output text | cat > /etc/tdcloud/control.env
+  grep -q '^TDCLOUD_DOMAIN=' /etc/tdcloud/control.env || { echo "control env from $CONTROL_ENV_PARAM is empty or has no TDCLOUD_DOMAIN" >&2; exit 1; }
   chmod 0600 /etc/tdcloud/control.env
   mkdir -p /var/lib/tdcloud && chown 10002:10002 /var/lib/tdcloud && chmod 0700 /var/lib/tdcloud
   docker rm -f tdc-control tdc-caddy 2>/dev/null || true
@@ -171,10 +185,11 @@ EOF
   docker run -d --name tdc-caddy --restart unless-stopped --network host --env-file /etc/tdcloud/caddy.env \
     -v caddy-data:/data -v caddy-config:/config --read-only --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges:true \
     "$CADDY_IMAGE" caddy run --config /etc/caddy/Caddyfile.control --adapter caddyfile
-  # nightly consistent copy of the control database to the backup bucket (SSE-KMS, versioned)
+  # nightly consistent copy of the control database to the backup bucket (versioned; the bucket's default SSE-KMS with
+  # the Trina Cloud key: no --sse flag, which would pick the AWS-managed aws/s3 key)
   cat > /etc/cron.d/tdcloud-control-backup <<EOF
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
-23 2 * * * root f=/var/lib/tdcloud/control-snapshot.db; rm -f \$f; docker exec tdc-control bun /app/src/main.ts db snapshot \$f && aws s3 cp --only-show-errors --sse aws:kms \$f s3://$BACKUP_BUCKET/control/control-\$(date -u +\%Y\%m\%dT\%H\%M\%SZ).db; rm -f \$f
+23 2 * * * root f=/var/lib/tdcloud/control-snapshot.db; rm -f \$f; docker exec tdc-control bun /app/src/main.ts db snapshot \$f && aws s3 cp --only-show-errors \$f s3://$BACKUP_BUCKET/control/control-\$(date -u +\%Y\%m\%dT\%H\%M\%SZ).db; rm -f \$f
 EOF
 fi
 echo "tdcloud bootstrap done ($ROLE)"

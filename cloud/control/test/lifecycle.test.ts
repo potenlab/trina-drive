@@ -126,6 +126,24 @@ describe('Paddle → provisioning', () => {
   })
 })
 
+describe('operator-made teams', () => {
+  test('teams create: no payment, reserved names only when allowed, provisioned; a failed setup mail does not fail it', async () => {
+    env = setup()
+    await expect(env.cloud.adminCreateTeam({ email: 'ops@trina.test', slug: 'trina', actor: 'admin:t' })).rejects.toThrow(/reserved/)
+    const t = await env.cloud.adminCreateTeam({ email: 'ops@trina.test', slug: 'trina', allowReserved: true, actor: 'admin:t' })
+    expect(t.status).toBe('provisioning')
+    env.mailer.send = async () => { throw new Error('ses sandbox') }
+    await env.cloud.runDueJobs()
+    const row = teamBySlug(env.cloud.db, 'trina')!
+    expect(row.status).toBe('active')
+    expect(row.subscription_id).toBeNull()
+    expect(env.cloud.db.query("SELECT count(*) AS n FROM jobs WHERE kind = 'provision' AND done_at IS NOT NULL AND last_error IS NULL").get()).toEqual({ n: 1 })
+    expect(env.cloud.db.query("SELECT count(*) AS n FROM audit WHERE action = 'team.setup_link_failed'").get()).toEqual({ n: 1 })
+    await expect(env.cloud.adminCreateTeam({ email: 'other@trina.test', slug: 'trina', allowReserved: true, actor: 'admin:t' })).rejects.toThrow(/taken/)
+    expect(verifyAudit(env.cloud.db).ok).toBe(true)
+  })
+})
+
 describe('grace, suspend, resume, delete', () => {
   const expire = () => { env.cloud.db.query('UPDATE teams SET grace_until = 1').run(); env.cloud.db.query('UPDATE jobs SET run_at = 0 WHERE done_at IS NULL').run() }
 

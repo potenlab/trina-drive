@@ -6,7 +6,9 @@ terraform {
       version = ">= 5.80, < 7.0"
     }
   }
-  # State: local by default. For a team, keep it in S3 (create the bucket by hand first, then uncomment):
+  # State: local. The file holds resource ids, not secrets (those are in SSM), but keep it outside the repository:
+  #   terraform init -backend-config="path=$HOME/.config/trina-drive/tdcloud-tf/terraform.tfstate"
+  # For a team, keep it in S3 instead (create the bucket by hand first, replace the block below with this one):
   # backend "s3" {
   #   bucket       = "tdcloud-tfstate-<account-id>"
   #   key          = "tdcloud/terraform.tfstate"
@@ -14,6 +16,7 @@ terraform {
   #   encrypt      = true
   #   use_lockfile = true
   # }
+  backend "local" {}
 }
 
 provider "aws" {

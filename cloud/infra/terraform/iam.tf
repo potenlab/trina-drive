@@ -95,11 +95,11 @@ data "aws_iam_policy_document" "host" {
     resources = ["arn:${local.partition}:ec2:${var.region}:${local.account}:network-interface/*"]
   }
   # the mail relay (cloud/control/src/relay.ts, run by host/bootstrap.sh): the teams' invites, password resets and
-  # notifications, through the one SES identity, and only with the team From address
+  # notifications, only with the team From address
   statement {
     sid       = "TeamMail"
     actions   = ["ses:SendEmail"]
-    resources = [local.ses_identity_arn]
+    resources = local.ses_identity_arns
     condition {
       test     = "StringEquals"
       variable = "ses:FromAddress"
@@ -183,7 +183,7 @@ data "aws_iam_policy_document" "control" {
   statement {
     sid       = "Mail"
     actions   = ["ses:SendEmail"]
-    resources = [local.ses_identity_arn]
+    resources = local.ses_identity_arns
     condition {
       test     = "StringEquals"
       variable = "ses:FromAddress"

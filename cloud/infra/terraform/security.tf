@@ -43,5 +43,5 @@ resource "aws_vpc_security_group_egress_rule" "all" {
   security_group_id = each.value
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
-  description       = "updates, image pulls, AWS APIs, Let's Encrypt, OAuth client metadata"
+  description       = "updates, image pulls, AWS APIs, Let-s Encrypt, OAuth client metadata"
 }

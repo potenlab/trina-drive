@@ -45,8 +45,11 @@ resource "aws_instance" "control" {
   tags       = { Name = "${var.name}-control", "tdcloud:role" = "control" }
   depends_on = [aws_s3_object.artifacts]
 
+  # user data runs on the first boot only: a change (e.g. a new control_image_tag) would just stop and start the
+  # instance without running it again. A running instance gets new image tags in /etc/tdcloud/host.conf and a rerun
+  # of /usr/local/sbin/tdcloud-bootstrap (README, Operations).
   lifecycle {
-    ignore_changes = [ami]
+    ignore_changes = [ami, user_data]
   }
 }
 

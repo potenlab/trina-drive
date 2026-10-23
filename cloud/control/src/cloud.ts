@@ -124,6 +124,45 @@ export class Cloud {
     }
   }
 
+  /** Operator-made team without a Paddle subscription (our own dogfood team, a pilot customer): the owner's account is
+   * created confirmed if it does not exist (no password: they sign in to the control plane only after a password
+   * reset; they never need to for the team itself), the team goes straight to provisioning. Reserved names are allowed
+   * with `allowReserved` (the operator's call, e.g. `trina`). Nothing ever bills or suspends it: billing events need a
+   * subscription id. */
+  async adminCreateTeam(o: { email: string; slug: string; name?: string; plan?: PlanId; allowReserved?: boolean; actor: string }): Promise<TeamRow> {
+    const email = o.email.trim().toLowerCase()
+    if (!EMAIL_RE.test(email) || email.length > 254) throw new CloudError('bad_email', 'a valid owner email address is required')
+    const slug = o.slug.trim().toLowerCase()
+    const problem = slugProblem(slug)
+    if (problem && !(o.allowReserved && problem === 'that name is reserved')) throw new CloudError('bad_slug', `address: ${problem}${problem === 'that name is reserved' ? ' (add --allow-reserved)' : ''}`)
+    let user = this.db.query<{ id: number }, [string]>('SELECT id FROM users WHERE email = ?').get(email)
+    if (!user) {
+      // an unusable password (random, never shown); the account exists so the team has an owner for its mail
+      const id = Number(this.db.query('INSERT INTO users (email, password_hash, verified_at, created_at) VALUES (?, ?, ?, ?)').run(email, await hashPassword(random(32)), now(), now()).lastInsertRowid)
+      audit(this.db, { actor: o.actor, action: 'user.created_by_admin', detail: { user: id } })
+      user = { id }
+    }
+    this.db.query('UPDATE users SET verified_at = coalesce(verified_at, ?) WHERE id = ?').run(now(), user.id)
+    const plan: PlanId = o.plan === 'business' ? 'business' : 'team'
+    const name = (o.name ?? slug).trim().replace(/\s+/g, ' ')
+    if (!name || name.length > 80 || /[\p{Cc}]/u.test(name)) throw new CloudError('bad_name', 'a team name of 1–80 characters')
+    let t: TeamRow
+    try {
+      t = this.db.transaction(() => {
+        const number = (this.db.query<{ n: number | null }, []>('SELECT max(number) AS n FROM teams').get()?.n ?? 0) + 1
+        const id = Number(this.db.query('INSERT INTO teams (public_id, slug, name, owner_user_id, plan, status, number, sub_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(publicId('team'), slug, name, user!.id, plan, 'provisioning', number, 'complimentary', now(), now()).lastInsertRowid)
+        return teamById(this.db, id)!
+      })()
+    } catch (e) {
+      if ((e as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') throw new CloudError('slug_taken', 'that address is taken', 409)
+      throw e
+    }
+    audit(this.db, { actor: o.actor, action: 'team.create', teamId: t.id, detail: { slug, plan, complimentary: true } })
+    this.enqueue('provision', t.id)
+    return t
+  }
+
   teamsOf(userId: number) { return this.db.query<TeamRow, [number]>("SELECT * FROM teams WHERE owner_user_id = ? AND status != 'deleted' ORDER BY id").all(userId) }
   ownerEmail(t: TeamRow) { return this.db.query<{ email: string }, [number]>('SELECT email FROM users WHERE id = ?').get(t.owner_user_id)!.email }
   url(t: Pick<TeamRow, 'slug'>) { return teamUrl(this.cfg, t.slug) }
@@ -271,8 +310,15 @@ export class Cloud {
     updateTeam(this.db, t.id, { status: 'active', host, public_ip: r.publicIp, backup_pub: filesKey.publicKey, backup_key_enc: wrapped, error: null })
     audit(this.db, { actor: 'system', action: 'team.provisioned', teamId: t.id, detail: { host, driver: this.driver.name, plan: t.plan, keys: this.keys.kind } })
     this.log(`provisioned ${t.slug} on ${host}`)
-    await this.sendSetupLink(t, r.setupToken)
     this.enqueue('backup', t.id, now() + HOUR)
+    // the team is up either way: a mail failure (SES sandbox, an unverified identity) must not fail the job, whose
+    // retry would find the team active and do nothing. The token is gone with the failed mail: `teams resend-setup`.
+    try {
+      await this.sendSetupLink(t, r.setupToken)
+    } catch (e) {
+      audit(this.db, { actor: 'system', action: 'team.setup_link_failed', teamId: t.id, detail: { error: (e as Error).message.slice(0, 300) } })
+      await this.alertOps(`setup link for ${t.slug} not sent`, `${(e as Error).message}\n\nWhen mail works: teams resend-setup ${t.slug}`)
+    }
   }
 
   /** Hook for DNS (AWS driver: one A record per team → the host's Elastic IP). Set by main.ts when Route 53 is configured. */

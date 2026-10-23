@@ -159,9 +159,9 @@ resource "aws_s3_object" "artifacts" {
     "docker/seccomp-bwrap.json"         = "${path.module}/../../../docker/seccomp-bwrap.json"
     "docker/apparmor-trina-drive-bwrap" = "${path.module}/../../../docker/apparmor-trina-drive-bwrap"
   }
-  bucket     = aws_s3_bucket.artifacts.id
-  key        = each.key
-  source     = each.value
-  etag       = filemd5(each.value)
-  kms_key_id = aws_kms_key.main.arn
+  bucket      = aws_s3_bucket.artifacts.id
+  key         = each.key
+  source      = each.value
+  source_hash = filemd5(each.value) # etag conflicts with kms_key_id (an SSE-KMS object's ETag is not its MD5)
+  kms_key_id  = aws_kms_key.main.arn
 }

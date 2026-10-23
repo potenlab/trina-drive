@@ -7,6 +7,9 @@ data "aws_ssm_parameter" "ubuntu" {
 }
 
 locals {
+  mail_domain = var.mail_domain != "" ? var.mail_domain : var.domain
+  # the SES identity's DKIM records go into the Route 53 zone when the mail domain is the zone (or inside it)
+  mail_in_zone = local.mail_domain == var.domain || endswith(local.mail_domain, ".${var.domain}")
   account      = data.aws_caller_identity.current.account_id
   partition    = data.aws_partition.current.partition
   ecr_registry = "${local.account}.dkr.ecr.${var.region}.amazonaws.com"
@@ -20,8 +23,11 @@ locals {
   ssm_ask_key     = "/${var.name}/caddy-ask-key"
   ssm_teams       = "/${var.name}/teams"
   # mail: the control plane sends as cloud@, the team instances (through each host's relay) as team_mail_address
-  control_mail_address = "cloud@${var.mail_domain}"
-  team_mail_address    = var.team_mail_address != "" ? var.team_mail_address : "drive@${var.mail_domain}"
+  control_mail_address = "cloud@${local.mail_domain}"
+  team_mail_address    = var.team_mail_address != "" ? var.team_mail_address : "drive@${local.mail_domain}"
   team_mail_from       = "${var.team_mail_name} <${local.team_mail_address}>"
-  ses_identity_arn     = "arn:${local.partition}:ses:${var.region}:${local.account}:identity/${var.mail_domain}"
+  # SES authorizes a send against the identity it matches, which is not always the domain: before the domain verifies
+  # (and for sandbox recipients) it checks identity/<address> (first AWS run: AccessDenied on identity/drive@...). The
+  # roles may therefore use any identity of the account, and the ses:FromAddress condition is what limits them.
+  ses_identity_arns = ["arn:${local.partition}:ses:${var.region}:${local.account}:identity/*"]
 }

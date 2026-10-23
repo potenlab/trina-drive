@@ -28,10 +28,10 @@ output "kms_key_alias" {
 }
 
 output "ses_dkim_records" {
-  description = "Three CNAMEs to add at Gabia for SES DKIM on mail_domain."
-  value = var.manage_ses_identity ? [
+  description = "SES DKIM CNAMEs for the mail domain: already in the Route 53 zone when the mail domain is the zone (default); otherwise add them in that domain's DNS."
+  value = var.manage_ses_identity && !local.mail_in_zone ? [
     for t in aws_sesv2_email_identity.mail[0].dkim_signing_attributes[0].tokens :
-    "${t}._domainkey.${var.mail_domain}  CNAME  ${t}.dkim.amazonses.com"
+    "${t}._domainkey.${local.mail_domain}  CNAME  ${t}.dkim.amazonses.com"
   ] : []
 }
 
