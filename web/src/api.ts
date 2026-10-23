@@ -20,7 +20,7 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
   if (body !== undefined) headers['content-type'] = 'application/json'
   if (method !== 'GET') headers['x-csrf-token'] = csrf
   const res = await fetch('/api' + path, { method, headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body) })
-  const data = await res.json().catch(() => null)
+  const data: any = await res.json().catch(() => null)
   if (res.status === 401 && path !== '/login' && path !== '/session') onSignedOut()
   if (!res.ok) throw new ApiError(res.status, data?.error ?? 'error', data?.message ?? res.statusText, data && typeof data === 'object' ? data : null)
   if (data && typeof data.csrf === 'string') csrf = data.csrf

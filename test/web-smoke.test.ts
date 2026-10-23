@@ -81,5 +81,8 @@ test('the built My tokens page offers `mcp add` (recommended / --token-stdin), n
   expect(js).toContain('--token-stdin')
   expect(js).toContain('Manual config (stores the token in plain text)')
   expect(js).not.toContain('--header "Authorization')
-  expect(js).not.toContain('--transport http')
+  // Connect your AI also offers Claude Code's own remote entry, which signs in through the browser (OAuth): no header
+  expect(js).toContain('claude mcp add --transport http --scope user')
+  expect(js).not.toMatch(/--transport http[^`'"]*--header/)
+  expect(js).not.toMatch(/Authorization: Bearer \$\{/)
 })
