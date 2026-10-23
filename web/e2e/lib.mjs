@@ -12,10 +12,10 @@ export const OUT = process.env.E2E_OUT || path.join(here, '.out')
 fs.mkdirSync(OUT, { recursive: true })
 export const pw = await import(process.env.PLAYWRIGHT_CORE || 'playwright-core')
 
-/** Starts web/e2e/fixture.ts (bun) and resolves with its {base, password, stop}. */
-export function startFixture() {
+/** Starts web/e2e/fixture.ts (bun) with `args` (e.g. ['--cloud']) and resolves with its {base, password, sessions, stop}. */
+export function startFixture(args = []) {
   return new Promise((resolve, reject) => {
-    const p = spawn('bun', [path.join(here, 'fixture.ts')], { cwd: ROOT, stdio: ['ignore', 'pipe', 'inherit'] })
+    const p = spawn('bun', [path.join(here, 'fixture.ts'), ...args], { cwd: ROOT, stdio: ['ignore', 'pipe', 'inherit'] })
     let buf = ''
     p.stdout.on('data', (d) => {
       buf += d
@@ -33,7 +33,10 @@ export async function signedIn(browser, fx, name, { width = 1440, height = 900, 
     colorScheme: theme, locale: locale === 'ko' ? 'ko-KR' : 'en-US', permissions: [],
   })
   await ctx.addInitScript(([l]) => { try { localStorage.setItem('trina-drive.locale', l) } catch {} }, [locale])
-  if (name) {
+  if (name && fx.sessions?.[name]) {
+    // a console person (no password here): the fixture made the session
+    await ctx.addCookies([{ name: 'tdrive_session', value: fx.sessions[name], url: fx.base }])
+  } else if (name) {
     const r = await ctx.request.post(fx.base + '/api/login', { data: { login: name, password: fx.password }, headers: { origin: fx.base } })
     if (r.status() !== 200) throw new Error(`login ${name}: ${r.status()}`)
   }

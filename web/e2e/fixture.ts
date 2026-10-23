@@ -5,6 +5,7 @@
 // Skills: a skill library (team/proposal: approved, with a change waiting for lee's approval).
 // Folders: 공용 (Anyone in the team · Editor), 재무 (restricted: nobody yet), 경영 (경영 group · Editor, No AI),
 //          프로젝트 (Anyone · Viewer; kim Editor; lee Manager), 프로젝트/비밀 (restricted here: lee only).
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -14,12 +15,21 @@ import { metaSet } from '../../src/managed/settings'
 import { makeCtx } from '../../src/session'
 import { addGroup, addMember, addPerson, grantManage, setFlag, setRule } from '../../src/store'
 import { approveVersion, designate, folderRowAt, libraries, pendingOf, scan } from '../../src/skills/core'
-import { hashPassword } from '../../src/web/auth'
+import { createSession, hashPassword } from '../../src/web/auth'
 import { OutboxMailer } from '../../src/web/mail'
 import { makeWebCtx, serveWeb } from '../../src/web/server'
 
 const PASSWORD = 'correct horse battery'
-const port = Number(process.argv[process.argv.indexOf('--port') + 1] || 0) || 0
+// --cloud: Trina Cloud mode, SSO only (src/tdcloud): mina and sam come from the console (no password here; their
+// sessions are made directly and printed), boss and the others keep a password. Console at http://console.test.
+const CLOUD = process.argv.includes('--cloud')
+if (CLOUD) {
+  const { publicKey } = crypto.generateKeyPairSync('ed25519')
+  const x = (publicKey.export({ format: 'jwk' }) as { x: string }).x
+  Object.assign(process.env, { TDRIVE_CLOUD_ISSUER: 'http://console.test', TDRIVE_CLOUD_TEAM: 'team_0123456789abcdef0123', TDRIVE_CLOUD_SSO_KEYS: JSON.stringify([{ kid: 'k1', x }]),
+    TDRIVE_CLOUD_CONSOLE_URL: 'http://console.test', TDRIVE_SSO_ONLY: '1' })
+}
+const port = process.argv.includes('--port') ? Number(process.argv[process.argv.indexOf('--port') + 1]) || 0 : 0
 const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tdrive-ui-')))
 const db = openDb(dir)
 const ctx = makeCtx(db, dir)
@@ -91,6 +101,13 @@ approveVersion(db, dir, v1.id, pid('lee'), v1.digest)
 await fetch(`${base}/api/files/upload?path=${encodeURIComponent('/Skills/proposal')}&conflict=replace`, { method: 'POST', headers: h, body: (() => { const f = new FormData(); f.append('file', new File([md('Write a client proposal the Trina way, with pricing')], 'SKILL.md')); return f })() })
 scan(db, dir)
 
-console.log(JSON.stringify({ base, dir, password: PASSWORD }))
+const sessions: Record<string, string> = {}
+if (CLOUD) {
+  for (const n of ['mina', 'sam']) {
+    db.query('UPDATE accounts SET cloud_user = ?, password_hash = NULL WHERE person_id = ?').run(`usr_${n}`, pid(n))
+    sessions[n] = createSession(db, pid(n)).cookie
+  }
+}
+console.log(JSON.stringify({ base, dir, password: PASSWORD, sessions }))
 process.on('SIGTERM', () => { server.stop(true); fs.rmSync(dir, { recursive: true, force: true }); process.exit(0) })
 process.on('SIGINT', () => { server.stop(true); fs.rmSync(dir, { recursive: true, force: true }); process.exit(0) })
