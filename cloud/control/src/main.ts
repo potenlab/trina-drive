@@ -14,12 +14,11 @@ import { FakeDriver } from './drivers/fake'
 import { LocalPool, LocalRunner, localDockerDriver } from './drivers/local'
 import type { Driver, HostPool } from './drivers/types'
 import { KmsKeyWrapper, LocalKeyWrapper, type KeyWrapper } from './keys'
-import { OutboxMailer, SesMailer, type Mailer } from './mailer'
+import { mailerFor, type Mailer } from './mailer'
 import { planOf, SLOTS_SQL } from './plans'
 import { MAX_BODY_BYTES, relayFromEnv } from './relay'
 import { seal, unseal } from './seal'
 import { iso } from './util'
-import { mailerFor } from './mailer'
 import { makeHandler } from './web'
 
 const HELP = `Trina Cloud control plane

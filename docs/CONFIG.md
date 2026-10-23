@@ -58,7 +58,7 @@ used by the macOS installer and the Docker image). Both keep managed storage in 
 | `TDRIVE_MAILER` | — (`notify.json`) | `smtp`, `ses`, `outbox` or `off`: the mailer for notifications **and** the web's invites and password resets, instead of `notify.json`'s `email` (a hosted instance gets it from its env file) |
 | `TDRIVE_MAIL_FROM` | — | From address (required for `smtp` / `ses`) |
 | `TDRIVE_SMTP_HOST`, `_PORT`, `_TLS`, `_USER` | —, 587, `starttls` (`tls` on 465) | SMTP submission; `_TLS` is `starttls` (required, never a plain-text fallback), `tls` (implicit) or `none` |
-| `TDRIVE_SES_REGION`, `_ENDPOINT`, `_CONFIGURATION_SET` | `AWS_REGION`, `https://email.<region>.amazonaws.com`, — | Amazon SES v2; credentials from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` or the EC2 instance role (IMDSv2) |
+| `TDRIVE_SES_REGION`, `_ENDPOINT`, `_CONFIGURATION_SET` | `AWS_REGION`, `https://email.<region>.amazonaws.com`, — | Amazon SES v2; credentials from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` or the EC2 instance role (IMDSv2). In Trina Cloud the endpoint is the host's mail relay, which sends on through Resend ([cloud/README.md](../cloud/README.md#mail-resend)) |
 | `TDRIVE_TRUSTED_PROXY` | — | `serve --trusted-proxy`: addresses / CIDR ranges of reverse proxies whose `X-Forwarded-For` is believed on the main listener |
 | `TDRIVE_CLIENT_IP_HEADER` | `x-forwarded-for` | `cf-connecting-ip` when cloudflared (not a generic proxy) is the trusted peer |
 | `TDRIVE_BACKUP_KEY` | — | backup secret key for `backup verify` / `restore` (or `--key-file`) |

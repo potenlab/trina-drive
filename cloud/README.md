@@ -17,11 +17,13 @@ cloud/
 
 Status: **runs end to end locally** (four teams on simulated hosts, 179 checks), with every team in hosted mode (admins enrol a
 second factor), behind Caddy as its one trusted proxy, on managed storage with the plan's quota, and sending its own
-mail through the host's mail relay. The AWS path (driver, host agent, mail relay → SES, Terraform) is written and
+mail through the host's mail relay. The AWS path (driver, host agent, mail relay → Resend or SES, Terraform) is written and
 unit-tested against fake AWS endpoints, and was **deployed once to AWS on 2026-10-23** (one control instance, one
 m7g.xlarge host, the dogfood team `trina`): provisioning over SSM, hosted-mode settings, the host firewall, the mail
 relay up to SES, backups to S3 and an export through KMS all worked; DNS delegation, TLS certificates and real mail wait
-on the Gabia NS records and SES. The deployment is now in [hold mode](#hold-mode-no-teams-until-the-first-customer).
+on the Gabia NS records and mail. AWS then denied SES production access: mail now goes through
+[Resend](#mail-resend) from `drive.trina.app` (verified; not yet live on AWS: see
+[Switching to Resend](#switching-a-deployment-to-resend)). The deployment is now in [hold mode](#hold-mode-no-teams-until-the-first-customer).
 Team hosts [scale out from 0 and back in](#hosts-scale-out-and-scale-in) by themselves (built after that deploy: tested
 locally and against fake AWS endpoints; needs a Terraform apply and a new control image, see the section).
 See [Known gaps](#known-gaps-and-follow-ups) before launch.
@@ -34,7 +36,7 @@ flowchart LR
   P["Paddle"] -->|signed webhook| C
   C -->|SSM Run Command<br/>(local: Docker CLI)| H
   C -->|A record per team| R[("Route 53<br/>cloud.trina.app")]
-  C -->|setup link| M["SES mail"]
+  C -->|setup link| M["Resend<br/>drive.trina.app"]
   subgraph H["Team host (EC2, Docker)"]
     K["Caddy<br/>on-demand TLS, rate limits<br/>.2 on every team network"] --> A["tdc-acme<br/>uid 20001 · own /28 network"]
     K --> G["tdc-globex<br/>uid 20002 · own /28 network"]
@@ -43,7 +45,7 @@ flowchart LR
     A -.->|invites, resets| R["mail relay<br/>(host network, instance role)"]
     G -.-> R
   end
-  R -->|SendEmail, team From only| M
+  R -->|team From only| M
   U["Claude.ai · ChatGPT · Claude Code"] -->|https://acme.cloud.trina.app/mcp| K
   H -->|encrypted backups| S3[("S3 · SSE-KMS")]
 ```
@@ -147,11 +149,39 @@ A team container cannot use the instance role: the metadata service is out of it
 network. Teams send with the product's own SES mailer to `http://<their gateway>:8025`; the host firewall opens that
 port to team bridges only. The relay accepts SES v2 `SendEmail` only from a team container's address (`.3` of a team
 /28; not Caddy, not the host), with exactly one recipient, no Cc/Bcc, a plain subject and From = the team address
-(`TDCLOUD_TEAM_MAIL_FROM`), at most 60 per hour and 500 per day per team (`TDCLOUD_MAIL_RELAY_PER_HOUR` / `_PER_DAY`),
-and sends it with the instance role. The host role's IAM allows `ses:SendEmail` on the one SES identity with condition
-`ses:FromAddress` = the team address (`iam.tf`, `TeamMail`); the control plane's role likewise only from
-`cloud@<mail domain>`. The `AWS_*` values in a team's env file are placeholders the product needs to sign at all, not
-credentials. Locally the relay writes to `dev/.state/team-mail.log` instead of SES.
+(`TDCLOUD_TEAM_MAIL_FROM`, `Trina Drive <drive@drive.trina.app>`; the display name may also be `<team> via Trina
+Drive` — letters, digits, spaces and `. , & ' ( ) _ -`, at most 64 characters — anything else is refused), at most 60
+per hour and 500 per day per team (`TDCLOUD_MAIL_RELAY_PER_HOUR` / `_PER_DAY`), and hands it to its upstream
+(`TDCLOUD_MAIL_UPSTREAM`): **`resend`** (the default on AWS, [below](#mail-resend)), `ses` (signed with the instance
+role; the host role's IAM allows `ses:SendEmail` only with `ses:FromAddress` = the team address, `iam.tf`, `TeamMail`),
+`smtp`, or `outbox:<file>` (development). The `AWS_*` values in a team's env file are placeholders the product needs to
+sign at all, not credentials. Locally the relay writes to `dev/.state/team-mail.log` instead.
+
+### Mail (Resend)
+
+AWS denied SES production access, so mail leaves through **Resend** (`control/src/resend.ts`): its HTTPS API,
+`POST https://api.resend.com/emails` with a Bearer key — hosts and the control instance allow HTTPS out, and a
+**sending-only key** is all it needs (nothing else is called at runtime).
+
+- **Sender domain `drive.trina.app`**, verified in Resend (region Tokyo, `ap-northeast-1`). Its DNS is at Cloudflare
+  (the trina.app zone), not in this Terraform: DKIM TXT `resend._domainkey.drive`, MX and SPF TXT on `send.drive`
+  (bounces), plus DMARC `_dmarc.drive`. `cloud/scripts/resend-domain.ts` prints them and checks public DNS without any
+  API call (`--records` reads the exact values with a full-access key; `--route53` exists for a domain in a Route 53
+  zone). Teams send as `Trina Drive <drive@drive.trina.app>`, the control plane (confirmations, setup links, billing
+  notices, ops alerts) as `Trina Cloud <cloud@drive.trina.app>` (`resend_domain` in Terraform).
+- **The key** lives in two SSM SecureStrings (KMS `alias/tdcloud`): `/tdcloud/control/resend-api-key` for the control
+  plane, `/tdcloud/hosts/resend-api-key` for the hosts' relays. Each role may read exactly its own parameter
+  (`iam.tf`, `MailKey`). The process reads it itself, with the instance role, when mail goes out (cached 10 minutes,
+  read again after a 401/403, so a rotated key needs no restart): it is never on a command line, in an env file, in
+  `docker inspect` or in a log line, and errors are redacted. On a laptop: `~/.config/trina-drive/resend-api-key`
+  (must be 0600; `TDCLOUD_RESEND_API_KEY_FILE`).
+- **Sending**: one `Idempotency-Key` per message, so a retry after a lost answer cannot send twice; 429 waits for
+  `Retry-After`, 5xx and network errors back off (0.5 s, 1 s, 2 s), within 12 s on the relay (the team's mailer gives
+  up after 15 s) and 30 s for the control plane; other 4xx are not retried. Messages carry Resend tags
+  `source=team|control` and `team=<number>` for the Resend log.
+- **SES stays available** (`mail_upstream = "ses"` in Terraform, `TDCLOUD_MAILER=ses`, `TDCLOUD_MAIL_UPSTREAM=ses`):
+  the identity, DKIM records and IAM statements are kept. `smtp` (default: Resend's SMTP `smtp.resend.com:465`, user
+  `resend`, the same key as password) is there for a network that blocks the API.
 
 ## Security
 
@@ -249,7 +279,11 @@ Auto Scaling / EC2 request shapes against fake endpoints; the billing state mach
 suspend, resume, cancel → final backup → delete, resubscription, stale and foreign events, failed provisioning),
 sealing (tampering, truncation), the AWS SigV4 test vector, sealed SSM outputs, Route 53/KMS request shapes, the
 docker arguments of a team container; team network addresses, the team env (the product's own `mailEnv` accepts it),
-the relay's checks and limits, the product's `SesMailer` through the relay to a fake SES signed with the host role, a
+the relay's checks and limits, the product's `SesMailer` through the relay to a fake SES signed with the host role,
+mail through Resend against a fake Resend endpoint (request shape, idempotency key, 429/5xx retries within the deadline,
+no retry on other 4xx, the key from SSM or a 0600 file and redacted everywhere, the relay forwarding a team's mail and
+refusing disallowed mail before Resend, the "<team> via" From, the control plane's mailer), the SMTP upstream against
+a fake SMTP server, the `resend-domain` script (no API call by default, a sending-only key, Route 53 dry run), a
 plan change rewriting env + quota, a pre-fixed-subnet network made again, Caddy moved back to its address,
 X-Forwarded-For read from the right in the control plane. They also run in the repository's `bun test`.
 
@@ -285,27 +319,31 @@ terraform apply -var-file=$S/terraform.tfvars -target=aws_ecr_repository.repo -t
 terraform output name_servers
 ```
 
-Mail goes out from the cloud domain itself (`mail_domain` empty = `domain`): `cloud@cloud.trina.app` (control plane)
-and `Trina Drive <drive@cloud.trina.app>` (teams). Its three DKIM CNAMEs and a DMARC record go into the Route 53 zone,
-so nothing but the delegation is added at Gabia. (With `mail_domain = "trina.app"`, add the CNAMEs from
-`ses_dkim_records` at Gabia instead.)
+The SES identity is the cloud domain itself (`mail_domain` empty = `domain`); its three DKIM CNAMEs and a DMARC record
+go into the Route 53 zone. It is kept for `mail_upstream = "ses"`; by default mail goes through Resend from
+`drive.trina.app` (step 3).
 
 **2. Gabia (trina.app DNS), once.** In 가비아 → DNS 관리 → trina.app → 레코드 수정, add **four NS records** with host
 `cloud`, one per value of `name_servers` (e.g. `cloud  NS  ns-123.awsdns-15.com.`). Nothing else changes at Gabia
 (not the apex, not `drive`). Check: `dig NS cloud.trina.app +short` shows the four Route 53 servers. The SES identity
 `cloud.trina.app` then verifies itself within the hour (`aws sesv2 get-email-identity --email-identity cloud.trina.app`).
 
-**3. SES.** Request **production access** (until then SES sends only to verified addresses; the setup link to a new
-team's owner fails and is reported to ops — `teams resend-setup` later):
+**3. Mail (Resend).** In Resend: add the domain `drive.trina.app` (region Tokyo), put the records its dashboard shows
+into Cloudflare (trina.app zone, "DNS only"), wait for "Verified" (done on 2026-10-23), and create a **sending-only**
+API key for that domain. Check DNS any time with `bun cloud/scripts/resend-domain.ts` (no API call). Put the key into
+SSM from the 0600 file (`file://` keeps it off the command line and out of the shell history):
 
 ```sh
-aws sesv2 put-account-details --production-access-enabled --mail-type TRANSACTIONAL --website-url https://drive.trina.app \
-  --contact-language EN --use-case-description "<transactional only: confirmations, setup links, invites, resets>"
-aws sesv2 put-account-suppression-attributes --suppressed-reasons BOUNCE COMPLAINT
+for p in /tdcloud/control/resend-api-key /tdcloud/hosts/resend-api-key; do
+  aws ssm put-parameter --type SecureString --key-id alias/tdcloud --overwrite --name $p \
+    --value file://$HOME/.config/trina-drive/resend-api-key
+done
 ```
 
-Both senders are in the one domain identity; `team_mail_address` changes the teams' address (the roles may send only
-from their own address: `ses:FromAddress`, which SES compares with the address part of `Name <address>`).
+(Two Resend keys, one per parameter, let you revoke the hosts' key alone.) `team_mail_address` changes the teams'
+address. With `mail_upstream = "ses"` instead: request SES production access
+(`aws sesv2 put-account-details --production-access-enabled --mail-type TRANSACTIONAL …`, refused for this account on
+2026-10-23) and the roles may send only from their own address (`ses:FromAddress`).
 
 **4. Images** (arm64; tags are immutable, so give every build a new tag, e.g. version + commit):
 
@@ -333,7 +371,8 @@ to ops as "unlinked"; `teams link` fixes one by hand).
 ```sh
 aws ssm put-parameter --type SecureString --key-id alias/tdcloud --name /tdcloud/caddy-ask-key \
   --value "$(openssl rand -hex 32)"
-terraform output -raw control_env_template > control.env    # fill in the <…> lines (ask key, Paddle values)
+terraform output -raw control_env_template > control.env    # fill in the <…> lines (ask key, Paddle values);
+                                                             # mail: TDCLOUD_MAILER=resend + the key's parameter name
 # Paddle not ready yet? A random PADDLE_WEBHOOK_SECRET placeholder and no price ids: the control plane starts, nothing
 # can be bought, operator-made teams (`teams create`) work
 aws ssm put-parameter --type SecureString --key-id alias/tdcloud --name /tdcloud/control/env --value file://control.env
@@ -372,6 +411,30 @@ Capacity is the scaler's ([Hosts](#hosts-scale-out-and-scale-in)); a higher ceil
 `TDCLOUD_MAX_HOSTS` in `/tdcloud/control/env` (and the vCPU quota). Product upgrade: push a new `trina-drive` tag, set `TDCLOUD_IMAGE` in
 `/tdcloud/control/env`, rerun the control bootstrap, then `teams upgrade --all` (each team: backup, new container on
 the same data). Backups of the control database: nightly to `s3://<backup bucket>/control/`.
+
+#### Switching a deployment to Resend
+
+For the deployment on hold since 2026-10-23 (made with SES): (1) the key into SSM (step 3); (2) a new control image
+(step 4) and `control_image_tag`, then `terraform apply -var-file=$S/terraform.tfvars` — the defaults
+`mail_upstream = "resend"`, `resend_domain = "drive.trina.app"` add the `MailKey` IAM statements, a launch template
+whose `host.conf` has `MAIL_UPSTREAM` / `MAIL_KEY_PARAM` and the team From `drive@drive.trina.app`, and the new
+bootstrap in the artifacts bucket; (3) in `/tdcloud/control/env` (get it into a 0600 file, edit, put it back,
+`rm -P` the file) set
+
+```
+TDCLOUD_MAILER=resend
+TDCLOUD_RESEND_API_KEY_PARAM=/tdcloud/control/resend-api-key
+TDCLOUD_MAIL_FROM=Trina Cloud <cloud@drive.trina.app>
+TDCLOUD_TEAM_MAIL_FROM=Trina Drive <drive@drive.trina.app>
+TDCLOUD_HELPER_IMAGE=<the new control image>
+```
+
+(4) start the control instance and roll the new image there as above (`host.conf` tag, fresh bootstrap); (5) hosts the
+scaler launches from now on run the relay with Resend. A host that is already running needs `MAIL_UPSTREAM=resend`,
+`MAIL_KEY_PARAM=/tdcloud/hosts/resend-api-key` and the new `TEAM_MAIL_FROM` in its `host.conf` and a bootstrap rerun,
+and existing teams `teams upgrade` (their env carries the old From, which the relay now refuses). Check: sign up (or
+`teams resend-setup <slug>`) and the mail arrives; `docker logs tdc-mail` on a host shows `(resend <id>)` lines;
+`/healthz` of the relay (from the host: `curl 127.0.0.1:8025/healthz`) says `"upstream":"resend"`.
 
 **Restore a team** (manual for now): on a host, recreate the team (`teams retry` on a fresh slug or the same one
 after `destroy`), then `tdrive backup restore <archive> --into …` with the product key and `tar -x` of `files.tar`
@@ -413,7 +476,7 @@ the scaler it is shorter — the hosts go by themselves once no team names them:
 docker exec tdc-control bun /app/src/main.ts teams backup <slug>; … teams delete <slug> --yes
 docker exec tdc-control bun /app/src/main.ts hosts list          # wait for the hosts to show `gone`
 # 2. a copy of the control DB in S3 (the nightly cron does not run while it is stopped)
-# 3. the control instance (nothing can sign up or pay yet: Paddle is not wired, SES is in the sandbox)
+# 3. the control instance (nothing can sign up or pay yet: Paddle is not wired, mail not switched to Resend yet)
 aws ec2 stop-instances --instance-ids <control instance id>
 ```
 
@@ -551,9 +614,11 @@ host; RPO 24 h). An m7g.large host (10 slots, $73) halves the 10-team compute bu
 | `TDCLOUD_IMAGE` | `trina-drive:dev` | image for new teams and `teams upgrade` |
 | `TDCLOUD_HELPER_IMAGE` | `tdcloud-control:dev` | this image, run on hosts for `seal` / `seal-dir` |
 | `TDCLOUD_SECCOMP`, `TDCLOUD_APPARMOR` | `docker/seccomp-bwrap.json`, `trina-drive-bwrap` | empty AppArmor = host without AppArmor |
-| `TDCLOUD_MAILER`, `TDCLOUD_MAIL_FROM`, `TDCLOUD_OPS_EMAIL` | `outbox` | `ses` in production |
-| `TDCLOUD_TEAM_MAILER` | `relay` | team instances' mail: `relay` (the host's relay; SES on AWS), `outbox` (a file in the team volume; refused in production), `off` |
-| `TDCLOUD_TEAM_MAIL_FROM` | `Trina Drive <drive@trina.app>` | From of every team's mail; the relay and the hosts' IAM allow only this address |
+| `TDCLOUD_MAILER`, `TDCLOUD_MAIL_FROM`, `TDCLOUD_OPS_EMAIL` | `outbox` | `resend` in production (or `ses`, `smtp`); From `Trina Cloud <cloud@drive.trina.app>` |
+| `TDCLOUD_RESEND_API_KEY_PARAM`, `TDCLOUD_RESEND_API_KEY_FILE`, `TDCLOUD_RESEND_ENDPOINT` | —, `~/.config/trina-drive/resend-api-key`, `https://api.resend.com` | the Resend key: SSM SecureString (required in production with `resend`), else a 0600 file |
+| `TDCLOUD_SMTP_HOST`, `_PORT`, `_TLS`, `_USER`, `_PASS_PARAM`, `_PASS_FILE` | `smtp.resend.com`, 465, implicit, `resend`, the Resend key's | `TDCLOUD_MAILER=smtp` / relay upstream `smtp` |
+| `TDCLOUD_TEAM_MAILER` | `relay` | team instances' mail: `relay` (the host's relay; Resend on AWS), `outbox` (a file in the team volume; refused in production), `off` |
+| `TDCLOUD_TEAM_MAIL_FROM` | `Trina Drive <drive@trina.app>` | From of every team's mail (`drive@drive.trina.app` on AWS); the relay allows only this address |
 | `TDCLOUD_TEAM_SUBNETS`, `TDCLOUD_MAIL_RELAY_PORT` | `10.128.0.0/11`, 8025 | the pool of team /28 networks (same value for the relay); the relay's port on each gateway |
 | `TDCLOUD_KMS_KEY_ID` / `TDCLOUD_MASTER_KEY_FILE` | `<state>/master.key` | key wrapping |
 | `TDCLOUD_BACKUP_TARGET`, `_KEEP`, `_EVERY_HOURS` | `dir:<state>/backups`, 14, 24 | `s3://bucket/prefix` on AWS |
@@ -574,7 +639,9 @@ host; RPO 24 h). An m7g.large host (10 slots, $73) halves the 10-team compute bu
 | `PADDLE_PRICE_{TEAM,BUSINESS}_{MONTHLY,YEARLY}` | — | price id → plan, and the dashboard's checkout buttons |
 
 The mail relay (`mail-relay`, on each host): `TDCLOUD_TEAM_MAIL_FROM`, `TDCLOUD_TEAM_SUBNETS`,
-`TDCLOUD_MAIL_RELAY_LISTEN` (`0.0.0.0:8025`), `TDCLOUD_MAIL_RELAY_UPSTREAM` (`ses`, or `outbox:<file>` in dev),
+`TDCLOUD_MAIL_RELAY_LISTEN` (`0.0.0.0:8025`), `TDCLOUD_MAIL_UPSTREAM` (`resend`, `ses`, `smtp`, or `outbox:<file>` in
+dev; unset: `ses`, or the older name `TDCLOUD_MAIL_RELAY_UPSTREAM`; the bootstrap passes `resend`), the Resend / SMTP
+settings above (on hosts `TDCLOUD_RESEND_API_KEY_PARAM=/tdcloud/hosts/resend-api-key`),
 `TDCLOUD_MAIL_RELAY_PER_HOUR` / `_PER_DAY` (60 / 500), `TDCLOUD_SES_CONFIGURATION_SET`, `AWS_REGION`. Caddy on the
 hosts: `TDCLOUD_FRONT_PROXIES` (empty; [Client addresses](#client-addresses)).
 
@@ -589,8 +656,8 @@ natural next step; not built). The container, limits and keys stay the same.
 ## Known gaps and follow-ups
 
 Done here (the product side came with PR #18): client addresses behind Caddy (fixed team networks,
-`TDRIVE_TRUSTED_PROXY`, Caddy overwriting `X-Forwarded-For`), mail from team instances (the host relay → SES with the
-instance role; IAM limited to the team From), hosted mode (`TDRIVE_HOSTED=1`; the end-to-end test enrols TOTP),
+`TDRIVE_TRUSTED_PROXY`, Caddy overwriting `X-Forwarded-For`), mail from team instances (the host relay → Resend,
+or SES with the instance role; only the team From), hosted mode (`TDRIVE_HOSTED=1`; the end-to-end test enrols TOTP),
 managed storage with the plan's quota (100 GB / 1 TB), the setup link with `#token=`.
 
 Before a real AWS launch:
@@ -610,11 +677,14 @@ Before a real AWS launch:
    S3 object etag vs KMS, an apostrophe EC2 refuses in a rule description, the KMS lockout check, SES checking the
    address identity before the domain verifies, ECR logins expiring after 12 h (credential helper now), backups
    uploaded with `--sse aws:kms` landing under the AWS-managed `aws/s3` key instead of the Trina Cloud key.
-2. **SES**: production access was requested on 2026-10-23 (pending); the account-level suppression list (bounces,
-   complaints) is on. The `ses:FromAddress` condition matches the address part of `Trina Drive <drive@…>` (the first
-   run got past IAM with it). Bounces and complaints are not handled: add a configuration set with an SNS/EventBridge
-   destination and suppress bad recipients (`TDCLOUD_SES_CONFIGURATION_SET` is passed through; the host IAM then also
-   needs the configuration set's ARN).
+2. **Mail**: AWS denied SES production access (2026-10-23); mail goes through Resend (`drive.trina.app` verified, a
+   test send from `drive@drive.trina.app` succeeded) — not yet live on AWS ([Switching to Resend](#switching-a-deployment-to-resend)).
+   Bounces and complaints are not handled: Resend suppresses hard bounces itself, but nothing here reads its webhooks
+   (`email.bounced`, `email.complained`) to stop mailing a team member. Resend's API rate limit is per account and
+   shared by the control plane and every host: short bursts wait out the 429s, a sustained burst fails (the relay
+   answers 502, the control plane reports the failed setup mail to ops: `teams resend-setup`). Team mail shows
+   `Trina Drive` as the sender; the relay already accepts `<team> via Trina Drive`, but the control plane does not yet
+   write the team's name into `TDRIVE_MAIL_FROM` (follow-up).
 3. **Host disk vs. plan size**: a Business team may hold 1 TB (XFS cap 2 TB) while hosts start with a 300 GB data
    volume. Quotas are caps, not reservations: watch free space per host (`tdcloud-host info` reports it; nothing
    alerts yet), grow volumes online, and give large Business teams their own host (see Upgrade path).
