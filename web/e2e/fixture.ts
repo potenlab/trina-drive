@@ -1,0 +1,81 @@
+// A small Trina-Cloud-like team for the drive UI scripts (web/e2e/*.mjs): managed storage, team folders with rules,
+// and people who sign in with a password. Serves the built app (web/dist) over plain HTTP on 127.0.0.1.
+//   bun web/e2e/fixture.ts [--port 0]   → prints one JSON line {"base": "...", "dir": "...", "password": "..."}, keeps serving
+// People: boss (admin), mina, sam (재무 group), kim (Editor of 프로젝트), lee (Manager of 프로젝트, not an admin).
+// Folders: 공용 (Anyone in the team · Editor), 재무 (restricted: nobody yet), 경영 (경영 group · Editor, No AI),
+//          프로젝트 (Anyone · Viewer; kim Editor; lee Manager), 프로젝트/비밀 (restricted here: lee only).
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { openDb } from '../../src/db'
+import { createManagedFolder } from '../../src/managed/folders'
+import { metaSet } from '../../src/managed/settings'
+import { makeCtx } from '../../src/session'
+import { addGroup, addMember, addPerson, grantManage, setFlag, setRule } from '../../src/store'
+import { hashPassword } from '../../src/web/auth'
+import { OutboxMailer } from '../../src/web/mail'
+import { makeWebCtx, serveWeb } from '../../src/web/server'
+
+const PASSWORD = 'correct horse battery'
+const port = Number(process.argv[process.argv.indexOf('--port') + 1] || 0) || 0
+const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tdrive-ui-')))
+const db = openDb(dir)
+const ctx = makeCtx(db, dir)
+metaSet(db, 'storage_mode', 'managed')
+makeWebCtx(ctx, {}) // web tables
+
+const people: [string, boolean][] = [['boss', true], ['mina', false], ['sam', false], ['kim', false], ['lee', false]]
+for (const [n, admin] of people) addPerson(db, n, admin)
+for (const g of ['전체', '재무', '경영']) addGroup(db, g)
+for (const [n] of people) addMember(db, '전체', n)
+addMember(db, '재무', 'sam'); addMember(db, '경영', 'boss')
+const hash = await hashPassword(PASSWORD)
+const pid = (n: string) => db.query<{ id: number }, [string]>('SELECT id FROM people WHERE name = ?').get(n)!.id
+for (const [n] of people) db.query('INSERT INTO accounts (person_id, email, password_hash, created_at, password_set_at) VALUES (?, ?, ?, ?, ?)').run(pid(n), `${n}@trina.test`, hash, Date.now(), Date.now())
+
+const mk = (name: string) => createManagedFolder(db, dir, { name })
+const common = mk('공용'), fin = mk('재무'), exec = mk('경영'), proj = mk('프로젝트')
+setRule(db, common.path, '@전체', 'write')
+setRule(db, exec.path, '@경영', 'write'); setFlag(db, exec.path, 'no_ai', true)
+setRule(db, proj.path, '@전체', 'read'); setRule(db, proj.path, 'kim', 'write'); setRule(db, proj.path, 'lee', 'write'); grantManage(db, proj.path, 'lee')
+// boss puts the files in (an admin does not read folders by default), then loses that access again
+setRule(db, fin.path, 'boss', 'write'); setRule(db, proj.path, 'boss', 'write')
+
+const { server } = serveWeb(ctx, port, '127.0.0.1', { mailer: new OutboxMailer(dir, true), webDir: path.join(import.meta.dir, '..', 'dist') })
+const base = `http://127.0.0.1:${server.port}`
+
+// files, uploaded the way the page does (as boss)
+async function session(name: string) {
+  const r = await fetch(base + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ login: name, password: PASSWORD }) })
+  const cookie = /tdrive_session=[^;]+/.exec(r.headers.get('set-cookie') ?? '')![0]
+  const csrf = ((await r.json()) as { csrf: string }).csrf
+  return { cookie, csrf }
+}
+const s = await session('boss')
+const h = { cookie: s.cookie, 'x-csrf-token': s.csrf, origin: base }
+async function upload(folder: string, name: string, text: string) {
+  const form = new FormData(); form.append('file', new File([text], name))
+  const r = await fetch(`${base}/api/files/upload?path=${encodeURIComponent(folder)}`, { method: 'POST', headers: h, body: form })
+  if (!r.ok) throw new Error(`upload ${folder}/${name}: ${r.status} ${await r.text()}`)
+}
+async function folder(at: string, name: string) {
+  const r = await fetch(`${base}/api/files/folder`, { method: 'POST', headers: { ...h, 'content-type': 'application/json' }, body: JSON.stringify({ path: at, name }) })
+  if (!r.ok) throw new Error(`mkdir ${at}/${name}: ${r.status} ${await r.text()}`)
+}
+await upload('/공용', '안내.md', '# 팀 안내\n공용 폴더 CANARY-PUB-1042\n')
+await upload('/공용', '2026 로드맵.pptx', 'slides')
+await upload('/공용', 'brand-guide.pdf', '%PDF-1.4 fake')
+await folder('/공용', '디자인')
+await upload('/공용/디자인', 'logo.png', 'png')
+await upload('/재무', '결산 2026 Q3.md', '# Q3 결산\n매출 CANARY-FIN-7731\n')
+await upload('/재무', '예산.xlsx', 'xlsx')
+await upload('/경영', '이사회.md', 'CANARY-EXEC-5520')
+await upload('/프로젝트', '계획.md', '# 계획\nCANARY-PROJ-3301')
+await folder('/프로젝트', '비밀')
+await upload('/프로젝트/비밀', '계약.docx', 'docx')
+setRule(db, path.join(proj.path, '비밀'), 'lee', 'write', { breakInherit: true })
+db.query("DELETE FROM rules WHERE subject_type = 'person' AND subject_id = ? AND folder_id IN (?, ?)").run(pid('boss'), fin.id, proj.id)
+
+console.log(JSON.stringify({ base, dir, password: PASSWORD }))
+process.on('SIGTERM', () => { server.stop(true); fs.rmSync(dir, { recursive: true, force: true }); process.exit(0) })
+process.on('SIGINT', () => { server.stop(true); fs.rmSync(dir, { recursive: true, force: true }); process.exit(0) })

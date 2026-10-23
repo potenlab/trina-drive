@@ -1,0 +1,47 @@
+// S48 (plan 10.5): the phone, in WebKit (iOS Safari's engine) at 390 × 844: sign in on the form, the sidebar as a
+// drawer, "+ New" floating, and the share dialog as a bottom sheet where lee (Manager of /프로젝트) adds mina.
+import { check, shot, signedIn } from './lib.mjs'
+
+export async function s48(browser, fx) {
+  console.log('S48 mobile WebKit 390: sign-in, drawer, floating New, share dialog as a bottom sheet')
+  const opts = { width: 390, height: 844, mobile: true }
+  const p = await signedIn(browser, fx, null, opts)
+  await p.goto(fx.base + '/')
+  await p.fill('input[autocomplete=username]', 'mina')
+  await p.fill('input[autocomplete=current-password]', fx.password)
+  await p.locator('button', { hasText: 'Sign in' }).click()
+  await p.waitForSelector('.fv-items')
+  check(true, 'signed in on the form at 390')
+  check(await p.evaluate(() => document.documentElement.scrollWidth <= 390), 'no sideways scroll at 390')
+  check(!(await p.locator('.sb').isVisible()) || (await p.locator('.sb').boundingBox()).x < -100, 'the sidebar is off screen until asked')
+  await p.locator('.tb-menu').tap()
+  await p.waitForTimeout(300)
+  check((await p.locator('.sb').boundingBox()).x >= 0, 'the menu button opens the drawer')
+  await shot(p, 's48-drawer')
+  await p.locator('.tr-row a', { hasText: '공용' }).tap()
+  await p.waitForURL(/p=%2F%EA%B3%B5%EC%9A%A9/)
+  await p.waitForTimeout(300)
+  check((await p.locator('.sb').boundingBox()).x < 0, 'picking a folder closes the drawer')
+  check(await p.locator('.fab').isVisible(), '"+ New" floats in a folder mina may edit')
+  await p.locator('.fab').tap()
+  check(await p.locator('.fv-menu button', { hasText: 'New folder' }).isVisible(), 'the floating New opens the New menu')
+  await p.keyboard.press('Escape')
+  await p.context().close()
+
+  const lee = await signedIn(browser, fx, 'lee', opts)
+  await lee.goto(fx.base + '/#/files?p=' + encodeURIComponent('/프로젝트'))
+  await lee.locator('.fv-share').tap()
+  await lee.waitForSelector('.sd-body')
+  await lee.waitForTimeout(200)
+  const box = await lee.locator('.sd').boundingBox()
+  check(Math.round(box.width) === 390 && Math.abs(box.y + box.height - 844) <= 1, 'the share dialog is a bottom sheet (full width, on the bottom edge)')
+  await lee.locator('.sd-combo input').tap()
+  await lee.locator('.sd-combo input').fill('mina')
+  await lee.locator('.sd-options li', { hasText: 'mina' }).tap()
+  await lee.locator('.sd-add-foot button', { hasText: 'Share' }).tap()
+  await lee.locator('.sd-entry', { hasText: 'mina' }).waitFor()
+  check(true, 'lee added mina from the phone')
+  await shot(lee, 's48-share-sheet')
+  check(lee.errors.length === 0, 'no page errors' + (lee.errors.length ? ': ' + lee.errors.join(' | ') : ''))
+  await lee.context().close()
+}
