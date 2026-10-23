@@ -7,10 +7,12 @@ import { Badge, ErrorLine, Loading, Page, useAction, useLoad, YesNo } from '../u
 import { FolderBadges } from './Folders'
 import { NAS_MODES } from './RegisterForm'
 import { at } from './approve-i18n'
+import { ShareDialog } from '../drive/ShareDialog'
 
 export function Folder({ id }: { id: number }) {
   const { data, error, reload } = useLoad(() => get<FolderDetail>(`/folders/${id}`), [id])
   const [people, setPeople] = useState<Person[]>([])
+  const [sharing, setSharing] = useState(false)
   const a = useAction()
   useEffect(() => { get<{ people: Person[] }>('/people').then((r) => setPeople(r.people), () => {}) }, [])
   if (error) return <Page title={t('folders_title')}><ErrorLine error={error} /><a href="#/folders">← {t('folders_title')}</a></Page>
@@ -61,7 +63,9 @@ export function Folder({ id }: { id: number }) {
   }
 
   return (
-    <Page title={f.vpath ?? f.name} actions={<div className="badges"><FolderBadges f={f} /></div>}>
+    <Page title={f.vpath ?? f.name} actions={<div className="badges"><FolderBadges f={f} />
+      {f.managed && f.vpath && f.can.edit_rules && <button type="button" className="btn small" onClick={() => setSharing(true)}>{t('share_action')}</button>}</div>}>
+      {sharing && f.vpath && <ShareDialog path={f.vpath} name={f.name} onClose={() => { setSharing(false); reload() }} />}
       <p className="crumbs">
         <a href="#/folders">← {t('folders_title')}</a>
         {data.parent && <> · <a href={`#/folders/${data.parent.id}`}>{t('parent')}: {data.parent.vpath}</a></>}
