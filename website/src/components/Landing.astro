@@ -4,6 +4,7 @@ import Base from '../layouts/Base.astro'
 import { LINKS, SITE_URL, CONTACT_EMAIL } from '../site'
 import Benchmark from './Benchmark.astro'
 import Bento from './Bento.astro'
+import Compare from './Compare.astro'
 import Competitors from './Competitors.astro'
 import FilesMock from './FilesMock.astro'
 import Flow from './Flow.astro'
@@ -59,16 +60,19 @@ const jsonLd = {
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-bg" aria-hidden="true"></div>
       <div class="container hero-copy">
-        <a class="pill" href="#faq"><span class="pill-dot" aria-hidden="true"></span>{h.pill}<span class="pill-arrow" aria-hidden="true">→</span></a>
+        <a class="pill" href={LINKS.github} rel="noopener"><span class="pill-dot" aria-hidden="true"></span>{h.pill}<span class="pill-arrow" aria-hidden="true">→</span></a>
         <h1 id="hero-title">{h.title} <span class="accent-text">{h.titleAccent}</span></h1>
         <p class="hero-sub">{h.sub}</p>
         <div class="hero-ctas">
           <a class="btn btn-primary btn-lg" data-cta="see-how" href="#how">{h.primary}<Icon name="arrow" /></a>
           <a class="btn btn-secondary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{h.secondary}</a>
         </div>
-        <div class="install">
-          <code><span class="prompt" aria-hidden="true">$ </span>{h.install}</code>
-          <button class="copy-btn" type="button" data-copy={h.install} data-copied={h.copied}>{h.copy}</button>
+        <div class="hero-meta">
+          <div class="install">
+            <code><span class="prompt" aria-hidden="true">$ </span>{h.install}</code>
+            <button class="copy-btn" type="button" data-copy={h.install} data-copied={h.copied}>{h.copy}</button>
+          </div>
+          <a class="hero-gh" href={LINKS.github} rel="noopener"><Icon name="github" />{h.github}<span aria-hidden="true">→</span></a>
         </div>
       </div>
       <div class="container hero-stage">
@@ -94,48 +98,10 @@ const jsonLd = {
       </div>
     </section>
 
-    <!-- knowledge base without the build: the enterprise way vs the small-team way -->
-    <section class="section" id="kb" aria-labelledby="kb-title">
-      <div class="container">
-        <div class="section-head" data-reveal>
-          <span class="eyebrow">{t.kb.eyebrow}</span>
-          <h2 id="kb-title">{t.kb.title}</h2>
-          <p>{t.kb.sub}</p>
-        </div>
-        <div class="ways">
-          {t.kb.cols.map((c) => (
-            <div class={`way${c.us ? ' way-us' : ''}`} data-reveal>
-              <p class="way-tag">{c.tag}</p>
-              <h3>{c.name}</h3>
-              <ul>{c.points.map((pt) => <li><Icon name={c.us ? 'check' : 'minus'} />{pt}</li>)}</ul>
-              <p class="way-foot">{c.foot}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-
-    <!-- vs a drive connector -->
-    <section class="section section-tint" id="connector" aria-labelledby="gd-title">
-      <div class="container gd-grid">
-        <div class="section-head" data-reveal>
-          <span class="eyebrow">{t.gdrive.eyebrow}</span>
-          <h2 id="gd-title">{t.gdrive.title}</h2>
-          <p>{t.gdrive.sub}</p>
-        </div>
-        <div class="gd-cards" data-reveal>
-          <div class="gd-card">
-            <h3>{t.gdrive.left.name}</h3>
-            <ul>{t.gdrive.left.points.map((pt) => <li><Icon name="minus" />{pt}</li>)}</ul>
-          </div>
-          <div class="gd-card gd-us">
-            <h3>{t.gdrive.right.name}</h3>
-            <ul>{t.gdrive.right.points.map((pt) => <li><Icon name="check" />{pt}</li>)}</ul>
-            <pre class="gd-demo" aria-hidden="true">{t.gdrive.demo.map((l, i) => <span class={i === 0 ? 'gd-cmd' : ''}>{l}</span>)}</pre>
-          </div>
-        </div>
-      </div>
-    </section>
+    <!-- one compact comparison: ontology/RAG vs. a drive connector vs. Trina Drive, with the one-search demo -->
+    <Compare c={t.compare}>
+      <pre class="cmp-term">{t.compare.demo.map((l, i) => <span class={i === 0 ? 'cmp-cmd' : ''}>{l}</span>)}</pre>
+    </Compare>
 
     {t.benchmark.enabled && <Benchmark t={t} />}
 
@@ -150,48 +116,18 @@ const jsonLd = {
       </div>
     </section>
 
-    <!-- shared with the whole team, safely -->
-    <section class="section section-tint" id="safe" aria-labelledby="pillars-title">
+    <!-- safe to share: three pillars with their command, then the limits in three lines (full promise on /security) -->
+    <section class="section section-tint" id="security" aria-labelledby="pillars-title">
       <div class="container">
         <div class="section-head" data-reveal>
           <span class="eyebrow">{t.pillars.eyebrow}</span>
           <h2 id="pillars-title">{t.pillars.title}</h2>
         </div>
         <Bento t={t} items={t.pillars.items} variant="pillars" />
-      </div>
-    </section>
-
-    <!-- security: always-dark panel -->
-    <section class="section" id="security" aria-labelledby="security-title">
-      <div class="container">
-        <div class="sec-panel">
-          <div class="sec-visual" aria-hidden="true">
-            <picture>
-              <source type="image/avif" srcset="/img/vault-560.avif 560w, /img/vault-1120.avif 1120w" sizes="(max-width: 900px) 90vw, 520px" />
-              <img src="/img/vault-560.webp" srcset="/img/vault-560.webp 560w, /img/vault-1120.webp 1120w" sizes="(max-width: 900px) 90vw, 520px" alt="" width="1120" height="836" loading="lazy" decoding="async" />
-            </picture>
-          </div>
-          <div class="sec-top">
-            <div class="section-head" data-reveal>
-              <span class="eyebrow">{t.security.eyebrow}</span>
-              <h2 id="security-title">{t.security.title}</h2>
-            </div>
-            <figure class="promise" data-reveal>
-              <figcaption class="promise-label">{t.security.promiseLabel}</figcaption>
-              <blockquote>{t.security.promise.map((s) => <p>{s}</p>)}</blockquote>
-            </figure>
-          </div>
-          <div class="sec-lists">
-            <div class="sec-list ok" data-reveal>
-              <h3><Icon name="shield" />{t.security.protectTitle}</h3>
-              <ul>{t.security.protect.map((s) => <li><Icon name="check" />{s}</li>)}</ul>
-            </div>
-            <div class="sec-list no" data-reveal>
-              <h3><Icon name="eye" />{t.security.limitsTitle}</h3>
-              <ul>{t.security.limits.map((s) => <li><Icon name="minus" />{s}</li>)}</ul>
-            </div>
-          </div>
-          <a class="sec-link" href="/security">{t.security.link}<span aria-hidden="true">→</span></a>
+        <div class="lim" data-reveal>
+          <p class="lim-title"><Icon name="eye" />{t.security.limitsTitle}</p>
+          <ul>{t.security.limits.map((s) => <li>{s}</li>)}</ul>
+          <a class="lim-link" href="/security">{t.security.link}<span aria-hidden="true">→</span></a>
         </div>
       </div>
     </section>

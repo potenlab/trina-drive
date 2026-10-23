@@ -75,7 +75,7 @@ const mi = t.features.minis
       <div class="bento-text">
         <span class="bento-icon"><Icon name={it.icon} />{it.label && <span class="bento-label">{it.label}</span>}</span>
         <h3>{it.title}</h3>
-        <p>{it.body}</p>
+        {it.body && <p>{it.body}</p>}
         {it.cmd && (
           <pre class="bento-cmd"><span class="tl-prompt" aria-hidden="true">$ </span>{it.cmd}{it.out && <span class="bento-out">{'\n'}{it.out}</span>}</pre>
         )}

@@ -7,6 +7,7 @@ import Base from '../../layouts/Base.astro'
 import { LINKS, SITE_URL } from '../../site'
 import Footer from '../Footer.astro'
 import ClientMark from '../ClientMark.astro'
+import Compare from '../Compare.astro'
 import Icon from '../Icon.astro'
 import Logo from '../Logo.astro'
 import Nav from '../Nav.astro'
@@ -22,7 +23,7 @@ const { t } = Astro.props
 const home = '/b'
 const h = t.hero
 const w = t.works
-const g = t.gdrive
+const g = t.compare.search
 const st = t.setup
 const d = t.devs
 ---
@@ -40,6 +41,7 @@ const d = t.devs
           <a class="btn btn-primary btn-lg" data-cta="see-how" href="#features">{h.primary}<Icon name="arrow" /></a>
           <a class="btn btn-secondary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{h.secondary}</a>
         </div>
+        <a class="hero-gh" href={LINKS.github} rel="noopener"><Icon name="github" />{h.github}<span aria-hidden="true">→</span></a>
       </div>
       <div class="container b-stage">
         <div class="stage-glow" aria-hidden="true"></div>
@@ -55,7 +57,7 @@ const d = t.devs
     <!-- pain in people's own words (public posts, linked) and the one-line answer to each -->
     <section class="pains" aria-labelledby="pains-title">
       <div class="container">
-        <h2 class="pains-title" id="pains-title">{t.pains.title}<small>{t.pains.sub}</small></h2>
+        <h2 class="pains-title" id="pains-title">{t.pains.title}{t.pains.sub && <small>{t.pains.sub}</small>}</h2>
         <ul class="pains-grid">
           {t.pains.items.map((p) => (
             <li class="pain" data-reveal>
@@ -91,10 +93,6 @@ const d = t.devs
                 </li>
               ))}
             </ul>
-            <p class="wk-dev-title">{w.devTitle}</p>
-            <ul class="wk-dev">
-              {w.devApps.map((a) => <li><ClientMark name={a} />{a}</li>)}
-            </ul>
           </div>
           <div class="wk-hub" aria-hidden="true">
             <span class="wk-line"></span>
@@ -115,91 +113,18 @@ const d = t.devs
       </div>
     </section>
 
-    <!-- knowledge base without the build -->
-    <section class="section" id="kb" aria-labelledby="kb-title">
-      <div class="container">
-        <div class="section-head" data-reveal>
-          <span class="eyebrow">{t.kb.eyebrow}</span>
-          <h2 id="kb-title">{t.kb.title}</h2>
-          <p>{t.kb.sub}</p>
-        </div>
-        <div class="ways">
-          {t.kb.cols.map((c) => (
-            <div class={`way${c.us ? ' way-us' : ''}`} data-reveal>
-              <p class="way-tag">{c.tag}</p>
-              <h3>{c.name}</h3>
-              <ul>{c.points.map((pt) => <li><Icon name={c.us ? 'check' : 'minus'} />{pt}</li>)}</ul>
-              <p class="way-foot">{c.foot}</p>
-            </div>
-          ))}
-        </div>
+    <!-- one compact comparison: knowledge-base project vs. a drive connector vs. Trina Drive, with one search across folders -->
+    <Compare c={t.compare} tint={false}>
+      <div class="gd-search">
+        <span class="gd-q"><Icon name="search" />“{g.query}”<small>{g.count}</small></span>
+        {g.hits.map((x) => <span class="gd-hit"><code>{x.file}</code><span>{x.line}</span></span>)}
       </div>
-    </section>
-
-    <!-- vs a drive connector -->
-    <section class="section section-tint" id="connector" aria-labelledby="gd-title">
-      <div class="container gd-grid">
-        <div class="section-head" data-reveal>
-          <span class="eyebrow">{g.eyebrow}</span>
-          <h2 id="gd-title">{g.title}</h2>
-          <p>{g.sub}</p>
-        </div>
-        <div class="gd-cards" data-reveal>
-          <div class="gd-card">
-            <h3>{g.left.name}</h3>
-            <ul>{g.left.points.map((pt) => <li><Icon name="minus" />{pt}</li>)}</ul>
-          </div>
-          <div class="gd-card gd-us">
-            <h3>{g.right.name}</h3>
-            <ul>{g.right.points.map((pt) => <li><Icon name="check" />{pt}</li>)}</ul>
-            <div class="gd-search" aria-hidden="true">
-              <span class="gd-q"><Icon name="search" />“{g.search.query}”<small>{g.search.count}</small></span>
-              {g.search.hits.map((x) => <span class="gd-hit"><code>{x.file}</code><span>{x.line}</span></span>)}
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+    </Compare>
 
     <Safe t={t} />
 
-    <!-- security: always-dark panel (same promise as variant A, plain-language lists) -->
-    <section class="section" id="security" aria-labelledby="security-title">
-      <div class="container">
-        <div class="sec-panel">
-          <div class="sec-visual" aria-hidden="true">
-            <picture>
-              <source type="image/avif" srcset="/img/vault-560.avif 560w, /img/vault-1120.avif 1120w" sizes="(max-width: 900px) 90vw, 520px" />
-              <img src="/img/vault-560.webp" srcset="/img/vault-560.webp 560w, /img/vault-1120.webp 1120w" sizes="(max-width: 900px) 90vw, 520px" alt="" width="1120" height="836" loading="lazy" decoding="async" />
-            </picture>
-          </div>
-          <div class="sec-top">
-            <div class="section-head" data-reveal>
-              <span class="eyebrow">{t.security.eyebrow}</span>
-              <h2 id="security-title">{t.security.title}</h2>
-            </div>
-            <figure class="promise" data-reveal>
-              <figcaption class="promise-label">{t.security.promiseLabel}</figcaption>
-              <blockquote>{t.security.promise.map((s) => <p>{s}</p>)}</blockquote>
-            </figure>
-          </div>
-          <div class="sec-lists">
-            <div class="sec-list ok" data-reveal>
-              <h3><Icon name="shield" />{t.security.protectTitle}</h3>
-              <ul>{t.security.protect.map((s) => <li><Icon name="check" />{s}</li>)}</ul>
-            </div>
-            <div class="sec-list no" data-reveal>
-              <h3><Icon name="eye" />{t.security.limitsTitle}</h3>
-              <ul>{t.security.limits.map((s) => <li><Icon name="minus" />{s}</li>)}</ul>
-            </div>
-          </div>
-          <a class="sec-link" href="/security">{t.security.link}<span aria-hidden="true">→</span></a>
-        </div>
-      </div>
-    </section>
-
     <!-- set up for you -->
-    <section class="section section-tint" id="how" aria-labelledby="how-title">
+    <section class="section" id="how" aria-labelledby="how-title">
       <div class="container">
         <div class="section-head" data-reveal>
           <span class="eyebrow">{st.eyebrow}</span>

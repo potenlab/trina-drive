@@ -19,6 +19,7 @@ const en = {
   skip: 'Skip to content',
   nav: {
     docs: 'Docs',
+    github: 'GitHub',
     pricing: 'Pricing',
     security: 'Security',
     faq: 'FAQ',
@@ -29,12 +30,13 @@ const en = {
   },
   // The H1 is two parts so the second can carry the accent gradient. Either part can be swapped freely.
   hero: {
-    pill: 'Open-source release coming soon',
+    pill: 'Source on GitHub · license coming soon',
     title: 'Your company folders,',
     titleAccent: 'as your team’s AI knowledge base.',
-    sub: 'No ontology, no RAG pipeline, no uploads. Claude, Codex and Cursor search and read your files directly — grep inside PDFs and Office files — and each person’s AI sees only what they’re allowed to.',
+    sub: 'Your AI searches and reads your team’s files directly. No uploads, no RAG, scoped per person.',
     primary: 'See how it works',
     secondary: 'Book a setup call',
+    github: 'View on GitHub',
     install: 'tdrive mcp add claude',
     copy: 'Copy',
     copied: 'Copied',
@@ -102,7 +104,7 @@ const en = {
     { icon: 'shield', text: 'Every security feature free' },
   ],
   clients: {
-    title: 'Works with the AI tools your team already uses',
+    title: 'Works with the AI tools you already use',
     today: 'today',
     soon: 'v0.2 · rolling out',
     items: [
@@ -115,52 +117,21 @@ const en = {
     // Shown next to the logos (A band, B "works" section). Logo rules: public/logos/SOURCES.md.
     trademarks: 'Trademarks belong to their owners; Trina Drive is not affiliated with or endorsed by them.',
   },
-  // Enterprise way vs small-team way. No dollar figures for ontology projects: qualitative facts only.
-  kb: {
-    eyebrow: 'Knowledge base without the build',
-    title: 'Enterprises build ontologies. Small teams have folders.',
-    sub: 'Get a team knowledge base for your AI without an ontology project.',
-    cols: [
-      {
-        name: 'The enterprise way',
-        tag: 'Ontology · knowledge graph · custom RAG',
-        points: [
-          'Months of modeling your data into entities and relations',
-          'Consultants to design it, a team to maintain it',
-          'Pipelines to chunk, embed and re-index every change',
-          'Answers assembled from fragments — hard to see why',
-        ],
-        foot: 'Built for companies with a data team and a budget',
-        us: false,
-      },
-      {
-        name: 'The small-team way',
-        tag: 'Trina Drive',
-        points: [
-          'Point it at the folders you already have',
-          'Your AI searches and reads the files directly — the way Claude Code works through a codebase',
-          'Answers point to real files, and every read is logged',
-          'Live in an afternoon. Free to self-host, or managed from $99/month',
-        ],
-        foot: 'For teams of 5 to 20',
-        us: true,
-      },
+  // One compact comparison: an ontology/RAG build vs. a cloud-drive connector vs. Trina Drive.
+  // No dollar figures for ontology projects. Don't claim connectors can't read files: they read one at a time.
+  compare: {
+    eyebrow: 'Why folders',
+    title: 'No ontology project. No one-file connector.',
+    sub: 'Search every folder at once, where the files already live.',
+    cols: ['Ontology / RAG', 'Drive connector', 'Trina Drive'],
+    rows: [
+      { label: 'To get started', cells: ['Months of modeling', 'Files in Google Drive first', 'Point at your folders'] },
+      { label: 'To search everything', cells: ['Pre-cut chunks', 'Reads one file at a time', 'grep -r, every folder at once'] },
+      { label: 'When a file changes', cells: ['Re-embed, re-index', 'Read it again', 'Next search sees it'] },
     ],
-  },
-  // vs. a cloud-drive connector. Don't claim connectors can't read files: they read one at a time.
-  gdrive: {
-    eyebrow: 'vs. a Google Drive connector',
-    title: 'Search everything at once, not one file at a time.',
-    sub: 'A drive connector finds a file and reads it. Your agent can’t grep across the whole drive. Trina Drive gives it every registered folder in one search.',
-    left: {
-      name: 'Drive connector',
-      points: ['Reads one file at a time', 'Can’t grep across your whole drive', 'Your files must live in Google Drive first'],
-    },
-    right: {
-      name: 'Trina Drive',
-      points: ['grep -r across every registered folder, in one command', 'Inside PDF, Word, Excel and PowerPoint — even HWP', 'Answers point to file paths you can open', 'On the NAS you already have'],
-    },
+    demoLabel: 'One search, every folder',
     demo: ['$ grep -ri "renewal date" /', '/contracts/acme_supply_2026.pdf: Renewal date: 2027-03-31', '/projects/globex/sow_v2.docx: …the renewal date shall be…', '/shared/vendors.xlsx: Northwind | renewal date | 2026-12-01'],
+    types: ['PDF', 'DOCX', 'XLSX', 'PPTX', 'HWP'],
   },
   // Benchmark section. Data-driven: fill in the numbers and set enabled: true. Hidden while enabled is false.
   // approaches: one bar each (value 0–100, in `unit`); the `us` entry gets the accent colour. byType: a small table.
@@ -208,7 +179,8 @@ const en = {
     ],
     note: 'Based on public documentation as of October 2026. Something out of date? Write to us and we will fix it.',
   },
-  // Safe to share: scope, originals, record. Short title, one sentence, one command.
+  // Safe to share: scope, originals, record (cards with a command), then the limits in three lines. The full promise
+  // (word for word) lives on /security.
   pillars: {
     eyebrow: 'Safe to share',
     title: 'Shared with the whole team, safely.',
@@ -217,14 +189,14 @@ const en = {
         icon: 'filter',
         label: 'Scope',
         title: 'Each person’s AI sees only what they may.',
-        body: 'Choose, per folder, whose AI may read it, and narrow any token further: one folder, read-only, for 7 days. Hidden folders look exactly like missing ones.',
+        body: '',
         cmd: 'tdrive mcp add claude --read-only --ttl 7d',
       },
       {
         icon: 'draft',
         label: 'Originals',
         title: 'Through Trina Drive, agents write drafts, not originals.',
-        body: 'Agents can’t change or delete originals through Trina Drive. They write to /drafts/, and each draft remembers which folders its content came from.',
+        body: '',
         cmd: 'echo hi > /projects/README.md',
         out: 'Originals are read-only. Write to /drafts/ and a person will move it.',
       },
@@ -232,14 +204,14 @@ const en = {
         icon: 'log',
         label: 'Record',
         title: 'Every read is logged.',
-        body: 'Who, which connection, which file: every agent call lands in a hash chain. Its fingerprint is sent off the server, so a quiet rewrite gets caught.',
+        body: '',
         cmd: 'tdrive audit verify',
       },
     ],
   },
   features: {
     eyebrow: 'What you get',
-    title: 'Ask in plain words. Your agent does the digging.',
+    title: 'Ask in plain words. Your agent digs.',
     // Text inside the small product illustrations on each card (decorative; the card text says it in words).
     minis: {
       filter: {
@@ -287,17 +259,17 @@ const en = {
       {
         icon: 'search',
         title: 'grep inside PDF and Office files',
-        body: 'grep -r reaches inside PDF, Word, Excel and PowerPoint — even HWP. Text is extracted in sandboxed workers on first use and cached by content hash. PDFs are searched by their text layer; OCR for scans comes in v0.3.',
+        body: 'PDF, Word, Excel, PowerPoint, even HWP. Scans: OCR in v0.3.',
       },
       {
         icon: 'shell',
         title: 'The commands agents already know',
-        body: 'Agents use the shell commands they already know (ls, grep -r, cat, pipes) over a virtual tree, plus file tools, search and web downloads. All of them ask the same permission function.',
+        body: 'ls, grep -r, cat and pipes, over a virtual tree.',
       },
       {
         icon: 'nas',
         title: 'No migration. Your NAS stays as it is.',
-        body: 'Register the SMB shares or local folders you already have. Nothing moves and nothing is copied to us. People keep using Finder, Explorer and Office. Remove Trina Drive and your folders are exactly as they were.',
+        body: 'Nothing moves, nothing is copied to us.',
       },
     ],
   },
@@ -305,9 +277,9 @@ const en = {
     eyebrow: 'How it works',
     title: 'Three steps. No migration.',
     steps: [
-      { title: 'Install on a Mac mini, register folders', body: 'Run the installer, pick folders on your NAS, and answer two questions per folder: who opens it on the NAS, and whose AI may read it.' },
-      { title: 'Each person connects their AI', body: 'One command makes a personal token and adds it to Claude Code, Codex or Cursor. 7 days by default, narrowed to the folders you pick, kept in the Keychain — never in a repo.', code: 'tdrive mcp add claude --server https://drive.office.lan --login alex' },
-      { title: 'Agents work. You see everything.', body: 'Agents read only what their person may read and leave drafts with sources. Every call lands in the audit log. Revoke a connection and the next request fails.' },
+      { title: 'Install on a Mac mini, register folders', body: 'Pick NAS folders. Choose whose AI may read each.' },
+      { title: 'Each person connects their AI', body: 'One command. Personal token, 7 days, in the Keychain.', code: 'tdrive mcp add claude --server https://drive.office.lan --login alex' },
+      { title: 'Agents work. You see everything.', body: 'Drafts with sources, every call logged, revoke anytime.' },
     ],
     diagram: {
       people: 'Your people and their AI',
@@ -326,43 +298,31 @@ const en = {
     },
   },
   security: {
-    eyebrow: 'Promises and limits',
-    title: 'What we promise, and what we don’t.',
+    // Shown word for word on /security (plan §7.2). The home pages show only the three limits below and link there.
     promiseLabel: 'Our promise, word for word',
     promise: [
       'Storage, permission decisions and the logs are on your server. What an agent reads goes to the AI company that made that agent (Anthropic, OpenAI and others).',
       'Mark folders where that must not happen as “No AI”. Personal folders cannot be read secretly, not even by admins (unregistering one or changing its owner notifies the owner), but whoever runs the server — for managed plans, our operators — can see the disk.',
     ],
-    protectTitle: 'What we promise',
-    protect: [
-      'Agent access = the person’s AI rules ∩ the token’s scope, decided in one function.',
-      'A hidden folder looks exactly like a missing one: same output, error and exit code.',
-      'Through Trina Drive nobody writes originals — not even admins.',
-      'A newly registered folder is visible to no AI until you choose who may read it.',
-      'Tokens are hashed, expire, live in the OS Keychain and can be revoked at once; a new client triggers an alert.',
-      'Shell commands and document parsing run in sandboxed workers; bulk-read alarms; fail-closed audit.',
-    ],
-    limitsTitle: 'What we don’t',
+    limitsTitle: 'What it doesn’t do',
     limits: [
-      'What an agent reads goes to the AI provider its person chose. Keep such folders “No AI”.',
-      'Guarantees cover access through Trina Drive only. A laptop that mounts the NAS directly goes around it.',
-      'It doesn’t stop prompt injection. It shrinks what any agent can reach and records what it read.',
-      'Copies made through an agent’s memory or local files are not caught.',
-      'NAS permissions are not read automatically: you choose per folder whose AI may read it.',
+      'What AI reads goes to its provider; use “No AI” folders.',
+      'Covers access through Trina Drive only.',
+      'Doesn’t stop prompt injection; it narrows and logs.',
     ],
-    link: 'Read the full security page',
+    link: 'Promises and limits, in full',
   },
   pricing: {
     eyebrow: 'Pricing',
     title: 'Self-hosted free forever. Pay us to run it.',
-    sub: 'Built for teams of 5 to 20. Every security feature is free and self-hostable; we charge for running Trina Drive for you, and for setup. Managed plans are priced on AI-connected people — everyone who only opens files is free.',
-    usdNote: 'All plans are billed in US dollars (USD).',
+    sub: 'Managed plans count only AI-connected people.',
+    usdNote: 'Billed in US dollars (USD).',
     billingLabel: 'Billing period',
     monthly: 'Monthly',
     yearly: 'Yearly',
     yearlyBadge: '2 months free',
     seatsLabel: 'AI-connected people',
-    trialNote: '14-day free trial of Team after a setup call. Annual billing = 2 months free.',
+    trialNote: '14-day Team trial after a setup call.',
     perMonth: '/ month',
     popular: 'Most teams',
     plans: [
@@ -373,7 +333,7 @@ const en = {
         price: { USD: '$0', KRW: '₩0' },
         unit: { USD: 'forever', KRW: 'forever' },
         annual: { USD: '', KRW: '' },
-        features: ['The full product', 'Every security feature', 'Unlimited people, folders and connections', 'Community support on GitHub'],
+        features: ['The full product', 'Every security feature', 'Unlimited people and folders', 'Community support on GitHub'],
         cta: 'Self-host it',
         ctaKind: 'link',
       },
@@ -390,9 +350,8 @@ const en = {
           note: { USD: '2 months free vs. monthly', KRW: '2 months free vs. monthly' },
         },
         features: [
-          'We install, monitor, update, back up and secure it on your office Mac mini (remote)',
+          'Installed and run on your Mac mini',
           'Up to 10 AI-connected people',
-          'Unlimited file-only people',
           'Extra AI-connected person: {extra}',
           'Email support, next business day',
         ],
@@ -422,8 +381,7 @@ const en = {
           'Everything in Team',
           'Up to 40 AI-connected people (+{extra} each beyond)',
           '4-business-hour response',
-          'Quarterly permission & audit review call',
-          'Setup included on annual',
+          'Quarterly access review · setup free on annual',
         ],
         extra: {
           monthly: { USD: '$7 / month', KRW: '₩9,000 / month' },
@@ -451,58 +409,38 @@ const en = {
     eyebrow: 'FAQ',
     title: 'Questions, answered plainly',
     more: 'Something else?',
-    moreBody: 'Write to us and a person answers within one business day.',
+    moreBody: 'A person answers within one business day.',
     items: [
       {
-        q: 'How is this different from a RAG or knowledge-graph product?',
-        a: 'There is nothing to model, chunk or embed. Agents search your folders with grep and read the files themselves, the way Claude Code works through a codebase. When a file changes, the next search sees it. Text inside PDF and Office files is extracted on first use and cached by content hash.',
+        q: 'How is this different from RAG or a knowledge graph?',
+        a: 'Nothing to model, chunk or embed. Agents grep your folders and read the files, so a change shows up on the next search.',
       },
       {
-        q: 'Why not just use a Google Drive connector?',
-        a: 'If your files already live in Google Drive, that is a sensible choice. A connector reads one file at a time; it can’t grep across your whole drive. Trina Drive searches every registered folder at once, on the NAS you already have.',
-      },
-      {
-        q: 'Why not mount the NAS and run Claude Code? It’s free and the shell is real.',
-        a: 'True, that shell is the real one. What a mount can’t give you: a narrower tree per person and per token, no write path to originals, search inside PDF and Office files, and a read log the team can see. A deny rule for one file in the client does not stop cat on the same file.',
+        q: 'Why not mount the NAS and run Claude Code?',
+        a: 'That shell is real. A mount can’t give you per-person scope, read-only originals, search inside PDF and Office files, or a shared read log.',
       },
       {
         q: 'A simulated shell isn’t bash.',
-        a: 'Right. There is no python, curl or real process, on purpose. The goal is the same commands (ls, grep -r, cat, pipes) over only the files you allow. Whether that beats plain read and search tools we are still measuring, and we will publish the result.',
+        a: 'Right: no python, curl or real processes, on purpose. The same commands (ls, grep -r, cat, pipes), over only the files you allow.',
       },
       {
         q: 'Doesn’t the data go to Anthropic or OpenAI anyway?',
-        a: 'Yes. Storage, permission decisions and logs are on your server, and what an agent reads goes to the AI company its person chose. Folders where that must not happen can be marked “No AI”: agents cannot see them at all.',
-      },
-      {
-        q: 'A permission filter can’t stop prompt injection.',
-        a: 'Correct, and we don’t claim it does. We make what one agent can reach narrower than its person, keep originals read-only through Trina Drive, label drafts with their sources, alert on bulk reads and log every call.',
+        a: 'What an agent reads goes to the AI company its person chose. Mark folders “No AI” and agents can’t see them at all.',
       },
       {
         q: 'Does it follow my NAS permissions?',
-        a: 'No. You decide per folder whose AI may read it, and you tell Trina Drive who opens each folder on the NAS. A newly registered folder is visible to no AI until you choose. Sub-folder permissions set on the NAS itself are not read.',
+        a: 'No. You choose per folder whose AI may read it, and a new folder is hidden from every AI until you do.',
       },
       {
-        q: 'Which AI tools work with it?',
-        a: 'Claude Code, Codex and Cursor today, over MCP with a personal token: tdrive mcp add claude (or codex, cursor). claude.ai and ChatGPT connectors over OAuth are built and rolling out in v0.2; they need a public HTTPS address.',
-      },
-      {
-        q: 'Someone left, or a laptop was lost. Now what?',
-        a: 'Revoke their token on the web; the very next request fails. Tokens expire (7 days by default) and the owner is alerted when a new client starts using one.',
-      },
-      {
-        q: 'Is it really open source?',
-        a: 'The open-source release is coming soon, and the license will be published with it. Our commitment: every security feature stays free and self-hostable, with no limits on people, files or connections.',
-      },
-      {
-        q: 'Who counts as an AI-connected person?',
-        a: 'Anyone who connects at least one AI tool to Trina Drive. People who only open files on the NAS or in the web app are free and unlimited.',
+        q: 'Is it open source?',
+        a: 'The source is on GitHub; the license is coming soon. Every security feature stays free and self-hostable.',
       },
     ],
   },
   cta: {
-    title: 'Give your team an AI knowledge base without building one.',
-    sub: 'Free to self-host. Or let us install and run it on your office Mac mini.',
-    primary: 'Follow on GitHub',
+    title: 'An AI knowledge base, without building one.',
+    sub: 'Free to self-host, or we run it on your office Mac mini.',
+    primary: 'View on GitHub',
     secondary: 'Book a setup call',
     install: 'Install guide',
   },
@@ -517,6 +455,7 @@ const en = {
       pricing: 'Pricing',
       security: 'Security',
       faq: 'FAQ',
+      docs: 'Docs',
       github: 'GitHub',
       securityModel: 'Security model',
       contact: 'Contact',
