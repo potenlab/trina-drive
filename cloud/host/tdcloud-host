@@ -41,7 +41,9 @@ case $cmd in
     chown "$uid:$uid" "$dir/data" "$dir/staging"
     chmod 0700 "$dir/data" "$dir/staging"
     # the team's env file: root-only, read by the docker CLI at `docker run/create --env-file`
-    aws ssm get-parameter --region "$(region)" --with-decryption --name "$param" --query Parameter.Value --output text > "$dir/env.tmp"
+    # through a pipe: run from the SSM agent, the aws CLI snap writes nothing to a stdout that is a file (exit 0)
+    aws ssm get-parameter --region "$(region)" --with-decryption --name "$param" --query Parameter.Value --output text | cat > "$dir/env.tmp"
+    grep -q '^TDRIVE_' "$dir/env.tmp" || { rm -f "$dir/env.tmp"; die "env from $param is empty"; }
     chmod 0600 "$dir/env.tmp" && mv "$dir/env.tmp" "$dir/env"
     echo "prepared $dir (uid $uid, quota ${gb}G)"
     ;;
@@ -69,8 +71,9 @@ case $cmd in
       [ -f "$f" ] || die "no $f"
       sha=$(sha256sum "$f" | cut -d' ' -f1)
       bytes=$(stat -c %s "$f")
-      # the bucket's default encryption is SSE-KMS; the object is already encrypted to the team's keys
-      aws s3 cp --region "$(region)" --only-show-errors --sse aws:kms "$f" "$dest$name"
+      # no --sse here: the bucket's default encryption (SSE-KMS with the Trina Cloud key) applies. `--sse aws:kms` alone
+      # means the AWS-managed aws/s3 key instead (first AWS run). The object is already encrypted to the team's keys.
+      aws s3 cp --region "$(region)" --only-show-errors "$f" "$dest$name"
       rm -f "$f"
       printf '{"name":"%s","bytes":%s,"sha256":"%s","key":"%s"}\n' "$name" "$bytes" "$sha" "${dest#s3://*/}$name"
     done

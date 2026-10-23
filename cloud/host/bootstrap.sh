@@ -167,7 +167,10 @@ EOF
     --no-healthcheck "$CONTROL_IMAGE" mail-relay
 else
   # ---- control host: the control plane (127.0.0.1:8790) and Caddy in front of it, host network for both
-  aws ssm get-parameter --with-decryption --name "$CONTROL_ENV_PARAM" --query Parameter.Value --output text > /etc/tdcloud/control.env
+  # through a pipe: the aws CLI snap run from the SSM agent (a rerun of this script) writes nothing when its stdout is
+  # a file (0 bytes, exit 0), and the control plane then started with an empty env (local driver, cloud.localhost)
+  aws ssm get-parameter --with-decryption --name "$CONTROL_ENV_PARAM" --query Parameter.Value --output text | cat > /etc/tdcloud/control.env
+  grep -q '^TDCLOUD_DOMAIN=' /etc/tdcloud/control.env || { echo "control env from $CONTROL_ENV_PARAM is empty or has no TDCLOUD_DOMAIN" >&2; exit 1; }
   chmod 0600 /etc/tdcloud/control.env
   mkdir -p /var/lib/tdcloud && chown 10002:10002 /var/lib/tdcloud && chmod 0700 /var/lib/tdcloud
   docker rm -f tdc-control tdc-caddy 2>/dev/null || true
@@ -182,10 +185,11 @@ EOF
   docker run -d --name tdc-caddy --restart unless-stopped --network host --env-file /etc/tdcloud/caddy.env \
     -v caddy-data:/data -v caddy-config:/config --read-only --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges:true \
     "$CADDY_IMAGE" caddy run --config /etc/caddy/Caddyfile.control --adapter caddyfile
-  # nightly consistent copy of the control database to the backup bucket (SSE-KMS, versioned)
+  # nightly consistent copy of the control database to the backup bucket (versioned; the bucket's default SSE-KMS with
+  # the Trina Cloud key: no --sse flag, which would pick the AWS-managed aws/s3 key)
   cat > /etc/cron.d/tdcloud-control-backup <<EOF
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
-23 2 * * * root f=/var/lib/tdcloud/control-snapshot.db; rm -f \$f; docker exec tdc-control bun /app/src/main.ts db snapshot \$f && aws s3 cp --only-show-errors --sse aws:kms \$f s3://$BACKUP_BUCKET/control/control-\$(date -u +\%Y\%m\%dT\%H\%M\%SZ).db; rm -f \$f
+23 2 * * * root f=/var/lib/tdcloud/control-snapshot.db; rm -f \$f; docker exec tdc-control bun /app/src/main.ts db snapshot \$f && aws s3 cp --only-show-errors \$f s3://$BACKUP_BUCKET/control/control-\$(date -u +\%Y\%m\%dT\%H\%M\%SZ).db; rm -f \$f
 EOF
 fi
 echo "tdcloud bootstrap done ($ROLE)"
