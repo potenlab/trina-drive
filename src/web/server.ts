@@ -16,6 +16,10 @@ import { forwardedClient } from './proxy'
 import { hostedGate } from './hosted'
 import { ensureWebSchema } from './schema'
 import { handleConsentApi, handleOAuth, isOAuthPath, makeOAuthRuntime, mcpOAuth } from '../oauth'
+import { davOptions, DAV_PREFIX, handleDav } from '../dav/handler'
+import { davEnabled } from '../dav/settings'
+import { googleOf } from '../gdrive/web'
+import { storageSettings } from '../managed/settings'
 import { oauthOptionsFromSettings, readPublicSettings } from '../oauth/settings'
 
 export const DEFAULT_WEB_DIR = path.join(import.meta.dir, '..', '..', 'web', 'dist')
@@ -57,6 +61,30 @@ function withHeaders(res: Response): Response {
   return res
 }
 
+/**
+ * The app's pages when Google Drive import is on: the Google Picker is Google's script (apis.google.com) showing
+ * Google's pages in a frame (docs.google.com). Only then, and only for the app shell; the API and files keep the
+ * strict policy.
+ */
+export const GOOGLE_PICKER_CSP = "default-src 'self'; script-src 'self' https://apis.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; " +
+  "img-src 'self' data: https://*.googleusercontent.com https://www.gstatic.com; font-src 'self'; connect-src 'self' https://apis.google.com https://www.googleapis.com https://content.googleapis.com; " +
+  "frame-src https://docs.google.com https://drive.google.com https://content.googleapis.com https://accounts.google.com; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
+/**
+ * Bodies outside /dav stay as small as they always were (LIMITS.requestBytes): Bun's own cap is raised for WebDAV PUTs
+ * (files up to the largest file size), so it is applied here — a declared length at once, an undeclared one as it streams.
+ */
+function capBody(req: Request): Request | Response {
+  if (!req.body) return req
+  const declared = req.headers.get('content-length')
+  if (declared !== null) return Number(declared) > LIMITS.requestBytes ? Response.json({ error: 'too_large' }, { status: 413 }) : req
+  let n = 0
+  const capped = req.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, ctl) { n += chunk.length; if (n > LIMITS.requestBytes) ctl.error(new Error('request body too large')); else ctl.enqueue(chunk) },
+  }))
+  return new Request(req, { body: capped, duplex: 'half' } as RequestInit)
+}
+
 function serveStatic(w: WebCtx, req: Request): Response {
   if (req.method !== 'GET' && req.method !== 'HEAD') return new Response('method not allowed', { status: 405, headers: { allow: 'GET, HEAD' } })
   const dir = w.opts.webDir ?? DEFAULT_WEB_DIR
@@ -75,6 +103,12 @@ function serveStatic(w: WebCtx, req: Request): Response {
 
 export async function handleWeb(w: WebCtx, req: Request, addr?: string): Promise<Response> {
   const { pathname } = new URL(req.url)
+  if (pathname === DAV_PREFIX || pathname.startsWith(DAV_PREFIX + '/')) return withHeaders(await handleDav(w, req, addr))
+  // Windows' WebDAV client asks the server root what it speaks before it mounts /dav/
+  if (req.method === 'OPTIONS' && pathname === '/' && davEnabled(w)) return withHeaders(davOptions())
+  const capped = capBody(req)
+  if (capped instanceof Response) return withHeaders(capped)
+  req = capped
   if (pathname === '/mcp' || pathname === '/health') return withHeaders(await handleRequest(w, req, { allowedOrigins: w.opts.allowedOrigins, onRequest: w.opts.onRequest, limiter: w.mcpLimiter, oauth: w.oauth ? mcpOAuth(w.oauth, w.db) : undefined }, addr))
   if (isOAuthPath(pathname)) return withHeaders(w.oauth ? await handleOAuth(w.oauth, w.db, req, addr ?? 'unknown') : Response.json({ error: 'not_found' }, { status: 404 }))
   // hosted: an admin without a second factor reaches only enrolment (hosted.ts)
@@ -82,7 +116,9 @@ export async function handleWeb(w: WebCtx, req: Request, addr?: string): Promise
   if (gate) return withHeaders(gate)
   if (pathname.startsWith('/api/oauth/')) return withHeaders(await handleConsentApi(w, w.oauth, req))
   if (pathname === '/api' || pathname.startsWith('/api/')) return withHeaders(await handleApi(w, req, addr))
-  return withHeaders(serveStatic(w, req))
+  const res = serveStatic(w, req)
+  if (res.headers.get('content-type')?.startsWith('text/html') && googleOf(w)) res.headers.set('content-security-policy', GOOGLE_PICKER_CSP)
+  return withHeaders(res)
 }
 
 export function serveWeb(ctx: Ctx, port: number, hostname = '127.0.0.1', opts: WebOptions = {}) {
@@ -91,8 +127,9 @@ export function serveWeb(ctx: Ctx, port: number, hostname = '127.0.0.1', opts: W
     port, hostname,
     // never Bun's development error page (it shows source and stack traces to the caller)
     development: false,
-    // bodies without a Content-Length are cut here too
-    maxRequestBodySize: LIMITS.requestBytes,
+    // bodies without a Content-Length are cut here too; WebDAV PUTs carry files (up to the largest file size), every
+    // other path is held to LIMITS.requestBytes in handleWeb (capBody)
+    maxRequestBodySize: davEnabled(w) ? Math.max(LIMITS.requestBytes, storageSettings(w.db, w.dataDir).maxFileBytes) : LIMITS.requestBytes,
     fetch: async (req, srv) => {
       try { return await handleWeb(w, req, forwardedClient(req, srv.requestIP(req)?.address, w.opts.trustedProxy)) } catch (e) {
         console.error(`[${NAME}] request failed:`, e)
