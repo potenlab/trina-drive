@@ -1006,7 +1006,13 @@ html[lang="en"] .bento-label { font-family: var(--font-mono); text-transform: up
 .trust-card p { margin-top: 8px; color: var(--fg-muted); font-size: 15px; line-height: 1.55; }
 .hero-note { margin-top: 14px; font-size: 14px; color: var(--fg-faint); }
 @media (max-width: 1000px) { .trust { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 560px) { .trust { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) {
+  .trust { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .trust-card { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px; padding: 18px; }
+  .trust-card .bento-icon { grid-row: span 2; }
+  .trust-card h3 { margin-top: 4px; }
+  .trust-card p { margin-top: 4px; }
+}
 
 /* the word-for-word promise (used on /security) */
 .promise {
