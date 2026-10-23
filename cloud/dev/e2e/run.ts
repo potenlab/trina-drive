@@ -21,7 +21,7 @@ import { Features } from './lib/features'
 import { Fixture } from './lib/fixture'
 import { Http } from './lib/http'
 import { SkipScenario, T, type Result, type Scenario } from './lib/ctx'
-import { makeTarget, type TargetKind } from './lib/target'
+import { makeTarget, sh, type TargetKind } from './lib/target'
 import { SCENARIOS } from './scenarios'
 
 export interface Ctx { target: ReturnType<typeof makeTarget>; http: Http; features: Features; fx: Fixture }
@@ -37,6 +37,19 @@ export async function setup(o: { target: TargetKind; verbose: boolean }): Promis
 }
 
 
+/**
+ * Local only: every scenario comes from this one address, and the console counts sign-ups (10 an hour) and sign-ins
+ * (30 per 15 minutes) per address, the drive its sign-ins (50 per 15 minutes). Their counters are cleared between
+ * scenarios so the gate measures the flows, not the order they ran in; the limits themselves are tested in
+ * cloud/control/test and test/ (and by the legacy suite's rate-limit checks).
+ */
+function resetLocalLimits(c: Ctx) {
+  if (c.target.kind !== 'local') return
+  const sql = (db: string, q: string) => `const { Database } = require('bun:sqlite'); const d = new Database(${JSON.stringify(db)}); d.exec('PRAGMA busy_timeout = 5000'); d.run(${JSON.stringify(q)})`
+  sh(['docker', 'exec', 'tdc-control', 'bun', '-e', sql(`${c.target.devEnv.TDCLOUD_STATE_DIR}/control.db`, "DELETE FROM rate WHERE key LIKE 'signup:%' OR key LIKE 'login%' OR key LIKE 'verify:%'")])
+  c.target.inTeam?.(c.target.team, ['/usr/local/bin/bun', '-e', sql('/data/db/store.db', "DELETE FROM rate_limits WHERE scope IN ('login_addr', 'login_name')")])
+}
+
 async function runOne(s: Scenario, c: Ctx, verbose: boolean): Promise<Result> {
   const t = new T(s.id, c.target, c.http, c.features, c.fx, verbose)
   const t0 = Date.now()
@@ -48,6 +61,7 @@ async function runOne(s: Scenario, c: Ctx, verbose: boolean): Promise<Result> {
     if (!r.ok) t.pending('all of it', r.reason)
   }
   if (t.pendings.length) return res('PENDING')
+  resetLocalLimits(c)
   try { await s.run(t) } catch (e) {
     if (e instanceof SkipScenario) return res('SKIP', e.message)
     t.failures.push(`threw: ${(e as Error).stack?.split('\n').slice(0, 4).join(' | ') ?? e}`)

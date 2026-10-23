@@ -26,12 +26,13 @@ export default {
     }
     t.check('kim was told about the sharing change on his folder', total > 0)
     if (await t.has('share', 'the share notification mail ("Notify people"): kind, count, link only')) {
-      const before = t.target.teamMail?.().length ?? 0
-      const r = await share(admin, { path: '/프로젝트', add: [{ subject: { type: 'person', id: sd.people.mina }, role: 'editor' }], notify: true })
+      const r = await share(admin, { path: '/재무', add: [{ subject: { type: 'person', id: sd.people.mina }, role: 'viewer' }], notify: true, confirm_widening: true })
       t.check('share with Notify', r.status === 200, r.text)
-      const m = t.target.teamMail?.().slice(before).find((x) => x.to === fx.creds('mina').email)
-      t.check('mina got a share mail with a #/shared link and no names', !!m && /#\/shared/.test(m.text) && !NAMES.some((x) => (m.subject + m.text).includes(x)), m)
-      await share(admin, { path: '/프로젝트', set: [{ subject: { type: 'person', id: sd.people.mina }, role: 'remove' }] })
+      // "shared with you" is an in-app notice: kind, count and a link to Shared with me (no mail, docs/SHARING-API.md)
+      const n = (await (await fx.drive('mina')).get('/notices')).json().notices as { kind?: string; link?: string }[]
+      const sharedN = n.find((x) => /shared/.test(x.kind ?? '') || /shared/.test(x.link ?? ''))
+      t.check('mina has a "shared with you" notice with a #/shared link and no names', !!sharedN && !NAMES.some((x) => JSON.stringify(sharedN).includes(x)), n.slice(0, 3))
+      await share(admin, { path: '/재무', set: [{ subject: { type: 'person', id: sd.people.mina }, role: 'remove' }], confirm_widening: true })
     }
     if (await t.has('mail', 'the mails the team sent')) {
       const mine = new Set([fx.creds('admin').email, ...PEOPLE.map((p) => fx.creds(p).email)])

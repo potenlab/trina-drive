@@ -63,7 +63,14 @@ export class Http {
     if (ck) headers.cookie = ck
     if (o.csrf) headers['x-csrf-token'] = o.csrf
     if (o.origin !== false && CHANGING.has(method)) headers.origin = typeof o.origin === 'string' ? o.origin : u.origin
-    const r = await fetch(url, { method, headers, body, redirect: 'manual', tls: this.t.tls, signal: AbortSignal.timeout(o.timeoutMs ?? 60_000) } as RequestInit)
+    let r!: Response
+    for (let i = 0; ; i++) {
+      // a certificate Caddy just issued can be "not yet valid" for a second when the Docker VM's clock runs ahead
+      try { r = await fetch(url, { method, headers, body, redirect: 'manual', tls: this.t.tls, signal: AbortSignal.timeout(o.timeoutMs ?? 60_000) } as RequestInit); break } catch (e) {
+        if (i >= 5 || (e as { code?: string }).code !== 'CERT_NOT_YET_VALID') throw e
+        await Bun.sleep(1500)
+      }
+    }
     o.jar?.take(u.host, r.headers)
     const text = method === 'HEAD' ? '' : await r.text()
     const loc = r.headers.get('location') ?? ''

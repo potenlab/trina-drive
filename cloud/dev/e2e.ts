@@ -54,12 +54,21 @@ function check(what: string, ok: boolean, detail?: unknown) {
 const step = (s: string) => console.log(`\n== ${s} (${Math.round((Date.now() - t0) / 1000)}s)`)
 
 interface Res { status: number; headers: Headers; text: string; json: () => any }
+/** a certificate Caddy just issued can be "not yet valid" for a second when the Docker VM's clock runs ahead: wait, retry */
+async function fetchTls(url: string, init: RequestInit): Promise<Response> {
+  for (let i = 0; ; i++) {
+    try { return await fetch(url, init) } catch (e) {
+      if (i >= 5 || (e as { code?: string }).code !== 'CERT_NOT_YET_VALID') throw e
+      await Bun.sleep(1500)
+    }
+  }
+}
 async function req(method: string, url: string, o: { body?: unknown; raw?: string; headers?: Record<string, string>; cookie?: string; origin?: boolean } = {}): Promise<Res> {
   const u = new URL(url)
   const headers: Record<string, string> = { ...(o.body !== undefined ? { 'content-type': 'application/json' } : {}), ...o.headers }
   if (o.cookie) headers.cookie = o.cookie
   if (o.origin !== false && method !== 'GET') headers.origin = u.origin
-  const r = await fetch(url, { method, headers, body: o.raw ?? (o.body !== undefined ? JSON.stringify(o.body) : undefined), redirect: 'manual', tls: { ca: CA }, signal: AbortSignal.timeout(60_000) } as RequestInit)
+  const r = await fetchTls(url, { method, headers, body: o.raw ?? (o.body !== undefined ? JSON.stringify(o.body) : undefined), redirect: 'manual', tls: { ca: CA }, signal: AbortSignal.timeout(60_000) } as RequestInit)
   const text = await r.text()
   return { status: r.status, headers: r.headers, text, json: () => JSON.parse(text) }
 }
@@ -428,7 +437,7 @@ async function freePlan() {
   const lt = outbox().filter((m) => m.to === owner && /login\/link\?token=/.test(m.text)).at(-1)?.text.match(/login\/link\?token=(\S+)/)?.[1]
   let lc = await req('POST', `${CONTROL}/api/login/link/confirm`, { body: { token: lt } })
   // the owner has a console authenticator now: the link is the first step, the code the second
-  if (lc.status === 200 && lc.json().totp_required) lc = await req('POST', `${CONTROL}/api/login/totp`, { body: { ticket: lc.json().ticket, code: await freshTotp(fc.creds?.totp ?? '') } })
+  if (lc.status === 200 && lc.json().totp_required) lc = await req('POST', `${CONTROL}/api/login/totp`, { body: { ticket: lc.json().ticket, code: await freshTotp(fce.secret) } })
   check('signed in with the link (and the authenticator code)', lc.status === 200 && /^(__Host-)?tdcloud_session=/.test(cookieOf(lc)), lc.text)
   const ownerCookie = cookieOf(lc)
   const mine = (await req('GET', `${CONTROL}/api/teams`, { cookie: ownerCookie })).json().teams as { id: string; slug: string; plan: string; paused?: boolean }[]
@@ -470,7 +479,10 @@ async function freePlan() {
   const envAfter = JSON.parse(sh(['docker', 'inspect', 'tdc-freeco']).out)[0].Config.Env as string[]
   check('Team env: 100 GB, no people limit', envAfter.includes('TDRIVE_STORAGE_QUOTA=100GB') && !envAfter.some((e) => e.startsWith('TDRIVE_MAX_PEOPLE=')))
   check('the data survived (a file, the people)', sh(['docker', 'exec', 'tdc-freeco', 'cat', '/data/keep/note.md']).out.includes('freeco keeps this') && tdrive('freeco', 'person', 'add', 'kai').code === 0)
-  check('the same address serves it, the admin session still works', (await req('GET', `${teamUrl('freeco')}/api/session`, { cookie: adminCookie })).status === 200)
+  // the recreated container serves once its member sync ran (the last step of a recreate): give it that moment
+  let sess = 0
+  for (let i = 0; i < 30 && sess !== 200; i++) { sess = (await req('GET', `${teamUrl('freeco')}/api/session`, { cookie: adminCookie })).status; if (sess !== 200) await Bun.sleep(2000) }
+  check('the same address serves it, the admin session still works', sess === 200, sess)
   check(`its host now shows a full slot (${row.host})`, / ready +1\/1 /.test(hostLine(row.host)), hostLine(row.host))
   const stats = admin('free', 'stats')
   check('free stats', stats.code === 0 && /free teams +0 of 1/.test(stats.out) && /1 upgraded/.test(stats.out) && /1 on the waitlist/.test(stats.out), stats.out + stats.err)

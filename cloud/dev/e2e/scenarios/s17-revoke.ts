@@ -18,6 +18,7 @@ export default {
     t.step('revoke')
     const r = await setRole(t, admin, '/재무', sd.folders.재무!, mina, 'remove')
     t.check(`mina removed from /재무 (${r.via})`, r.res.status === 200, r.res.text)
+    t.check('removing a reader is not answered as a widening (it cannot widen anything)', !r.widening409, r.widening409?.text)
     await expectSight(t, 'mina', '/재무/결산.md', CANARY.재무, { human: false, ai: false }, 'revoked')
     t.step('the rest of mina\'s access is as before')
     await expectSight(t, 'mina', '/공용/notice.md', CANARY.공용, { human: true, ai: true }, 'untouched')

@@ -66,9 +66,9 @@ export class Features {
     switch (f) {
       case 'team': return (await this.status('GET', `${team}/api/state`)) === 200
       case 'sso': {
-        if (!(await this.get('team')).ok) return false
-        const r = await this.http.req('GET', `${team}/api/sso/start?return=%2F`, { timeoutMs: 15_000 })
-        return r.status >= 300 && r.status < 400 && r.location.startsWith(`${this.t.control}/sso/authorize`)
+        // /api/state says so (B1); /api/sso/start sits in Caddy's sign-in rate zone, so it is not the probe
+        const r = await this.http.req('GET', `${team}/api/state`, { timeoutMs: 15_000 })
+        return r.status === 200 && !!r.json().sso?.console_url
       }
       case 'sso-console': {
         const r = await this.http.req('GET', `${this.t.control}/sso/authorize?team=team_00000000000000000000&state=x`, { timeoutMs: 15_000 })
@@ -79,9 +79,8 @@ export class Features {
       case 'shared-with-me': return (await this.get('team')).ok && (await this.status('GET', `${team}/api/shared-with-me`)) === 401
       case 'directory': return (await this.get('team')).ok && (await this.status('GET', `${team}/api/directory`)) === 401
       case 'sso-only': {
-        if (this.t.kind === 'aws') return (await this.get('sso')).ok
-        const i = sh(['docker', 'inspect', '-f', '{{json .Config.Env}}', `tdc-${this.t.team}`])
-        return i.code === 0 && (JSON.parse(i.out) as string[]).includes('TDRIVE_SSO_ONLY=1')
+        const r = await this.http.req('GET', `${team}/api/state`, { timeoutMs: 15_000 })
+        return r.status === 200 && r.json().sso?.only === true
       }
       case 'cloud-sync': {
         if (!this.t.tdrive) return (await this.get('sso')).ok

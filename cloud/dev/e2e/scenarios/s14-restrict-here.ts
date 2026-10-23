@@ -33,8 +33,10 @@ export default {
       const pre = (await shareView(kim, '/프로젝트/비밀')).json()
       const losing = (pre.entries ?? []).filter((e: { source: string; role: string }) => e.source === 'inherited' && e.role !== 'manager')
       t.check(`the dialog can show who would lose access (${losing.length} inherited entries + Anyone in the team)`, !!pre.general?.effective || losing.length > 0, pre)
-      const on = await share(kim, { path: '/프로젝트/비밀', restrict_here: { on: true, keep: [{ type: 'person', id: sd.people.boss }, { type: 'person', id: sd.people.sam }] } })
-      t.check('Restrict here on, keeping boss and sam', on.status === 200 && on.json().general?.restricted_here === true, on.text)
+      // boss and sam have rules of their own here (direct entries stay); Keep lists only entries from above
+      const on = await share(kim, { path: '/프로젝트/비밀', restrict_here: { on: true, keep: [] }, confirm_widening: true })
+      t.check('Restrict here on again (boss and sam stay: their rules are on this folder)', on.status === 200 && on.json().general?.restricted_here === true, on.text)
+      if (on.status !== 200) await share(await fx.drive('admin'), { path: '/프로젝트/비밀', restrict_here: { on: true, keep: [] }, confirm_widening: true }) // never leave the seed open
       await expectSight(t, 'mina', f, CANARY.비밀, { human: false, ai: false }, 'restricted again')
       await expectSight(t, 'kim', f, CANARY.비밀, { human: true, ai: true }, 'Manager from above, restricted again', ['web', 'mcp'])
     }

@@ -22,7 +22,8 @@ export default {
     t.check('the team answers again', ok)
     const k2 = await bash(t.http, fx.slug, kim, "cat '/재무/결산.md'; ls /")
     t.check('kim\'s token still works and still reads /재무 (rules kept)', k2.stdout.includes(CANARY.재무), k2)
-    const m2 = await mina.list('/')
+    let m2 = await mina.list('/')
+    for (let i = 0; i < 20 && m2.status !== 200; i++) { await Bun.sleep(2000); m2 = await mina.list('/') } // serves once its member sync ran
     t.check('mina\'s web session survived', m2.status === 200 && m2.text.includes('공용') && !m2.text.includes('재무'), m2.text.slice(0, 200))
     const d2 = await dav(t.http, fx.slug, davAuth(fx.login('mina'), ap), 'GET', '/공용/notice.md')
     t.check('mina\'s app password still mounts', d2.status === 200 && d2.text.includes(CANARY.공용), d2.status)
