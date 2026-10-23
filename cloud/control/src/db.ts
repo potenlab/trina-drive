@@ -107,6 +107,11 @@ export interface TeamRow {
   waiting_since: number | null; wait_alerted_at: number | null
   last_activity_at: number | null; activity_checked_at: number | null; idle_warned_at: number | null; paused_at: number | null
   delete_warnings: number; woke_at: number | null
+  // the console (migrations/console.ts): team callback token hashes, member sync state, usage poll
+  callback_hash: string | null; callback_prev_hash: string | null
+  sync_seq: number; sync_applied_seq: number | null; member_version: number; synced_version: number
+  sync_at: number | null; sync_error: string | null; sync_failing_since: number | null; sync_unmanaged: string | null
+  usage_checked_at: number | null
 }
 
 export type HostState = 'booting' | 'ready' | 'draining' | 'terminating' | 'gone' | 'lost'

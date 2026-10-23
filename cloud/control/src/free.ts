@@ -153,6 +153,31 @@ export class FreeTier {
     const t = this.now()
     const s = this.c.db.query<SignupRow, [string, number]>("SELECT * FROM free_signups WHERE secret_hash = ? AND status = 'pending' AND expires_at > ?").get(sha256(token), t)
     if (!s || this.c.db.query('UPDATE free_signups SET verified_at = ? WHERE id = ? AND verified_at IS NULL').run(t, s.id).changes !== 1) throw new CloudError('bad_link', 'this link is used, expired or wrong', 404)
+    return this.confirmed(s)
+  }
+
+  /** The console's "New team → Free" for a signed-in, confirmed account: the same rules as the public sign-up (one
+   * free team per mailbox, the cap and its waitlist; TDCLOUD_MAX_FREE_TEAMS = 0 keeps it closed). */
+  async requestForUser(userId: number, nameIn: unknown, slugIn: unknown, ip: string): Promise<{ status: 'provisioning' | 'waitlisted' | 'exists'; team?: TeamRow; url?: string }> {
+    const u = this.c.db.query<{ email: string; verified_at: number | null }, [number]>('SELECT email, verified_at FROM users WHERE id = ?').get(userId)
+    if (!u?.verified_at) throw new CloudError('unverified', 'confirm your email address first (check your inbox)', 403)
+    const name = typeof nameIn === 'string' ? nameIn.trim().replace(/\s+/g, ' ') : ''
+    if (!name || name.length > 80 || /[\p{Cc}]/u.test(name)) throw new CloudError('bad_name', 'a team name of 1–80 characters')
+    const asked = typeof slugIn === 'string' && slugIn.trim() ? slugIn.trim().toLowerCase() : null
+    if (asked) {
+      const problem = slugProblem(asked)
+      if (problem) throw new CloudError('bad_slug', `address: ${problem}`)
+      if (teamBySlug(this.c.db, asked)) throw new CloudError('slug_taken', 'that address is taken', 409)
+    }
+    const t = this.now()
+    const id = Number(this.c.db.query('INSERT INTO free_signups (email, email_key, name, slug, ip, secret_hash, created_at, expires_at, verified_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(u.email, emailKey(u.email), name, asked, ip, sha256(random(32)), t, t, t, 'pending').lastInsertRowid)
+    audit(this.c.db, { actor: `user:${userId}`, action: 'free.signup', detail: { signup: id, console: true } })
+    return this.confirmed(this.c.db.query<SignupRow, [number]>('SELECT * FROM free_signups WHERE id = ?').get(id)!)
+  }
+
+  /** A confirmed sign-up: a team, the waitlist, or "you already have one". */
+  private async confirmed(s: SignupRow): Promise<{ status: 'provisioning' | 'waitlisted' | 'exists'; team?: TeamRow; url?: string }> {
     const existing = this.existingFor(s.email)
     if (existing) {
       this.c.db.query("UPDATE free_signups SET status = 'refused', note = 'one free team per email' WHERE id = ?").run(s.id)
@@ -197,7 +222,7 @@ export class FreeTier {
     const db = this.c.db, t = this.now()
     let user = db.query<{ id: number }, [string]>('SELECT id FROM users WHERE email = ?').get(s.email)
     if (!user) {
-      user = { id: Number(db.query('INSERT INTO users (email, password_hash, verified_at, created_at) VALUES (?, ?, ?, ?)').run(s.email, await hashPassword(random(32)), t, t).lastInsertRowid) }
+      user = { id: Number(db.query('INSERT INTO users (email, password_hash, verified_at, created_at, public_id, password_set) VALUES (?, ?, ?, ?, ?, 0)').run(s.email, await hashPassword(random(32)), t, t, publicId('usr')).lastInsertRowid) }
       audit(db, { actor, action: 'user.created_free', detail: { user: user.id } })
     }
     db.query('UPDATE users SET verified_at = coalesce(verified_at, ?) WHERE id = ?').run(t, user.id)
@@ -211,6 +236,7 @@ export class FreeTier {
           const number = (db.query<{ n: number | null }, []>('SELECT max(number) AS n FROM teams').get()?.n ?? 0) + 1
           const id = Number(db.query("INSERT INTO teams (public_id, slug, name, owner_user_id, plan, status, number, sub_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'free', 'provisioning', ?, 'free', ?, ?)")
             .run(publicId('team'), slug, s.name, user!.id, number, t, t).lastInsertRowid)
+          this.c.members.addOwner(id, user!.id)
           return teamById(db, id)!
         })()
         audit(db, { actor, action: 'team.create', teamId: team.id, detail: { slug, plan: 'free', signup: s.id } })
