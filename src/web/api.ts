@@ -12,6 +12,8 @@ import {
 } from './auth'
 import * as approve from './approve'
 import * as files from './files'
+import * as managed from '../managed/web'
+import { ManagedError } from '../managed/core'
 import { consumeTicket, createTicket, has2FA, ticketFailed, ticketPerson } from './mfa'
 import { ApiError, bad, json, notFound, rateLimited, type WebCtx } from './http'
 import { markNoticesRead, noticesOf } from './notices'
@@ -69,11 +71,12 @@ function startSession(w: WebCtx, req: Request, personId: number, previous?: WebS
   return { csrf: s.csrf, cookie: sessionCookie(req, s.cookie, SESSION_MAX_MS / 1000) }
 }
 
-type Route = { method: string; re: RegExp; auth: boolean; fn: (c: Call) => Promise<Response | unknown> | Response | unknown }
+/** raw: the handler reads the body itself (uploads: multipart or bytes, with their own size limits) */
+type Route = { method: string; re: RegExp; auth: boolean; fn: (c: Call) => Promise<Response | unknown> | Response | unknown; raw?: boolean }
 interface Call { w: WebCtx; req: Request; m: RegExpExecArray; body: Record<string, unknown>; s: WebSession | null; actor: Actor; op: ops.Op; addr: string; url: URL }
 
-const R = (method: string, path: string, auth: boolean, fn: Route['fn']): Route =>
-  ({ method, re: new RegExp('^/api' + path.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$'), auth, fn })
+const R = (method: string, path: string, auth: boolean, fn: Route['fn'], raw = false): Route =>
+  ({ method, re: new RegExp('^/api' + path.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$'), auth, fn, raw })
 const id = (c: Call, k = 'id') => { const v = Number(c.m.groups?.[k]); if (!Number.isSafeInteger(v) || v <= 0) throw notFound(); return v }
 
 const routes: Route[] = [
@@ -239,6 +242,27 @@ const routes: Route[] = [
   R('GET', '/files/text', true, ({ w, actor, url }) => files.text(w, actor, url)),
   R('GET', '/files/who', true, ({ w, actor, url }) => files.who(w, actor, url)),
   R('GET', '/search', true, ({ w, actor, url }) => files.search(w, actor, url)),
+  // managed storage (src/managed): people change files where the server owns them; every op is R0/R1 + write
+  R('POST', '/files/folder', true, ({ w, actor, body: b }) => managed.mkdir(w, actor, b)),
+  R('POST', '/files/upload', true, ({ w, actor, req, url }) => managed.upload(w, actor, req, url), true),
+  R('POST', '/files/rename', true, ({ w, actor, body: b }) => managed.rename(w, actor, b)),
+  R('POST', '/files/move', true, ({ w, actor, body: b }) => managed.move(w, actor, b)),
+  R('POST', '/files/copy', true, ({ w, actor, body: b }) => managed.copy(w, actor, b)),
+  R('POST', '/files/delete', true, ({ w, actor, body: b }) => managed.remove(w, actor, b)),
+  R('GET', '/files/versions', true, ({ w, actor, url }) => managed.versions(w, actor, url)),
+  R('GET', '/files/versions/download', true, ({ w, actor, url }) => managed.versionDownload(w, actor, url)),
+  R('POST', '/files/versions/restore', true, ({ w, actor, body: b }) => managed.restoreVersion(w, actor, b)),
+  R('POST', '/files/share', true, ({ w, actor, body: b }) => managed.shareSettings(w, actor, b)),
+  R('POST', '/uploads', true, ({ w, actor, body: b }) => managed.uploadStart(w, actor, b)),
+  R('GET', '/uploads/:uid', true, (c) => managed.uploadGet(c.w, c.actor, c.m.groups!.uid!)),
+  R('PUT', '/uploads/:uid', true, (c) => managed.uploadChunk(c.w, c.actor, c.m.groups!.uid!, c.req, c.url), true),
+  R('POST', '/uploads/:uid/complete', true, (c) => managed.uploadComplete(c.w, c.actor, c.m.groups!.uid!, c.body)),
+  R('DELETE', '/uploads/:uid', true, (c) => managed.uploadCancel(c.w, c.actor, c.m.groups!.uid!)),
+  R('GET', '/trash', true, ({ w, actor }) => managed.trash(w, actor)),
+  R('POST', '/trash/empty', true, ({ w, actor }) => managed.emptyTrash(w, actor)),
+  R('POST', '/trash/:id/restore', true, (c) => managed.restore(c.w, c.actor, id(c))),
+  R('DELETE', '/trash/:id', true, (c) => managed.purge(c.w, c.actor, id(c))),
+  R('GET', '/storage', true, ({ w, actor }) => managed.storageView(w, actor)),
   R('GET', '/audit', true, ({ w, actor, url }) => views.auditView(w, actor, url.searchParams.get('view') ?? 'mine', Number(url.searchParams.get('before') ?? '') || undefined)),
 ]
 
@@ -257,12 +281,13 @@ export async function handleApi(w: WebCtx, req: Request, addr = 'unknown'): Prom
     // CSRF: every state change made with a session carries the session's token
     if (changing && s && route.auth && !csrfOk(s, req.headers.get('x-csrf-token'))) throw new ApiError(403, 'bad_csrf', 'missing or wrong CSRF token; reload the page')
     const actor: Actor = s ? { personId: s.personId, admin: s.admin } : { personId: -1, admin: false }
-    const call: Call = { w, req, m: route.re.exec(url.pathname)!, body: await body(req), s, actor, op: { w, actor, base: base(w, req) }, addr, url }
+    const call: Call = { w, req, m: route.re.exec(url.pathname)!, body: route.raw ? {} : await body(req), s, actor, op: { w, actor, base: base(w, req) }, addr, url }
     const out = await route.fn(call)
     return out instanceof Response ? out : json(out)
   } catch (e) {
     if (e instanceof ApiError || e instanceof AuthError) return json({ error: e.code, message: e.message }, e.status, e instanceof ApiError ? e.headers : undefined)
     if (e instanceof StoreError) return json({ error: 'bad_request', message: e.message }, 400)
+    if (e instanceof ManagedError) return json({ error: e.code, message: e.message }, e.status)
     console.error(`[${NAME}] ${req.method} ${url.pathname} failed:`, e)
     return json({ error: 'internal', message: 'internal error' }, 500)
   }

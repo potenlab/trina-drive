@@ -11,16 +11,18 @@
 // Every call is audited (person, "web", action, path; files whose content left). These reads add NO provenance window
 // (R3): provenance follows what an agent's token touched so its drafts carry their sources; a person reading in a
 // browser writes no drafts through this server, and what they carry in their head is out of reach either way (4, 5).
+import fs from 'node:fs'
 import { appendAudit } from '../audit'
 import { LIMITS } from '../config'
 import { ExtractError, TOOLS } from '../extract'
 import { evText, runRg } from '../grep'
 import { ext, isOffice, nfc, splitVirtual } from '../names'
 import { Access, Closed, effectiveLevel, entryName, type Entry, type FileEntry, type Node } from '../policy'
-import type { Actor } from '../rights'
+import { Rights, type Actor } from '../rights'
 import type { FolderRow } from '../store'
 import { ApiError, bad, notFound, type WebCtx } from './http'
 import { draftsView } from './views'
+import { inManaged, managedMountIds, openEntry } from '../managed/core'
 
 export const FILES_LIMITS = {
   /** extracted text returned by /files/text */
@@ -58,10 +60,14 @@ function resolve(access: Access, ps: string[]): Entry | null {
 
 const vpathOf = (e: Entry) => e.kind === 'dir' ? e.node.vpath : e.vpath
 
-function entryJson(access: Access, e: Entry) {
+/** Managed storage: a person may change this folder (managed, readable, rule ≥ write: src/managed/ops.ts). */
+const writableNode = (access: Access, ids: Set<number>, n: Node) => inManaged(ids, n) && access.canRead(n) && access.level(n) >= 2
+
+function entryJson(access: Access, e: Entry, ids?: Set<number>) {
   const name = entryName(e)
   // folder size and time are not shown: they would change with files the person cannot see (policy: synthetic stat)
-  if (e.kind === 'dir') return { name, path: e.node.vpath, kind: 'folder' as const, size: null, mtime: null, ext: null, has_text: false, readable: access.canRead(e.node) }
+  if (e.kind === 'dir') return { name, path: e.node.vpath, kind: 'folder' as const, size: null, mtime: null, ext: null, has_text: false, readable: access.canRead(e.node),
+    ...(ids ? { writable: writableNode(access, ids, e.node), managed: inManaged(ids, e.node) } : {}) }
   return { name, path: e.vpath, kind: 'file' as const, size: e.size, mtime: Math.round(e.mtimeMs), ext: ext(name) || null, has_text: hasText(name, e.size), readable: true }
 }
 
@@ -84,16 +90,18 @@ export function list(w: WebCtx, a: Actor, url: URL) {
   const access = Access.forPerson(w.db, a.personId)
   const raw = url.searchParams.get('path')
   const ps = parts(raw)
+  const ids = managedMountIds(w.db)
   if (!ps.length) {
     const entries = access.rootEntries()
     audit(w, a, 'files list /', [])
-    return { path: '/', entries: entries.map((x) => entryJson(access, x)), drafts: draftsView(w, a).drafts.length }
+    return { path: '/', writable: false, managed: false, entries: entries.map((x) => entryJson(access, x, ids)), drafts: draftsView(w, a).drafts.length }
   }
   const e = must(w, a, access, 'list', raw)
   if (e.kind !== 'dir') throw bad('not_folder', 'this is a file')
   const entries = access.list(e.node)
   audit(w, a, `files list ${e.node.vpath}`, [e.node.vpath])
-  return { path: e.node.vpath, readable: access.canRead(e.node), entries: entries.map((x) => entryJson(access, x)) }
+  return { path: e.node.vpath, readable: access.canRead(e.node), writable: writableNode(access, ids, e.node), managed: inManaged(ids, e.node),
+    entries: entries.map((x) => entryJson(access, x, ids)) }
 }
 
 export function stat(w: WebCtx, a: Actor, url: URL) {
@@ -119,6 +127,7 @@ export function download(w: WebCtx, a: Actor, url: URL): Response {
   const access = Access.forPerson(w.db, a.personId)
   const e = must(w, a, access, 'download', url.searchParams.get('path'))
   if (e.kind !== 'file') throw bad('is_folder', 'folders cannot be downloaded')
+  if (inManaged(managedMountIds(w.db), e.parent)) return streamManaged(w, a, access, e)
   const bytes = readFile(access, e) // R1 ⑤ ⑦: opened without following links, re-checked after reading
   audit(w, a, `files download ${e.vpath}`, [e.vpath])
   return new Response(bytes, {
@@ -132,6 +141,36 @@ export function download(w: WebCtx, a: Actor, url: URL): Response {
       'content-length': String(bytes.length),
     },
   })
+}
+
+/**
+ * Managed storage holds files of any size (uploads up to the max file size): they are streamed, not read into memory.
+ * Opened without following links, identity and one link checked, the folder chain re-checked (R1 ⑤ ⑦) before the
+ * first byte leaves; only the server writes there, so the file cannot change under the stream except by its own API,
+ * which replaces by rename (the open file keeps its bytes).
+ */
+function streamManaged(w: WebCtx, a: Actor, access: Access, e: FileEntry): Response {
+  let fd: number
+  try { fd = openEntry(e); access.recheck(e) } catch { throw notFound() }
+  const size = Number(fs.fstatSync(fd).size)
+  try { audit(w, a, `files download ${e.vpath}`, [e.vpath]) } catch (err) { fs.closeSync(fd); throw err }
+  let off = 0
+  let open = true
+  const close = () => { if (open) { open = false; fs.closeSync(fd) } }
+  const body = new ReadableStream<Uint8Array>({
+    pull(c) {
+      const buf = Buffer.alloc(Math.min(1024 * 1024, Math.max(0, size - off)))
+      const n = buf.length ? fs.readSync(fd, buf, 0, buf.length, off) : 0
+      if (n <= 0) { close(); c.close(); return }
+      off += n
+      c.enqueue(buf.subarray(0, n))
+    },
+    cancel() { close() },
+  })
+  return new Response(body, { headers: {
+    'content-type': 'application/octet-stream', 'content-disposition': attachment(entryName(e)), 'x-content-type-options': 'nosniff',
+    'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'no-store', 'content-length': String(size),
+  } })
 }
 
 /** Cut at a UTF-8 character boundary. */
@@ -191,8 +230,14 @@ export function who(w: WebCtx, a: Actor, url: URL) {
   if (!reg || reg.nas_readers == null || reg.nas_readers === 'unknown') nas = { mode: 'unknown', people: null }
   else if (reg.nas_readers === 'all') nas = { mode: 'all', people: null }
   else { const ids = new Set(JSON.parse(reg.nas_readers) as number[]); nas = { mode: 'chosen', people: people.filter((p) => ids.has(p.id)).map((p) => p.name) } }
+  const managed = inManaged(managedMountIds(w.db), node)
+  const r = new Rights(w.db)
+  const nearest = r.folders.get(rows[rows.length - 1]!.id)
+  // managed storage has no NAS: readers are the rule readers (R5 with no NAS readers), and "who can see" says so
   return {
-    path, folder: node.vpath, restricted: false, flags,
+    path, folder: node.vpath, restricted: false, flags, managed,
+    // the folder page (rules) is for the admin and manage holders (R7); never inside a personal folder
+    can_share: !rows.some((x) => x.personal_owner != null) && (a.admin || (!!nearest && r.manages(a.personId, nearest))),
     personal_owner: owner == null ? null : people.find((p) => p.id === owner)?.name ?? null,
     // AI readers: what agents of these people may read here (none while a flag closes the folder to agents)
     ai: {
@@ -202,7 +247,7 @@ export function who(w: WebCtx, a: Actor, url: URL) {
     },
     // people who open it in this web view (the same rules; "No AI" does not close it for people)
     web: webClosed ? [] : ruleReaders.map((p) => p.name),
-    nas,
+    nas: managed ? null : nas,
   }
 }
 
