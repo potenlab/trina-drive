@@ -320,7 +320,7 @@ const enB = {
   },
   pricing: {
     ...en.pricing,
-    title: 'We set it up and run it. Or self-host it free.',
+    title: 'We set it up and run it.\nOr self-host it free.',
     sub: 'Priced on AI-connected people. File-only people are free.',
   },
   setup: {

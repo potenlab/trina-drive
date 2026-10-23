@@ -22,7 +22,7 @@ const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bi
   <div class="container">
     <div class="section-head center">
       <span class="eyebrow">{p.eyebrow}</span>
-      <h2 id="pricing-title">{p.title}</h2>
+      <h2 id="pricing-title">{p.title.split('\n').map((line, i) => <>{i > 0 && <br />}{line}</>)}</h2>
       <p>{p.sub}</p>
     </div>
     <div class="pricing-top">

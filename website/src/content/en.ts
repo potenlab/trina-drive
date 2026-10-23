@@ -322,7 +322,7 @@ const en = {
   },
   pricing: {
     eyebrow: 'Pricing',
-    title: 'Self-hosted free forever. Pay us to run it.',
+    title: 'Self-hosted free forever.\nPay us to run it.',
     sub: 'Managed plans count only AI-connected people.',
     usdNote: 'Billed in US dollars (USD).',
     billingLabel: 'Billing period',
