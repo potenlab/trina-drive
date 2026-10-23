@@ -1,0 +1,67 @@
+<!doctype html>
+<!-- README banner (?v=banner, 1280×400), GitHub social preview (?v=social, 1280×640) and the chat illustration
+     (?v=chat, 1280×860; needs ?img= a screenshot of the drive.trina.app/b hero chat). Rendered with headless Chromium
+     (see capture notes in docs/assets/src/README.txt). Fonts and images come from the website folder, read only. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Trina Drive banner</title>
+<style>
+  @font-face { font-family: "Geist"; src: url("../../../website/public/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; }
+  @font-face { font-family: "Geist Mono"; src: url("../../../website/public/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; }
+  :root { --fg: #f2f3f5; --muted: #a7adb6; --accent: #3ddc97; --grad: linear-gradient(100deg, #6ee7b7 0%, #3ddc97 40%, #67e8f9 100%); }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1280px; height: 400px; overflow: hidden; background: #08090b; }
+  body { font-family: "Geist", system-ui, sans-serif; color: var(--fg); position: relative; -webkit-font-smoothing: antialiased; }
+  .bg { position: absolute; inset: 0; background: url("../../../website/public/img/hero-dark-2400.webp") center 42% / cover no-repeat; }
+  .bg::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse 52% 70% at 50% 50%, rgba(8, 9, 11, 0.92) 0%, rgba(8, 9, 11, 0.7) 55%, rgba(8, 9, 11, 0.15) 100%); }
+  .c { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 80px; }
+  .brand { display: flex; align-items: center; gap: 14px; font-size: 30px; font-weight: 640; letter-spacing: -0.02em; }
+  .brand svg { width: 46px; height: 46px; }
+  h1 { margin-top: 22px; font-size: 46px; line-height: 1.12; font-weight: 640; letter-spacing: -0.035em; }
+  h1 span { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { margin-top: 20px; font-size: 17px; color: var(--muted); display: flex; gap: 22px; }
+  .sub b { color: var(--fg); font-weight: 520; }
+  .sub i { font-style: normal; color: var(--accent); margin-right: 7px; }
+  .tags { margin-top: 26px; display: flex; gap: 10px; font: 500 15px "Geist Mono", monospace; color: var(--muted); }
+  .tags span { padding: 6px 12px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: rgba(255,255,255,.04); }
+  body.social, body.social .bg { height: 640px; } html:has(body.social) { height: 640px; }
+  body.social h1 { font-size: 60px; margin-top: 34px; } body.social .brand { font-size: 38px; } body.social .brand svg { width: 58px; height: 58px; }
+  body.social .sub { font-size: 21px; margin-top: 28px; flex-direction: column; gap: 10px; } body.social .tags { margin-top: 34px; font-size: 17px; }
+  body.social .bg::after { background: radial-gradient(ellipse 60% 70% at 50% 50%, rgba(8, 9, 11, 0.93) 0%, rgba(8, 9, 11, 0.72) 60%, rgba(8, 9, 11, 0.2) 100%); }
+  /* chat illustration */
+  html:has(body.chat) { height: 860px; background: #f6f7f6; }
+  body.chat { height: 860px; background: #f6f7f6; color: #0a0b0d; }
+  body.chat .bg { background-image: url("../../../website/public/img/hero-light-2400.webp"); opacity: .9; } body.chat .bg::after { display: none; }
+  body.chat .c { justify-content: flex-start; padding: 40px 56px 0; }
+  .label { display: inline-flex; align-items: center; gap: 10px; padding: 8px 16px; border-radius: 999px; background: #e7f6ef; color: #0a7a53;
+    border: 1px solid rgba(10, 122, 83, .25); font-size: 17px; font-weight: 580; }
+  .label::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #0a7a53; box-shadow: 0 0 0 4px rgba(10,122,83,.15); }
+  .shot { margin-top: 26px; width: 1168px; border-radius: 18px; }
+  .note { margin-top: 18px; font-size: 14px; color: #656b74; }
+  body:not(.chat) .chatonly, body.chat .nochat { display: none; }
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="c nochat">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" fill="#f2f3f5"/><path d="M8 11.5a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2V21a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2z" fill="none" stroke="#0a0b0d" stroke-width="1.8" stroke-linejoin="round"/><circle cx="16" cy="16.5" r="1.9" fill="#0a7a53"/><path d="M16 18v2.4" stroke="#0a7a53" stroke-width="1.8" stroke-linecap="round"/></svg>
+    Trina Drive
+  </div>
+  <h1>Your company folders,<br><span>as your team’s AI knowledge base.</span></h1>
+  <div class="sub"><span><i>●</i>Each person’s AI sees only what they may</span><span><i>●</i>Through Trina Drive, AI writes drafts, not originals</span><span><i>●</i>Every read logged</span></div>
+  <div class="tags"><span>Claude</span><span>ChatGPT</span><span>Codex</span><span>Cursor</span><span>MCP</span><span>self-hosted</span></div>
+</div>
+<div class="c chatonly">
+  <span class="label">In the Claude app or ChatGPT · connectors in v0.2, rolling out</span>
+  <img class="shot" id="shot" alt="">
+  <p class="note">Illustration from drive.trina.app/b · fictional company and people · Codex, Claude Code and Cursor connect today</p>
+</div>
+<script>
+  const q = new URLSearchParams(location.search), v = q.get('v') ?? 'banner'
+  document.body.className = v
+  if (q.get('img')) document.getElementById('shot').src = q.get('img')
+</script>
+</body>
+</html>
