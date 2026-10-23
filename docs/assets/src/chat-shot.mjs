@@ -3,7 +3,7 @@ const S = process.env.S
 const exe = process.env.CHROME // a Chromium or Chrome binary
 const b = await chromium.launch({ executablePath: exe, headless: true })
 const p = await b.newPage({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2, colorScheme: 'light', locale: 'en-US' })
-await p.goto('https://drive.trina.app/b', { waitUntil: 'networkidle' })
+await p.goto(process.env.URL ?? 'https://drive.trina.app/b', { waitUntil: 'networkidle' }) // URL= a local preview before deploy
 await p.waitForTimeout(1500)
 const el = p.locator('.cd').first()
 await el.scrollIntoViewIfNeeded()

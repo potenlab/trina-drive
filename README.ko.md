@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/potenlab/trina-drive/stargazers"><img src="https://img.shields.io/github/stars/potenlab/trina-drive?style=flat&logo=github&color=0a7a53" alt="GitHub stars"></a>
+  <a href="https://github.com/potenlab/trina-drive/stargazers"><img src="https://img.shields.io/github/stars/potenlab/trina-drive?style=flat&logo=github&color=c43d0a" alt="GitHub stars"></a>
   <a href="https://github.com/potenlab/trina-drive/actions/workflows/ci.yml"><img src="https://github.com/potenlab/trina-drive/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="라이선스: Apache-2.0"></a>
   <a href="#빠르게-시작하기"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Docker-555" alt="플랫폼: macOS | Docker"></a>
-  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-3ddc97" alt="PR 환영"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-ff5b1f" alt="PR 환영"></a>
   <a href="https://github.com/potenlab/trina-drive/discussions"><img src="https://img.shields.io/badge/chat-Discussions-6E56CF?logo=github" alt="GitHub Discussions"></a>
 </p>
 
