@@ -1,0 +1,14 @@
+{
+  "name": "trina-cloud-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Trina Cloud control plane: signup, Paddle billing, one isolated Trina Drive instance per team.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "start": "bun src/main.ts serve",
+    "cli": "bun src/main.ts",
+    "test": "bun test --timeout 30000 test",
+    "typecheck": "../../node_modules/.bin/tsc --noEmit -p ."
+  }
+}
