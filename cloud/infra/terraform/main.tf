@@ -22,9 +22,14 @@ locals {
   ssm_control_env = "/${var.name}/control/env"
   ssm_ask_key     = "/${var.name}/caddy-ask-key"
   ssm_teams       = "/${var.name}/teams"
-  # mail: the control plane sends as cloud@, the team instances (through each host's relay) as team_mail_address
-  control_mail_address = "cloud@${local.mail_domain}"
-  team_mail_address    = var.team_mail_address != "" ? var.team_mail_address : "drive@${local.mail_domain}"
+  # the Resend API key (a sending-only key is enough), one SecureString per role so each reads only its own
+  ssm_control_mail_key = "/${var.name}/control/resend-api-key"
+  ssm_hosts_mail_key   = "/${var.name}/hosts/resend-api-key"
+  # mail: the control plane sends as cloud@, the team instances (through each host's relay) as team_mail_address, in
+  # the Resend domain (drive.trina.app, DNS at Cloudflare) or, with SES, in the SES identity's domain
+  send_domain          = var.mail_upstream == "ses" ? local.mail_domain : var.resend_domain
+  control_mail_address = "cloud@${local.send_domain}"
+  team_mail_address    = var.team_mail_address != "" ? var.team_mail_address : "drive@${local.send_domain}"
   team_mail_from       = "${var.team_mail_name} <${local.team_mail_address}>"
   # SES authorizes a send against the identity it matches, which is not always the domain: before the domain verifies
   # (and for sandbox recipients) it checks identity/<address> (first AWS run: AccessDenied on identity/drive@...). The

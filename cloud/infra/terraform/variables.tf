@@ -95,7 +95,7 @@ variable "manage_ses_identity" {
 }
 
 variable "team_mail_address" {
-  description = "Address every team instance sends from (invites, password resets, notifications), in mail_domain. Empty = drive@<mail_domain>. The hosts' role may send from this address only."
+  description = "Address every team instance sends from (invites, password resets, notifications), in the sending domain (resend_domain with Resend, mail_domain with SES). Empty = drive@<that domain>. The relay (and, with SES, the hosts' role) lets teams send from this address only."
   type        = string
   default     = ""
 }
@@ -122,4 +122,20 @@ variable "kms_admin_arns" {
   description = "IAM users/roles that administer the KMS key through its key policy. Needed when the identity running Terraform has no kms:PutKeyPolicy in IAM (KMS refuses a policy that would lock its creator out); e.g. [\"arn:aws:iam::<account>:user/tdcloud-deploy\"]."
   type        = list(string)
   default     = []
+}
+
+variable "mail_upstream" {
+  description = "How mail leaves Trina Cloud, for the control plane (TDCLOUD_MAILER) and each host's mail relay (TDCLOUD_MAIL_UPSTREAM): resend (Resend's HTTPS API; the API key in the SSM SecureStrings <name>/control/resend-api-key and <name>/hosts/resend-api-key), ses (Amazon SES with the instance roles; needs SES production access) or smtp (SMTP submission, by default Resend's SMTP with the same key)."
+  type        = string
+  default     = "resend"
+  validation {
+    condition     = contains(["resend", "ses", "smtp"], var.mail_upstream)
+    error_message = "mail_upstream is resend, ses or smtp."
+  }
+}
+
+variable "resend_domain" {
+  description = "Sending domain verified in Resend (region ap-northeast-1) when mail_upstream is resend or smtp: teams send as drive@<it>, the control plane as cloud@<it>. Its DNS is not in this Terraform (drive.trina.app is at Cloudflare): add the records from the Resend dashboard there (cloud/scripts/resend-domain.ts prints and checks them)."
+  type        = string
+  default     = "drive.trina.app"
 }

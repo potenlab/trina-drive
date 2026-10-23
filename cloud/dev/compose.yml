@@ -73,7 +73,7 @@ services:
         ipv4_address: 10.250.250.10
 
   # The mail relay, as on an AWS team host (cloud/host/bootstrap.sh): on the host network of the Docker engine (here the
-  # engine's VM), so every team reaches it at its own network's gateway and nothing else. Instead of SES it appends each
+  # engine's VM), so every team reaches it at its own network's gateway and nothing else. Instead of Resend it appends each
   # message to .state/team-mail.log — the dev mail sink the end-to-end test reads.
   mail:
     image: tdcloud-control:dev
@@ -83,7 +83,7 @@ services:
     network_mode: host
     environment:
       TDCLOUD_TEAM_MAIL_FROM: ${TDCLOUD_TEAM_MAIL_FROM}
-      TDCLOUD_MAIL_RELAY_UPSTREAM: outbox:${TDCLOUD_STATE_DIR}/team-mail.log
+      TDCLOUD_MAIL_UPSTREAM: outbox:${TDCLOUD_STATE_DIR}/team-mail.log
       TDCLOUD_MAIL_RELAY_LISTEN: 0.0.0.0:8025
     volumes:
       - ${TDCLOUD_STATE_DIR}:${TDCLOUD_STATE_DIR}

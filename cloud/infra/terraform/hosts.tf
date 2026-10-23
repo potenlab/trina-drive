@@ -67,6 +67,8 @@ resource "aws_launch_template" "host" {
     control_env_param  = local.ssm_control_env
     ask_key_param      = local.ssm_ask_key
     team_mail_from     = local.team_mail_from
+    mail_upstream      = var.mail_upstream
+    mail_key_param     = local.ssm_hosts_mail_key
     team_subnets       = var.team_subnets
     front_proxies      = join(" ", var.front_proxies)
   }))

@@ -4,7 +4,7 @@
 #
 # ROLE=host     a team host: Docker, the AppArmor profile for bwrap, an XFS data volume with project quotas at
 #               /srv/tdcloud, a firewall that keeps team containers off the VPC, the metadata service and each other,
-#               an Elastic IP from the pool, Caddy, the mail relay (team mail → SES with this instance's role), and the
+#               an Elastic IP from the pool, Caddy, the mail relay (team mail → Resend, or SES with this instance's role), and the
 #               host agent (tdcloud-host) for the control plane's SSM commands.
 # ROLE=control  the control host: Docker, the control-plane container on 127.0.0.1:8790 (env from SSM Parameter
 #               Store), Caddy (Caddyfile.control) for https://<domain>, nightly copy of the control database to S3.
@@ -170,12 +170,15 @@ EOF
   done
 
   # ---- the mail relay: team instances send mail (SES v2 API) to their network's gateway, port 8025; the relay checks
-  # the sender and the From and signs for SES with this instance's role (cloud/control/src/relay.ts). Host network:
-  # it must reach the metadata service (hop limit 1) and listen on every team gateway.
+  # the sender and the From, then hands the message to MAIL_UPSTREAM (cloud/control/src/relay.ts): resend (default;
+  # the API key is read by the relay itself from the SecureString MAIL_KEY_PARAM with this instance's role, so it is
+  # never on disk, in an env file or on a command line) or ses (signed with the role). Host network: it must reach the
+  # metadata service (hop limit 1) and listen on every team gateway.
   docker rm -f tdc-mail 2>/dev/null || true
   docker run -d --name tdc-mail --restart unless-stopped --network host \
     -e AWS_REGION="$REGION" -e TDCLOUD_TEAM_MAIL_FROM="$TEAM_MAIL_FROM" -e TDCLOUD_TEAM_SUBNETS="$TEAM_SUBNETS" \
-    -e TDCLOUD_MAIL_RELAY_LISTEN="0.0.0.0:${MAIL_RELAY_PORT:-8025}" -e TDCLOUD_MAIL_RELAY_UPSTREAM=ses \
+    -e TDCLOUD_MAIL_RELAY_LISTEN="0.0.0.0:${MAIL_RELAY_PORT:-8025}" -e TDCLOUD_MAIL_UPSTREAM="${MAIL_UPSTREAM:-resend}" \
+    -e TDCLOUD_RESEND_API_KEY_PARAM="${MAIL_KEY_PARAM:-/tdcloud/hosts/resend-api-key}" \
     --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 256m --pids-limit 128 \
     --no-healthcheck "$CONTROL_IMAGE" mail-relay
 else

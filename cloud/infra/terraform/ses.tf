@@ -1,5 +1,6 @@
-# Mail from the control plane (email confirmation, the one-time setup link, billing notices) and from the teams (through
-# each host's relay) through SES. With the mail domain inside the Route 53 zone (the default: mail_domain = domain) the
+# SES, kept for later (mail_upstream = "ses"): Resend is the default sender (variables.tf, mail_upstream; AWS has not
+# given the account production access). With SES, mail from the control plane (email confirmation, the one-time setup
+# link, billing notices) and from the teams (through each host's relay) goes through this identity. With the mail domain inside the Route 53 zone (the default: mail_domain = domain) the
 # DKIM CNAMEs are added here and the identity verifies itself once Gabia delegates the zone; another domain needs the
 # CNAMEs from outputs.ses_dkim_records in its own DNS. Then request production access (SES starts in the sandbox: only
 # verified recipients).

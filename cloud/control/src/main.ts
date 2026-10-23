@@ -14,7 +14,7 @@ import { FakeDriver } from './drivers/fake'
 import { LocalPool, LocalRunner, localDockerDriver } from './drivers/local'
 import type { Driver, HostPool } from './drivers/types'
 import { KmsKeyWrapper, LocalKeyWrapper, type KeyWrapper } from './keys'
-import { OutboxMailer, SesMailer, type Mailer } from './mailer'
+import { mailerFor, type Mailer } from './mailer'
 import { planOf, SLOTS_SQL } from './plans'
 import { MAX_BODY_BYTES, relayFromEnv } from './relay'
 import { seal, unseal } from './seal'
@@ -44,7 +44,7 @@ const HELP = `Trina Cloud control plane
   jobs list | jobs run                    pending jobs | run the due ones once
   db snapshot <file>                      a consistent copy of the control database (the control host ships it to S3 nightly)
   audit verify | audit list [--team slug] [--limit N]
-  mail-relay                              (on each team host) team instances' mail → SES with the host's role (src/relay.ts)
+  mail-relay                              (on each team host) team instances' mail → Resend / SES (src/relay.ts)
   seal --recipient KEY [--out FILE]       (helper) encrypt stdin to a team backup key
   seal-dir --dir D --recipient KEY --out FILE [--exclude a,b]   (helper) tar a directory and seal it
   unseal --key-file FILE [--in FILE] [--out FILE]
@@ -57,7 +57,7 @@ export function buildCloud(cfg: Config, opts: { driver?: Driver; pool?: HostPool
   const aws = new AwsClient(cfg.aws.region, creds)
   const target = parseTarget(cfg.backupTarget, cfg.aws.region, creds)
   const keys = opts.keys ?? (cfg.kmsKeyId ? new KmsKeyWrapper(aws, cfg.kmsKeyId) : LocalKeyWrapper.fromFile(cfg.masterKeyFile ?? path.join(cfg.stateDir, 'master.key')))
-  const mailer = opts.mailer ?? (cfg.mailer === 'ses' ? new SesMailer(aws, cfg.mailFrom) : new OutboxMailer(path.join(cfg.stateDir, 'outbox.log')))
+  const mailer = opts.mailer ?? mailerFor(cfg, aws)
   let cloud: Cloud | null = null
   const driver = opts.driver ?? (cfg.driver === 'aws'
     ? awsDriver({
