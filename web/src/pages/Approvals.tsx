@@ -11,7 +11,7 @@ import { at, type ApKey } from './approve-i18n'
 import './approve.css'
 
 interface StepUp { method: 'passkey' | 'totp' | null; missing: 'passkey' | 'totp' | null; lan_only: boolean; public_url: string | null }
-interface Item { id: number; status: string; created_at: number; expires_at: number; decided_at: number | null; target: string; name: string; size: number; gain: number; can_decide: boolean; mine: boolean; requester: string; via: 'agent' | 'web' }
+interface Item { id: number; status: string; created_at: number; expires_at: number; decided_at: number | null; target: string; name: string; size: number; gain: number; can_decide: boolean; mine: boolean; requester: string; via: 'agent' | 'web'; overwrite?: boolean }
 interface Detail extends Item {
   sha256: string; draft_version: number; draft_path: string; decided_by: string | null; decision_reason: string | null; approvers_exist: boolean | null
   sources: ({ folder: string; strong: boolean } | string)[]; hidden_sources: number; gainers: { count: number; names: string[] } | null
@@ -48,7 +48,7 @@ function ApprovalList() {
           {data.items.map((x) => (
             <li key={x.id}>
               <div className="row-main">
-                <a href={`#/approvals/${x.id}`}><strong className="mono">{x.target}/{x.name}</strong></a> <StatusBadge s={x.status} />
+                <a href={`#/approvals/${x.id}`}><strong className="mono">{x.target}/{x.name}</strong></a> <StatusBadge s={x.status} />{x.overwrite && <> <Badge kind="warn">{at('ap_overwrite')}</Badge></>}
                 {x.mine && <> <Badge>{at('ap_mine')}</Badge></>}
                 <div className="muted small">
                   {at('ap_by', { name: x.requester })} {at(x.via === 'agent' ? 'ap_via_agent_short' : 'ap_via_web')} · {fmtDate(x.created_at)}
@@ -92,7 +92,7 @@ function ApprovalPage({ id }: { id: number }) {
   })
 
   return (
-    <Page title={`${d.target}/${d.name}`} actions={<StatusBadge s={d.status} />}>
+    <Page title={`${d.target}/${d.name}`} actions={<><StatusBadge s={d.status} />{d.overwrite && <Badge kind="warn">{at('ap_overwrite')}</Badge>}</>}>
       <p className="crumbs"><a href="#/approvals">← {at('ap_back')}</a></p>
       <section className="card">
         <p>{at('ap_by', { name: d.requester })} {d.via === 'agent' ? at('ap_via_agent', { token: d.requester_token ?? '…' }) : at('ap_via_web')} · {fmtDate(d.created_at)}
