@@ -21,9 +21,13 @@ import type { DB } from './db'
 import { sourcesFor, type Blobs, type Draft } from './drafts'
 import { sniffLink, SNIFF_BYTES } from './inplace/linkish'
 import { ext, isSystemName, nfc, splitVirtual } from './names'
-import { Access, isWidening, readersSource, readersTarget, type Node } from './policy'
+import { Access, isWidening, readersSource, readersTarget, type FileEntry, type Node } from './policy'
 import { Rights } from './rights'
 import { ensureFolder, sha256, type FolderRow } from './store'
+import { dropStaged, gcBlobs, inManaged, managedMountIds, ManagedError, placeNew, placeReplace, stageBytes, taken as mTaken, trackNew, trackReplace, type Placed as ManagedPlaced } from './managed/core'
+import { indexLater } from './managed/ops'
+import { versionsKept } from './managed/settings'
+import type { Mirror } from './mirror'
 import { ensureWebSchema } from './web/schema'
 
 export const APPROVAL_TTL_MS = 7 * 86400_000
@@ -57,6 +61,9 @@ export function ensurePromoteSchema(db: DB) {
   if (done.has(db)) return
   ensureWebSchema(db) // approvers are people with a web sign-in (accounts)
   db.exec(SCHEMA)
+  // managed storage: a promote may replace an existing file (it becomes an earlier version, so nothing is lost)
+  if (!db.query<{ name: string }, []>('PRAGMA table_info(approvals)').all().some((c) => c.name === 'overwrite'))
+    db.exec('ALTER TABLE approvals ADD COLUMN overwrite INTEGER NOT NULL DEFAULT 0')
   done.add(db)
 }
 
@@ -95,6 +102,7 @@ export function checkTargetName(name: unknown): string {
 }
 
 /** A name already there (any spelling equal after NFC, case-insensitively), or its Mac sidecar. */
+const nameTakenSafe = (dir: string, name: string) => { try { return nameTaken(dir, name) } catch { return false } }
 function nameTaken(dir: string, name: string): boolean {
   const want = nfc(name).toLowerCase()
   let names: string[]
@@ -158,7 +166,11 @@ function checkContent(bytes: Uint8Array) {
 }
 
 // ---------- writing ----------
-export interface Placed { real: string; dev: string; ino: string }
+export interface Placed {
+  real: string; dev: string; ino: string
+  /** managed storage (src/managed): placed through its staging and versions; recorded as a file row (and a version) */
+  managed?: { placed: ManagedPlaced; keep: number }
+}
 
 /** ⑦ for folders: every step from the mount down is still the same folder and not a link. */
 function recheckDir(node: Node) {
@@ -225,6 +237,7 @@ export function placeNewFile(node: Node, name: string, bytes: Uint8Array): Place
 
 /** Undo a placement whose record could not be written (only if it is still the file we wrote). */
 export function unplace(p: Placed) {
+  if (p.managed) { p.managed.placed.undo(); return }
   try {
     const st = fs.lstatSync(p.real, { bigint: true })
     if (String(st.dev) === p.dev && String(st.ino) === p.ino) fs.unlinkSync(p.real)
@@ -241,6 +254,11 @@ interface RecordArgs {
 /** Inside the caller's transaction: the promotion row and the tracked/confirmed copy that passes Src(d) on (R3/R6). */
 export function recordPromotion(db: DB, a: RecordArgs): number {
   ensurePromoteSchema(db)
+  if (a.placed.managed) {
+    const m = a.placed.managed
+    if (m.placed.replaced) { const r = trackReplace(db, m.placed, a.byPerson, a.now, m.keep); gcLater.set(m.placed, r.dropped) }
+    else trackNew(db, m.placed, a.byPerson, a.now)
+  }
   const id = Number(db.query(`INSERT INTO promotions (at, approval_id, draft_id, draft_version, sha256, size, by_person, token_id, target_folder_id, path, vpath, dev, ino, widening)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(a.now, a.approvalId, a.draft.id, a.draft.version, a.draft.sha256, a.draft.size, a.byPerson, a.tokenId,
     a.targetId, a.placed.real, a.vpath, a.placed.dev, a.placed.ino, a.widening ? 1 : 0).lastInsertRowid)
@@ -258,14 +276,14 @@ export function recordPromotion(db: DB, a: RecordArgs): number {
 
 // ---------- requests ----------
 export type Plan =
-  | { kind: 'write'; target: Target; bytes: Uint8Array; draft: Draft; name: string }
-  | { kind: 'approval'; target: Target; bytes: Uint8Array; draft: Draft; name: string; gain: number[] }
+  | { kind: 'write'; target: Target; bytes: Uint8Array; draft: Draft; name: string; overwrite: boolean }
+  | { kind: 'approval'; target: Target; bytes: Uint8Array; draft: Draft; name: string; gain: number[]; overwrite: boolean }
 
 /**
  * Decide what a promote does (nothing is written here): the draft's current version, a valid new name, a target the
  * promoter may promote into, and whether it widens. `expectedSha` (optional) must be the draft's current version.
  */
-export function planPromote(db: DB, blobs: Blobs, p: Promoter, draft: Draft, folder: unknown, name: unknown, expectedSha?: unknown): Plan {
+export function planPromote(db: DB, blobs: Blobs, p: Promoter, draft: Draft, folder: unknown, name: unknown, expectedSha?: unknown, overwrite?: unknown): Plan {
   ensurePromoteSchema(db)
   const n = checkTargetName(name)
   if (expectedSha !== undefined && expectedSha !== null && expectedSha !== '' && expectedSha !== draft.sha256)
@@ -274,10 +292,18 @@ export function planPromote(db: DB, blobs: Blobs, p: Promoter, draft: Draft, fol
   const bytes = blobs.get(draft.sha256)
   if (sha256(bytes) !== draft.sha256) throw new PromoteError('draft_changed', 'the stored draft does not match its hash', 500)
   checkContent(bytes)
-  if (nameTaken(target.node.real, n)) throw exists(n, target.vpath)
+  // managed storage keeps every earlier version, so a promote may replace a file there (asked for explicitly);
+  // on a NAS (in place) it never does: the file there has no earlier version this server could give back
+  const managed = inManaged(managedMountIds(db), target.node)
+  let replace = false
+  if (nameTaken(target.node.real, n)) {
+    if (overwrite !== true || !managed) throw managed ? new PromoteError('exists', `${target.vpath}/${n} already exists. Pass overwrite: true to replace it (the current file is kept as an earlier version), or choose another name.`, 409) : exists(n, target.vpath)
+    existingFile(p.access, target.node, n)
+    replace = true
+  }
   const src = [...draft.src.keys()]
   const widening = src.length > 0 && isWidening(db, src, target.folderId)
-  return widening ? { kind: 'approval', target, bytes, draft, name: n, gain: readerGain(db, src, target.folderId) } : { kind: 'write', target, bytes, draft, name: n }
+  return widening ? { kind: 'approval', target, bytes, draft, name: n, gain: readerGain(db, src, target.folderId), overwrite: replace } : { kind: 'write', target, bytes, draft, name: n, overwrite: replace }
 }
 
 /** Right before writing: the draft is still at the version planned (base-hash check). */
@@ -286,17 +312,60 @@ export function checkBase(db: DB, draftId: number, sha: string) {
   if (!l || l.deleted_at != null || l.sha256 !== sha) throw new PromoteError('draft_changed', 'The draft changed (or was deleted) while promoting; nothing was written. Read it again.', 409)
 }
 
+/** The visible file a replace would overwrite (a folder or a closed entry of that name is never replaced). */
+function existingFile(access: Access, node: Node, name: string): FileEntry {
+  const there = mTaken(node.real, name)
+  const e = there ? access.child(node, there) : null
+  if (!e || e.kind !== 'file') throw new PromoteError('exists', `${node.vpath}/${name} exists and is not a file that can be replaced`, 409)
+  return e
+}
+
 /** Write a non-widening plan now. Returns the placement; the caller records it (recordPromotion) with its audit row. */
-export function executeWrite(db: DB, plan: Extract<Plan, { kind: 'write' }>): Placed {
+export function executeWrite(db: DB, plan: Extract<Plan, { kind: 'write' }>, access?: Access): Placed {
   checkBase(db, plan.draft.id, plan.draft.sha256)
-  return placeNewFile(plan.target.node, plan.name, plan.bytes)
+  return place(db, plan.target.node, plan.name, plan.bytes, plan.overwrite, access ?? new Access(db, { personId: -1 }))
+}
+
+/** Into managed storage through its staging (new file, or a replace that keeps the old bytes); elsewhere a new file. */
+function place(db: DB, node: Node, name: string, bytes: Uint8Array, overwrite: boolean, access: Access): Placed {
+  if (!inManaged(managedMountIds(db), node)) return placeNewFile(node, name, bytes)
+  const root = path.dirname(node.rows[0]!.path) // a managed team folder is a directory right in the managed root (folders.ts)
+  const staged = stageBytes(root, bytes)
+  let mp: ManagedPlaced
+  try {
+    if (overwrite) mp = placeReplace(root, node, existingFile(access, node, name), staged)
+    else {
+      if (mTaken(node.real, name)) throw exists(name, node.vpath)
+      mp = placeNew(node, name, staged)
+    }
+  } catch (e) {
+    dropStaged(staged)
+    if (e instanceof ManagedError) throw new PromoteError(e.code, e.message, e.status)
+    throw e
+  }
+  return { real: mp.real, dev: mp.dev, ino: mp.ino, managed: { placed: mp, keep: versionsKept(db) } }
+}
+
+/** After the commit: drop version bytes no row needs, and fill the text mirror for the new content. */
+export function afterPromote(ctx: { db: DB; mirror: Mirror }, p: Placed) {
+  if (!p.managed) return
+  const dropped = gcLater.get(p.managed.placed)
+  if (dropped?.length) gcBlobs(ctx.db, rootOf(ctx.db, p.managed.placed.real), dropped)
+  indexLater(ctx, p.managed.placed)
+}
+const gcLater = new WeakMap<ManagedPlaced, string[]>()
+/** The managed root holding a file (the parent of its team folder). */
+function rootOf(db: DB, real: string): string {
+  const mount = db.query<{ path: string }, []>('SELECT f.path FROM managed_mounts m JOIN folders f ON f.id = m.folder_id').all()
+    .find((r) => real.startsWith(r.path + '/'))
+  return mount ? path.dirname(mount.path) : path.dirname(path.dirname(real))
 }
 
 export interface ApprovalRow {
   id: number; created_at: number; expires_at: number; status: string; draft_id: number; draft_version: number; sha256: string; size: number
   draft_path: string; requester_person_id: number; requester_token_id: number | null; target_folder_id: number; target_vpath: string
   name: string; reason: string | null; src: string; gain: number; decided_at: number | null; decided_by: number | null
-  decision_reason: string | null; promotion_id: number | null
+  decision_reason: string | null; promotion_id: number | null; overwrite?: number
 }
 
 export const approvalById = (db: DB, id: number) => { ensurePromoteSchema(db); return db.query<ApprovalRow, [number]>('SELECT * FROM approvals WHERE id = ?').get(id) }
@@ -315,9 +384,9 @@ export function createApproval(db: DB, plan: Extract<Plan, { kind: 'approval' }>
   const why = typeof reason === 'string' ? reason.slice(0, REASON_MAX) : null
   const src = JSON.stringify([...plan.draft.src].map(([id, strong]) => [id, strong ? 1 : 0]))
   const id = Number(db.query(`INSERT INTO approvals (created_at, expires_at, status, draft_id, draft_version, sha256, size, draft_path, requester_person_id, requester_token_id,
-      target_folder_id, target_vpath, name, reason, src, gain) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      target_folder_id, target_vpath, name, reason, src, gain, overwrite) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(now, now + APPROVAL_TTL_MS, plan.draft.id, plan.draft.version, plan.draft.sha256, plan.draft.size, plan.draft.path, p.personId, p.tokenId,
-      plan.target.folderId, plan.target.vpath, plan.name, why, src, plan.gain.length).lastInsertRowid)
+      plan.target.folderId, plan.target.vpath, plan.name, why, src, plan.gain.length, plan.overwrite ? 1 : 0).lastInsertRowid)
   const a = approvalById(db, id)!
   if (!eligibleApprovers(db, a).length) {
     db.query("UPDATE approvals SET status = 'closed', decided_at = ?, decision_reason = 'no one can approve' WHERE id = ?").run(now, id)
@@ -419,7 +488,7 @@ export function approve(db: DB, blobs: Blobs, id: number, approverId: number, sh
   const draft = db.query<{ token_id: number; person_id: number }, [number]>('SELECT token_id, person_id FROM drafts WHERE id = ?').get(a.draft_id)!
   const widening = isWidening(db, approvalSources(db, a), a.target_folder_id)
   let placed: Placed
-  try { placed = placeNewFile(node, a.name, bytes) } catch (e) {
+  try { placed = place(db, node, a.name, bytes, !!a.overwrite && !!nameTakenSafe(node.real, a.name), server) } catch (e) {
     if (e instanceof PromoteError && e.code === 'exists') db.query("UPDATE approvals SET status = 'failed', decided_at = ?, decided_by = ?, decision_reason = 'a file with that name exists now' WHERE id = ?").run(now, approverId, a.id)
     throw e
   }
@@ -433,7 +502,7 @@ export function approve(db: DB, blobs: Blobs, id: number, approverId: number, sh
         byPerson: approverId, tokenId: null, targetId: a.target_folder_id, vpath, placed, widening, approvalId: a.id, now })
       db.query('UPDATE approvals SET promotion_id = ? WHERE id = ?').run(promotionId, a.id)
       appendAudit(db, { personId: approverId, tokenId: null, tool: 'web', outcome: 'ok', files: [vpath],
-        command: `approve promote #${a.id}: draft v${a.draft_version} (sha256 ${a.sha256}) -> ${vpath} (new file${widening ? ', widening' : ''})` })
+        command: `approve promote #${a.id}: draft v${a.draft_version} (sha256 ${a.sha256}) -> ${vpath} (${placed.managed?.placed.replaced ? 'new version' : 'new file'}${widening ? ', widening' : ''})` })
     })()
   } catch (e) { unplace(placed); throw e }
   return { approval: approvalById(db, a.id)!, promotionId, vpath, placed }
@@ -477,7 +546,7 @@ export function approvalsFor(db: DB, personId: number, now = Date.now()) {
 function summary(db: DB, a: ApprovalRow, canDecide: boolean, mine: boolean) {
   return {
     id: a.id, status: a.status, created_at: a.created_at, expires_at: a.expires_at, decided_at: a.decided_at,
-    target: a.target_vpath, name: a.name, size: a.size, gain: a.gain, can_decide: canDecide, mine,
+    target: a.target_vpath, name: a.name, size: a.size, gain: a.gain, can_decide: canDecide, mine, overwrite: !!a.overwrite,
     requester: nameOf(db, a.requester_person_id), via: a.requester_token_id != null ? 'agent' : 'web',
   }
 }

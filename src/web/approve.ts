@@ -11,7 +11,7 @@ import type { DB } from '../db'
 import { canSeeDraft, liveDrafts, type Draft } from '../drafts'
 import { Access } from '../policy'
 import {
-  approvalById, approvalDetail, approvalsFor, approve, approverStatus, createApproval, executeWrite, MAX_PENDING_PER_PERSON, planPromote,
+  afterPromote, approvalById, approvalDetail, approvalsFor, approve, approverStatus, createApproval, executeWrite, MAX_PENDING_PER_PERSON, planPromote,
   PromoteError, promoteFolderIds, promoteTargets, recordPromotion, reject, setPromote, unplace, type Promoter,
 } from '../promote'
 import { Rights, type Actor } from '../rights'
@@ -159,25 +159,27 @@ function myDraft(w: WebCtx, personId: number, id: number): Draft {
 
 export const promoteTargetsView = (w: WebCtx, a: Actor) => ({ targets: promoteTargets(w.db, a.personId) })
 
-export function promoteFromWeb(op: Op, draftId: number, body: { folder?: unknown; name?: unknown; expected_sha256?: unknown; note?: unknown }) {
+export function promoteFromWeb(op: Op, draftId: number, body: { folder?: unknown; name?: unknown; expected_sha256?: unknown; note?: unknown; overwrite?: unknown }) {
   const { w, actor } = op
   const db = w.db
   const d = myDraft(w, actor.personId, draftId)
   const p: Promoter = { personId: actor.personId, tokenId: null, access: Access.forPerson(db, actor.personId) }
   let plan
-  try { plan = planPromote(db, w.blobs, p, d, body.folder, body.name, body.expected_sha256) } catch (e) { return asApi(e) }
+  try { plan = planPromote(db, w.blobs, p, d, body.folder, body.name, body.expected_sha256, body.overwrite) } catch (e) { return asApi(e) }
   const vpath = `${plan.target.vpath}/${plan.name}`
   if (plan.kind === 'write') {
     let placed
-    try { placed = executeWrite(db, plan) } catch (e) { return asApi(e) }
+    try { placed = executeWrite(db, plan, p.access) } catch (e) { return asApi(e) }
+    const replaced = !!placed.managed?.placed.replaced
     try {
       db.transaction(() => {
         recordPromotion(db, { draft: { id: d.id, version: d.version, sha256: d.sha256, size: d.size, token_id: d.token_id, person_id: d.person_id },
           byPerson: actor.personId, tokenId: null, targetId: plan.target.folderId, vpath, placed, widening: false, approvalId: null, now: Date.now() })
-        record(db, actor.personId, `promote /drafts/${d.path} v${d.version} -> ${vpath} (new file)`, ['/drafts/' + d.path, vpath])
+        record(db, actor.personId, `promote /drafts/${d.path} v${d.version} -> ${vpath} (${replaced ? 'new version' : 'new file'})`, ['/drafts/' + d.path, vpath])
       })()
     } catch (e) { unplace(placed); throw e }
-    return { status: 'written', path: vpath }
+    afterPromote(w, placed)
+    return { status: 'written', path: vpath, ...(replaced ? { replaced: true } : {}) }
   }
   const waiting = db.query<{ n: number }, [number]>("SELECT count(*) AS n FROM approvals WHERE requester_person_id = ? AND status = 'pending'").get(actor.personId)!.n
   if (waiting >= MAX_PENDING_PER_PERSON) throw new ApiError(429, 'too_many_pending', 'you have too many promote requests waiting')
@@ -281,6 +283,7 @@ export async function approveRequest(op: Op, sessionHash: string, id: number, bo
     throw new ApiError(403, 'step_up_required', 'confirm with your passkey (or code) for this approval; each approval needs its own')
   let r
   try { r = approve(w.db, w.blobs, ap.id, actor.personId, body.sha256) } catch (e) { return asApi(e) }
+  afterPromote(w, r.placed)
   emit(w, { kind: 'approval_decided', subjectPersonId: ap.requester_person_id, approvalId: ap.id })
   return { ok: true, status: r.approval.status, path: r.vpath }
 }

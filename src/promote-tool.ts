@@ -4,7 +4,7 @@
 // A widening promote returns "pending approval" with the web link — information for the person, never a way to approve.
 import type { Draft } from './drafts'
 import {
-  APPROVAL_TTL_MS, createApproval, executeWrite, MAX_PENDING_PER_PERSON, planPromote, PromoteError, recordPromotion, unplace,
+  afterPromote, APPROVAL_TTL_MS, createApproval, executeWrite, MAX_PENDING_PER_PERSON, planPromote, PromoteError, recordPromotion, unplace,
   type Plan, type Promoter,
 } from './promote'
 import type { Ctx, Session } from './session'
@@ -14,12 +14,12 @@ export interface PromoteToolResult { text: string; isError: boolean; outcome: st
 /** Where a person approves: the public address when there is one, else the path on this server's own web address. */
 export const approvalLink = (ctx: Ctx, id: number) => `${(ctx.publicUrl ?? '').replace(/\/+$/, '')}/#/approvals/${id}`
 
-export function promoteByAgent(ctx: Ctx, s: Session, draft: Draft, folder: unknown, name: unknown, reason: unknown, expectedSha: unknown): PromoteToolResult {
+export function promoteByAgent(ctx: Ctx, s: Session, draft: Draft, folder: unknown, name: unknown, reason: unknown, expectedSha: unknown, overwrite?: unknown): PromoteToolResult {
   const db = ctx.db
   const p: Promoter = { personId: s.token.person_id, tokenId: s.token.id, access: s.access }
   let plan: Plan
   try {
-    plan = planPromote(db, ctx.blobs, p, draft, folder, name, expectedSha)
+    plan = planPromote(db, ctx.blobs, p, draft, folder, name, expectedSha, overwrite)
     if (plan.kind === 'approval') {
       const waiting = db.query<{ n: number }, [number]>("SELECT count(*) AS n FROM approvals WHERE requester_person_id = ? AND status = 'pending'").get(p.personId)!.n
       if (waiting >= MAX_PENDING_PER_PERSON) throw new PromoteError('too_many_pending', `You already have ${waiting} promote requests waiting for approval; wait for them, or cancel some on the web.`, 429)
@@ -33,7 +33,7 @@ export function promoteByAgent(ctx: Ctx, s: Session, draft: Draft, folder: unkno
 
   if (plan.kind === 'write') {
     let placed: ReturnType<typeof executeWrite>
-    try { placed = executeWrite(db, plan) } catch (e) {
+    try { placed = executeWrite(db, plan, s.access) } catch (e) {
       if (e instanceof PromoteError) return { text: e.message, isError: true, outcome: `refused: ${e.code}` }
       throw e
     }
@@ -43,10 +43,13 @@ export function promoteByAgent(ctx: Ctx, s: Session, draft: Draft, folder: unkno
       recordPromotion(tx, { draft: { id: draft.id, version: draft.version, sha256: draft.sha256, size: draft.size, token_id: draft.token_id, person_id: draft.person_id },
         byPerson: p.personId, tokenId: p.tokenId, targetId: plan.target.folderId, vpath, placed, widening: false, approvalId: null, now: ctx.now() })
     })
+    const replaced = !!placed.managed?.placed.replaced
     return {
-      text: `Promoted /drafts/${draft.path} (v${draft.version}, sha256 ${draft.sha256}) to ${vpath} as a new file. ` +
+      text: `Promoted /drafts/${draft.path} (v${draft.version}, sha256 ${draft.sha256}) to ${vpath} as ${replaced ? 'a new version (the file it replaced is kept as an earlier version)' : 'a new file'}. ` +
         `Whoever reads it there also inherits this draft's sources.`,
-      isError: false, outcome: `written ${vpath}`, structured: { status: 'written', path: vpath, sha256: draft.sha256 },
+      isError: false, outcome: `written ${vpath}${replaced ? ' (new version)' : ''}`, structured: { status: 'written', path: vpath, sha256: draft.sha256, ...(replaced ? { replaced: true } : {}) },
+      // after the commit: version bytes no longer needed go, and the text mirror follows the new content
+      finish: () => afterPromote(ctx, placed),
     }
   }
 
