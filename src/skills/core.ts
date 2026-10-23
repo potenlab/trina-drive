@@ -3,7 +3,7 @@
 // A skill library is a folder an Admin designated (never a Manager: finding 14). Each direct subfolder <name>/ holding
 // a SKILL.md is a skill; its files are the skill's resources. The server reads a library through the same walk as
 // everything else (policy.ts: identities checked, links closed, system names hidden) and keeps every version it sees
-// as an immutable snapshot: the files' bytes content-addressed under <data>/skills/, a manifest, and a digest of the
+// as an immutable snapshot: the files' bytes content-addressed in the blob store (beside drafts), a manifest, and a digest of the
 // manifest. Agents only ever get an *approved* snapshot (catalog, body, files, SEP-2640 digests alike); an edit on
 // disk becomes a 'pending' version that serves nobody until someone other than its editors approves it, and until then
 // the previously approved snapshot keeps serving (none, for a new skill).
@@ -36,7 +36,8 @@ export function ensureSkillsSchema(db: DB) {
   ensured.add(db)
 }
 
-export const skillBlobs = (dataDir: string) => new Blobs(path.join(detectLayout(dataDir).dataDir, 'skills'))
+/** Snapshot bytes live in the content-addressed store drafts use (same bytes, same file), so backups carry them. */
+export const skillBlobs = (dataDir: string) => new Blobs(detectLayout(dataDir).draftsDir)
 
 // ---------- libraries ----------
 export interface Library { folder_id: number; slug: string; by_person: number | null; at: number }

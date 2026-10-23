@@ -1,7 +1,7 @@
 // Tables of team skills (plan 4.2 "저장", workstream I1), run by src/migrations.ts. Idempotent and additive only.
 //   skill_libraries  folders an Admin made a skill library (slug = the first segment of the skill's qualified name)
 //   skill_versions   every version of a skill the server has seen, by manifest digest; agents get only 'approved' ones.
-//                    The bytes of each file live content-addressed in <data>/skills/<aa>/<sha256> (src/skills/core.ts).
+//                    The bytes of each file live content-addressed in the drafts blob store (<aa>/<sha256>; backed up with it).
 //   skill_problems   the latest reason a skill folder could not be read as a skill (shown on the web, never served)
 import type { Migration } from '../migrations'
 
