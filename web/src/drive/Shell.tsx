@@ -1,7 +1,7 @@
 // The drive's frame, laid out like Google Drive (plan 2.4): a top bar (the Star Pillar mark and "Trina Drive", the
-// team, search, notices, the account menu with "Back to console" in Trina Cloud) and a left sidebar ("+ New", Team
-// folders with the folder tree, Shared with me, AI drafts, Approvals, Trash, Connect your AI, Mount as a drive, the
-// admin pages, and team storage). Below 860px the sidebar is a drawer. The pages render in the main area.
+// team, search, notices, the account menu with "Back to console" in Trina Cloud) and a left sidebar ("+ New", My files
+// in Trina Cloud, Team folders with the folder tree, Shared with me, Recent, Skills, AI drafts, Approvals, Trash,
+// Connect your AI, Mount as a drive, the admin pages, and team storage). Below 860px the sidebar is a drawer. The pages render in the main area.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { PRODUCT } from '../../../src/brand'
 import { api, get, type Me } from '../api'
@@ -17,7 +17,7 @@ import { setTheme, useTheme, type ThemeChoice } from './theme'
 import { st } from './SkillsText'
 import { Tree, filesHref } from './Tree'
 
-export type Section = 'files' | 'trash' | 'shared' | 'skills' | 'drafts' | 'approvals' | 'connect' | 'mount' | 'people' | 'folders' | 'audit' | 'settings' | 'other'
+export type Section = 'files' | 'my' | 'recent' | 'trash' | 'shared' | 'skills' | 'drafts' | 'approvals' | 'connect' | 'mount' | 'people' | 'folders' | 'audit' | 'settings' | 'other'
 
 interface Storage { quota: number | null; usage: { total: number } }
 let storageCache: Promise<Storage | null> | null = null
@@ -47,7 +47,7 @@ export function Shell({ section, filesPath, children }: { section: Section; file
 /** On a phone the sidebar is a drawer, so "+ New" also floats at the bottom right (as in the Drive app). */
 function Fab({ section }: { section: Section }) {
   const here = useHere()
-  if (section !== 'files' || !here.files || !here.writable) return null
+  if ((section !== 'files' && section !== 'my') || !here.files || !here.writable) return null
   return <button type="button" className="fab btn cta" aria-label={ft('new')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openNew(r.left - 160, r.top - 170) }}><Icon name="plus" size={26} /></button>
 }
 
@@ -153,7 +153,8 @@ function Sidebar({ me, section, filesPath, onPick, onError }: { me: Me; section:
   const here = useHere()
   const [treeOpen, setTreeOpen] = useState(true)
   const newRef = useRef<HTMLButtonElement>(null)
-  const canNew = section === 'files' && here.files && here.writable
+  const canNew = (section === 'files' || section === 'my') && here.files && here.writable
+  const my = me.myFilesPath ?? null
   const adminRootNew = me.admin && section === 'files' && here.files && here.path === '/' && me.storage === 'managed'
   return (
     <nav className="sb-nav">
@@ -165,14 +166,16 @@ function Sidebar({ me, section, filesPath, onPick, onError }: { me: Me; section:
         }}><Icon name="plus" /><span>{ft('new')}</span></button>
 
       <div className="sb-group">
+        {/* Trina Cloud: each member's private folder, first like "My Drive" (absent when self-hosted or not made yet) */}
+        {my && <Item href="#/my" icon="user" label={t('nav_my_files')} on={section === 'my'} onPick={onPick} />}
         <div className={`sb-item sb-tree-head ${section === 'files' && filesPath === '/' ? 'on' : ''}`}>
           <button type="button" className={`tr-caret ${treeOpen ? 'open' : ''}`} aria-expanded={treeOpen} aria-label={ft('folders')} onClick={() => setTreeOpen(!treeOpen)}><Icon name="chevron" size={14} /></button>
           <a href={filesHref('/')} onClick={onPick} aria-current={section === 'files' && filesPath === '/' ? 'page' : undefined}><Icon name="drive" /><span className="sb-label">{t('nav_team_folders')}</span></a>
         </div>
-        {treeOpen && <Tree current={section === 'files' ? filesPath : null} onPick={onPick} onError={onError} />}
+        {treeOpen && <Tree current={section === 'files' ? filesPath : null} hide={my} onPick={onPick} onError={onError} />}
         <Item href="#/shared" icon="shared" label={t('swm_title')} on={section === 'shared'} onPick={onPick} />
+        <Item href="#/recent" icon="recent" label={t('nav_recent')} on={section === 'recent'} onPick={onPick} />
         <Item href="#/skills" icon="skill" label={st('sk_nav')} on={section === 'skills'} onPick={onPick} />
-        {/* Recent (#/recent) arrives in Phase 2 with its API (plan 10.1) */}
         <Item href="#/drafts" icon="drafts" label={t('nav_ai_drafts')} on={section === 'drafts'} onPick={onPick} />
         <Item href="#/approvals" icon="approvals" label={at('nav_approvals')} on={section === 'approvals'} count={me.approvals} onPick={onPick} />
         <Item href="#/trash" icon="trash" label={ft('trash')} on={section === 'trash'} onPick={onPick} />

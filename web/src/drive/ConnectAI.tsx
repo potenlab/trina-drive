@@ -4,6 +4,7 @@
 //   tdrive command (password sign-in; not offered when the team signs in only through Trina Cloud).
 //   Claude.ai / ChatGPT: a custom connector pointed at <server>/mcp, approved on this server's consent page.
 //   Cursor: the tdrive command, then turn it on in Cursor.
+// Then how team skills reach each AI (the same connection; approved versions only), linking to Skills.
 // Below: access tokens (make one per computer, see last use, revoke) and the apps connected through OAuth.
 import { useState } from 'react'
 import { useSession } from '../App'
@@ -91,6 +92,17 @@ export function ConnectAI() {
         </div>
         <p className="cai-safe small"><Icon name="approvals" size={16} /> {t('cai_safety')}</p>
       </div>
+
+      <section className="card cai-skills" aria-labelledby="cai-skills">
+        <h2 id="cai-skills"><Icon name="skill" size={20} /> {t('cai_skills_title')}</h2>
+        <p className="small">{t('cai_skills_intro')}</p>
+        <ul className="cai-skill-list small">
+          <li><Icon name="terminal" size={16} /><span>{t('cai_skills_cli')}</span></li>
+          <li><Icon name="globe" size={16} /><span>{t('cai_skills_web')}</span></li>
+          <li><Icon name="approvals" size={16} /><span>{t('cai_skills_rules')}</span></li>
+        </ul>
+        <a className="btn small" href="#/skills">{t('cai_skills_link')} →</a>
+      </section>
 
       <div className="card note-card">
         <Icon name="mount" size={18} />

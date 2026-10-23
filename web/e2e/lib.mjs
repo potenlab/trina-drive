@@ -26,14 +26,18 @@ export function startFixture(args = []) {
   })
 }
 
-/** A signed-in browser page for `name` (session cookie set through the API, like the sign-in form does). */
+/** A signed-in browser page for `name` (session cookie set through the API, like the sign-in form does), or for
+ * `{ cookie }` (a session the fixture made). */
 export async function signedIn(browser, fx, name, { width = 1440, height = 900, theme = 'light', locale = 'en', mobile = false } = {}) {
   const ctx = await browser.newContext({
     viewport: { width, height }, deviceScaleFactor: mobile ? 2 : 1, isMobile: mobile, hasTouch: mobile,
     colorScheme: theme, locale: locale === 'ko' ? 'ko-KR' : 'en-US', permissions: [],
   })
   await ctx.addInitScript(([l]) => { try { localStorage.setItem('trina-drive.locale', l) } catch {} }, [locale])
-  if (name && fx.sessions?.[name]) {
+  if (name && typeof name === 'object' && name.cookie) {
+    // a person who joined during the scenario (fixture hook /join): their session cookie
+    await ctx.addCookies([{ name: 'tdrive_session', value: name.cookie, url: fx.base }])
+  } else if (name && fx.sessions?.[name]) {
     // a console person (no password here): the fixture made the session
     await ctx.addCookies([{ name: 'tdrive_session', value: fx.sessions[name], url: fx.base }])
   } else if (name) {
@@ -59,6 +63,13 @@ export async function shot(page, name) {
 }
 
 let failures = 0
+/** A JSON call as a signed-in page's session (CSRF from /api/session). */
+export async function apiAs(page, fx, method, path, body) {
+  const csrf = (await (await page.request.get(fx.base + '/api/session')).json()).csrf
+  const r = await page.request.fetch(fx.base + '/api' + path, { method, headers: { origin: fx.base, 'x-csrf-token': csrf }, data: body })
+  return { status: r.status(), body: await r.json().catch(() => null) }
+}
+
 export function check(ok, what) {
   if (ok) console.log('  ok  ' + what)
   else { failures++; console.log('  FAIL ' + what) }

@@ -36,7 +36,9 @@ export interface Me { id: number; name: string; admin: boolean; email: string | 
   /** Trina Cloud mode (src/tdcloud/me.ts, workstream B1): the console's address for "Back to console", the team's name */
   cloud?: { sso_only?: boolean; console_url?: string; managed?: boolean; has_password?: boolean; display_name?: string | null; reauth_url?: string | null; team_name?: string }
   /** sharing (src/share/me.ts, workstream A1) */
-  share?: Record<string, unknown> }
+  share?: Record<string, unknown>
+  /** Trina Cloud: the person's My files folder ("/<handle> (personal)", docs/MY-FILES.md); null before it is made; absent when self-hosted */
+  myFilesPath?: string | null }
 export interface FolderSummary {
   /** in managed storage (the server owns it): no NAS, rules decide who views and who edits */
   managed?: boolean

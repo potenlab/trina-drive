@@ -5,29 +5,55 @@
 //   - "Editors can change permissions and share" (managers), AI access (No AI), copy link
 //   - a change that would let more people read AI-draft copies answers 409 "widening": a Manager confirms, an Editor
 //     asks for approval; an Editor opening a folder to the whole team confirms with a passkey (or authenticator code)
-// Every change is a request the server decides (the page only offers what the answer says this person may do).
+//   - files (workstream A2): Viewer / Editor only, General access no narrower than the folder, the folder's readers listed
+//     as inherited (hidden from a file-only Editor), "People you add will see the folder names on the way", a file that is
+//     an AI-draft copy (a manager confirms; an Editor asks one), "Remove me" for one's own direct share
+//   - admins add a non-member by mail address (S16): an invitation, and the share once they join (pending until then)
+//   - My files is never shared: the dialog says "Move it to a team folder to share it"
+// Every change is a request the server decides (the page only offers what the answer says this person may do). A path
+// the person cannot see reads exactly like one that does not exist: one generic line, never a name from the request.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { ApiError } from '../api'
 import { useSession } from '../App'
 import { t, useLocale } from '../i18n'
-import { errText } from '../ui'
+import { errText, Skeleton } from '../ui'
 import { getPasskey, passkeysSupported } from '../webauthn'
 import { Icon } from './Icon'
 import {
-  linkTo, needsStepUp, shareBackend, wideningOf,
-  type Directory, type Level, type Role, type ShareBackend, type ShareChange, type ShareEntry, type ShareView, type SubjectRef,
+  isPersonal, linkTo, needsStepUp, shareBackend, wideningOf,
+  type Directory, type Level, type Role, type ShareBackend, type ShareChange, type ShareEntry, type ShareView, type SubjectRef, type Widening,
 } from './share-api'
 
-type Pick = SubjectRef & { name: string; detail?: string }
+type Pick = (SubjectRef & { name: string; detail?: string }) | { type: 'email'; email: string; name: string; detail?: string }
 type Pending =
-  | { kind: 'widening'; change: ShareChange; count: number; sourcesHidden: number; canConfirm: boolean }
+  | ({ kind: 'widening'; change: ShareChange } & Widening)
   | { kind: 'stepup'; change: ShareChange; method: 'passkey' | 'totp'; options?: unknown }
 
-const same = (a: SubjectRef, b: SubjectRef) => a.type === b.type && a.id === b.id
+const same = (a: { type: string; id?: number; email?: string | null }, b: { type: string; id?: number; email?: string | null }) => a.type === b.type && (a.type === 'email' ? a.email === b.email : a.id === b.id)
 const roleLabel = (r: Role) => t(`share_role_${r}`)
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-export function ShareDialog({ path, name, onClose }: { path: string; name: string; onClose: () => void }) {
+/** A refusal as one line of text. Names never come from the request: a hidden path reads like a missing one. */
+export function shareErrorText(e: unknown, kind: 'folder' | 'file' = 'folder'): string {
+  if (!(e instanceof ApiError)) return errText(e)
+  if (e.status === 404) return t('share_not_found')
+  switch (e.code) {
+    case 'not_manager': case 'editors_cannot_share': return kind === 'file' ? t('share_file_cannot_share') : t('share_only_managers')
+    case 'personal': return t('share_personal')
+    case 'invite_admin_only': return t('share_invite_admin_only')
+    case 'invites_unavailable': case 'invite_unsupported': return t('share_invites_unavailable')
+    case 'editors_cannot_confirm': return t('share_cannot_confirm')
+    case 'too_many': return t('share_too_many')
+    case 'inherited_general': return t('share_inherited_general')
+    case 'inherited': return t('share_inherited_role')
+    case 'passkey_required': case 'totp_required': return t('share_step_up_missing')
+    case 'folders_only': return t('share_folders_only')
+    default: return errText(e)
+  }
+}
+
+export function ShareDialog({ path, name, kind: kindHint = 'folder', onClose }: { path: string; name: string; kind?: 'folder' | 'file'; onClose: () => void }) {
   useLocale()
   const { me } = useSession()
   const [backend, setBackend] = useState<ShareBackend | null>(null)
@@ -38,6 +64,8 @@ export function ShareDialog({ path, name, onClose }: { path: string; name: strin
   const [note, setNote] = useState<string | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
   const [restrictOpen, setRestrictOpen] = useState(false)
+  // S16: addresses invited in this dialog that are not members yet (the share is given when they join)
+  const [invited, setInvited] = useState<{ email: string; role: Role }[]>([])
   // bumps on every change that went through: the add box clears its picks (also after "Request approval")
   const [done, setDone] = useState(0)
   const boxRef = useRef<HTMLDivElement>(null)
@@ -51,8 +79,9 @@ export function ShareDialog({ path, name, onClose }: { path: string; name: strin
       setBackend(b)
       try { const v = await b.get(path); if (live) setView(v) } catch (e) {
         if (!live) return
-        if (e instanceof ApiError && e.status === 403) setReadOnlyReason(t('share_only_managers'))
-        else setError(errText(e))
+        if (e instanceof ApiError && e.status === 403 && !isPersonal(e)) setReadOnlyReason(t('share_only_managers'))
+        else if (b.kind === 'legacy' && e instanceof ApiError && e.status === 404 && kindHint === 'file') setReadOnlyReason(t('share_folders_only'))
+        else setError(shareErrorText(e, kindHint))
       }
     })
     return () => { live = false }
@@ -75,8 +104,9 @@ export function ShareDialog({ path, name, onClose }: { path: string; name: strin
   }, [])
 
   const askStepUp = async (change: ShareChange) => {
-    try { const o = await backend!.stepUpOptions(path, change.general); setPending({ kind: 'stepup', change, method: o.method, options: o.options }) } catch (x) { setError(errText(x)) }
+    try { const o = await backend!.stepUpOptions(path, change.general); setPending({ kind: 'stepup', change, method: o.method, options: o.options }) } catch (x) { setError(shareErrorText(x, kind)) }
   }
+  const kind = view?.item.kind ?? kindHint
   const apply = async (change: ShareChange, okText = t('share_saved')) => {
     if (!backend) return false
     setBusy(true); setError(null); setNote(null)
@@ -85,21 +115,36 @@ export function ShareDialog({ path, name, onClose }: { path: string; name: strin
     try {
       const r = await backend.change(path, change)
       setView(r); setPending(null); setDone((n) => n + 1)
+      const waiting = (r.invited ?? []).filter((x) => !x.granted)
+      if (waiting.length) {
+        const roleOf = (email: string) => (change.add?.find((a) => 'email' in a.subject && a.subject.email.toLowerCase() === email.toLowerCase())?.role ?? 'viewer') as Role
+        setInvited((old) => [...old.filter((o) => !waiting.some((w) => w.email.toLowerCase() === o.email.toLowerCase())), ...waiting.map((w) => ({ email: w.email, role: roleOf(w.email) }))])
+      }
       if (r.approval_id) setNote(t('share_approval_requested'))
-      else if (r.invited?.length) setNote(t('share_invited_n', { n: r.invited.filter((x) => x.status === 'invited').length || r.invited.length }))
+      else if (r.invited?.length) setNote(t('share_invited_n', { n: r.invited.length }))
       else setNote(okText)
       return true
     } catch (e) {
-      const w = wideningOf(e)
+      const w = wideningOf(e, kind)
       if (w) { setPending({ kind: 'widening', change, ...w }); return false }
       if (needsStepUp(e)) { await askStepUp(change); return false }
-      setError(e instanceof ApiError && e.code === 'not_manager' ? t('share_only_managers') : errText(e))
+      setError(shareErrorText(e, kind))
       return false
     } finally { setBusy(false) }
   }
 
-  const canEdit = !!view && (view.can_manage || !!view.can_share)
+  const canEdit = !!view && view.mode === undefined && (view.can_manage || !!view.can_share)
   const title = t('share_title', { name })
+  const file = kind === 'file'
+  const leave = async () => {
+    if (!window.confirm(t('share_leave_confirm'))) return
+    if (await apply({ leave: true }, t('share_left'))) closeRef.current()
+  }
+  // why the dialog is read-only (said once, at the top)
+  const roText = !view ? '' : file
+    ? (view.editors_can_share && !view.editors_can_share.value && view.my_role === 'editor' && view.editors_can_share.inherited_from
+      ? t('share_file_editors_off', { folder: view.editors_can_share.inherited_from }) : t('share_file_cannot_share'))
+    : t('share_only_managers')
 
   return createPortal(
     <div className="sd-scrim" onMouseDown={onClose}>
@@ -110,27 +155,43 @@ export function ShareDialog({ path, name, onClose }: { path: string; name: strin
           <button type="button" className="btn ghost icon" onClick={onClose} aria-label={t('close')}><Icon name="close" size={18} /></button>
         </header>
 
-        {!view && !error && !readOnlyReason && <p className="muted sd-pad">{t('loading')}</p>}
+        {!view && !error && !readOnlyReason && <div className="sd-pad"><Skeleton rows={3} /></div>}
         {readOnlyReason && <p className="sd-pad muted">{readOnlyReason}</p>}
         {view?.mode === 'inplace' && <p className="sd-pad">{t('share_inplace')} {view.folder_id != null && <a href={`#/folders/${view.folder_id}`} onClick={onClose}>{t('share_open_folder_page')}</a>}</p>}
+        {view?.mode === 'personal' && <p className="sd-pad sd-personal"><Icon name="lock" size={16} /> {t('share_personal')}</p>}
 
-        {view && view.mode !== 'inplace' && <div className="sd-body">
-          {canEdit ? <AddPeople view={view} backend={backend!} busy={busy} onAdd={apply} done={done} /> : <p className="sd-ro"><Icon name="lock" size={16} /> {t('share_only_managers')}</p>}
+        {view && view.mode === undefined && <div className="sd-body">
+          {canEdit ? <AddPeople view={view} backend={backend!} busy={busy} onAdd={apply} done={done} /> : <p className="sd-ro"><Icon name="lock" size={16} /> {roText}</p>}
 
           <section aria-labelledby="sd-people">
             <h3 id="sd-people">{t('share_people_with_access')}</h3>
             <ul className="sd-list">
-              {view.entries.length === 0 && <li className="muted small">{t('share_nobody')}</li>}
+              {view.entries.length === 0 && invited.length === 0 && <li className="muted small">{t('share_nobody')}</li>}
               {view.entries.map((e) => <EntryRow key={`${e.subject.type}${e.subject.id}${e.source}`} e={e} view={view} me={me?.id ?? -1} busy={busy}
-                onRole={(role) => apply({ set: [{ subject: { type: e.subject.type, id: e.subject.id }, role }] })} />)}
+                onRole={(role) => apply({ set: [{ subject: { type: e.subject.type, id: e.subject.id }, role }] })} onLeave={leave} />)}
             </ul>
+            {file && view.inherited === 'hidden' && <p className="muted small sd-gap">{t('share_file_only_list')}</p>}
           </section>
+
+          {invited.length > 0 && (
+            <section aria-labelledby="sd-invited" className="sd-invited">
+              <h3 id="sd-invited">{t('share_pending_invites')}</h3>
+              <ul className="sd-list">
+                {invited.map((x) => (
+                  <li key={x.email} className="sd-entry">
+                    <span className="sd-avatar pending" aria-hidden="true"><Icon name="bell" size={16} /></span>
+                    <span className="sd-who"><span>{x.email}</span><span className="muted small">{t('share_pending_invite_row', { role: roleLabel(x.role) })}</span></span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <GeneralAccess view={view} busy={busy} canEdit={canEdit} onChange={(g) => apply({ general: g })} onRestrict={() => setRestrictOpen(true)} />
           {restrictOpen && <RestrictHere view={view} busy={busy} onCancel={() => setRestrictOpen(false)}
             onConfirm={async (keep) => { if (await apply({ restrict_here: { on: true, keep } }, t('share_restricted_done'))) setRestrictOpen(false) }} />}
 
-          <section aria-labelledby="sd-settings" className="sd-settings">
+          {file ? (view.ai.no_ai && <p className="muted small sd-gap sd-line"><Icon name="lock" size={14} /> {t('share_no_ai_file', { folder: view.ai.inherited_no_ai_from ?? view.item.path })}</p>) : <section aria-labelledby="sd-settings" className="sd-settings">
             <h3 id="sd-settings">{t('share_settings')}</h3>
             {view.editors_can_share && (
               <label className="sd-toggle">
@@ -148,33 +209,37 @@ export function ShareDialog({ path, name, onClose }: { path: string; name: strin
               <span><span>{t('share_ai_access')}</span>
                 <span className="muted small">{view.ai.inherited_no_ai_from ? t('share_no_ai_inherited', { folder: view.ai.inherited_no_ai_from }) : view.ai.no_ai && !view.can_ai_off ? t('share_no_ai_admin_only') : t('share_ai_access_help')}</span></span>
             </label>
-          </section>
+          </section>}
 
           {/* only below the top: a top folder's name is no news */}
-          {view.path_names_visible && view.item.path.split('/').length > 2 && <p className="sd-warn small"><Icon name="info" size={16} /> {t('share_path_names_visible', { path: view.item.path })}</p>}
-          {(view.warnings ?? []).map((w) => <p key={w.code} className="sd-warn small"><Icon name="info" size={16} /> {w.code === 'draft_copies' ? t('share_warn_draft_copies', { n: w.count ?? 0 }) : w.code === 'manager_cannot_open' ? t('share_warn_manager_cannot_open', { n: w.count ?? 0 }) : w.code === 'editors_off_above' ? t('share_editors_off_above_any') : w.code}</p>)}
+          {canEdit && (file
+            ? typeof view.path_names_visible === 'string' && <p className="sd-warn small"><Icon name="info" size={16} /> {t('share_path_names_visible_file', { path: view.path_names_visible })}</p>
+            : view.path_names_visible && view.item.path.split('/').length > 2 && <p className="sd-warn small"><Icon name="info" size={16} /> {t('share_path_names_visible', { path: view.item.path })}</p>)}
+          {(view.warnings ?? []).map((w) => <p key={w.code} className="sd-warn small"><Icon name="info" size={16} /> {w.code === 'draft_copies' ? t('share_warn_draft_copies', { n: w.count ?? 0 }) : w.code === 'draft_copy' ? t('share_warn_draft_copy') : w.code === 'manager_cannot_open' ? t('share_warn_manager_cannot_open', { n: w.count ?? 0 }) : w.code === 'editors_off_above' ? t('share_editors_off_above_any') : w.code}</p>)}
         </div>}
 
         {pending?.kind === 'widening' && (
           <AlertBox>
             <p><strong>{t('share_widening_title')}</strong></p>
             <p className="small">{t('share_widening_text', { n: pending.count })}{pending.sourcesHidden > 0 && ' ' + t('share_widening_hidden', { n: pending.sourcesHidden })}</p>
+            {pending.sources.length > 0 && <p className="small muted">{t('share_widening_sources', { list: pending.sources.join(', ') })}</p>}
+            {!pending.canConfirm && !pending.canRequest && <p className="small">{t('share_widening_file_ask')}</p>}
             <div className="sd-actions">
               <button type="button" className="btn" onClick={() => setPending(null)}>{t('cancel')}</button>
               {pending.canConfirm
                 ? <button type="button" className="btn primary" disabled={busy} onClick={() => apply({ ...pending.change, confirm_widening: true })}>{t('share_anyway')}</button>
-                : <button type="button" className="btn primary" disabled={busy} onClick={() => apply({ ...pending.change, confirm_widening: true })}>{t('share_request_approval')}</button>}
+                : pending.canRequest && <button type="button" className="btn primary" disabled={busy} onClick={() => apply({ ...pending.change, confirm_widening: true })}>{t('share_request_approval')}</button>}
             </div>
           </AlertBox>
         )}
         {pending?.kind === 'stepup' && <StepUp pending={pending} busy={busy} onCancel={() => setPending(null)} onProof={async (proof) => {
           setBusy(true)
-          try { const assertion = await backend!.stepUp(path, pending.change.general, proof); setBusy(false); await apply({ ...pending.change, step_up: assertion }) } catch (x) { setBusy(false); setError(errText(x)) }
+          try { const assertion = await backend!.stepUp(path, pending.change.general, proof); setBusy(false); await apply({ ...pending.change, step_up: assertion }) } catch (x) { setBusy(false); setError(shareErrorText(x, kind)) }
         }} onError={setError} />}
 
         {error && <p className="error sd-pad-x" role="alert">{error}</p>}
         <footer className="sd-foot">
-          <CopyLink path={path} />
+          {view?.mode !== 'personal' && <CopyLink path={path} kind={kind} />}
           <span className="sd-note small" role="status" aria-live="polite">{note}</span>
           <button type="button" className="btn primary" onClick={onClose}>{t('share_done')}</button>
         </footer>
@@ -195,13 +260,20 @@ function AddPeople({ view, backend, busy, onAdd, done }: { view: ShareView; back
   const [open, setOpen] = useState(false)
   useEffect(() => { if (done) { setPicked([]); setRole('viewer') } }, [done])
   const loadDir = () => { if (!dir) backend.directory().then(setDir, () => setDir({ people: [], groups: [] })) }
-  const has = (s: SubjectRef) => picked.some((p) => same(p, s)) || view.entries.some((e) => e.source === 'direct' && same(e.subject, s))
+  const has = (s: Pick) => picked.some((p) => same(p, s)) || (s.type !== 'email' && view.entries.some((e) => e.source === 'direct' && same(e.subject, s)))
   const options = useMemo<Pick[]>(() => {
     if (!dir) return []
     const ql = q.trim().toLocaleLowerCase()
     const groups = dir.groups.filter((g) => !g.everyone).map((g) => ({ type: 'group' as const, id: g.id, name: g.name, detail: t('share_members_n', { n: g.size }) }))
     const people = dir.people.map((p) => ({ type: 'person' as const, id: p.id, name: p.display_name || p.name, detail: p.email ?? p.name }))
-    return [...people, ...groups].filter((o) => !has(o) && (!ql || o.name.toLocaleLowerCase().includes(ql) || (o.detail ?? '').toLocaleLowerCase().includes(ql))).slice(0, 8)
+    const found: Pick[] = [...people, ...groups].filter((o) => !has(o) && (!ql || o.name.toLocaleLowerCase().includes(ql) || (o.detail ?? '').toLocaleLowerCase().includes(ql))).slice(0, 8)
+    // S16: an admin types a whole address that is nobody in the team → invite it
+    const typed = q.trim()
+    if (view.can_invite && EMAIL.test(typed) && !dir.people.some((p) => (p.email ?? '').toLowerCase() === ql)) {
+      const inv: Pick = { type: 'email', email: typed, name: typed, detail: t('share_invite_option_help') }
+      if (!has(inv)) found.push(inv)
+    }
+    return found
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dir, q, picked, view])
   const pick = (o: Pick) => { setPicked([...picked, o]); setQ(''); setCursor(0); setOpen(false) }
@@ -212,11 +284,13 @@ function AddPeople({ view, backend, busy, onAdd, done }: { view: ShareView; back
     else if (e.key === 'Backspace' && !q && picked.length) setPicked(picked.slice(0, -1))
     else if (e.key === 'Escape' && open) { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); setOpen(false) }
   }
-  const roles: Role[] = view.can_grant_manager ? ['viewer', 'editor', 'manager'] : ['viewer', 'editor']
-  const hasGroup = picked.some((p) => p.type === 'group')
+  const roles: Role[] = view.can_grant_manager && view.item.kind === 'folder' ? ['viewer', 'editor', 'manager'] : ['viewer', 'editor']
+  const hasGroup = picked.some((p) => p.type !== 'person')
+  const hasInvite = picked.some((p) => p.type === 'email')
   const send = async () => {
     if (!picked.length) return
-    const ok = await onAdd({ add: picked.map((p) => ({ subject: { type: p.type, id: p.id }, role: hasGroup && role === 'manager' ? 'editor' : role })), notify })
+    const r: Role = hasGroup && role === 'manager' ? 'editor' : role
+    const ok = await onAdd({ add: picked.map((p) => ({ subject: p.type === 'email' ? { email: p.email } : { type: p.type, id: p.id }, role: r })), notify })
     if (ok) { setPicked([]); setRole('viewer') }
   }
   return (
@@ -224,8 +298,8 @@ function AddPeople({ view, backend, busy, onAdd, done }: { view: ShareView; back
       <div className="sd-add-row">
         <div className={`sd-combo ${picked.length ? 'has' : ''}`} onClick={(e) => (e.currentTarget.querySelector('input') as HTMLInputElement | null)?.focus()}>
           {picked.map((p) => (
-            <span key={`${p.type}${p.id}`} className="sd-chip">
-              {p.type === 'group' && <Icon name="people" size={14} />}{p.name}
+            <span key={p.type === 'email' ? 'e' + p.email : `${p.type}${p.id}`} className={`sd-chip ${p.type === 'email' ? 'invite' : ''}`}>
+              {p.type === 'group' && <Icon name="people" size={14} />}{p.type === 'email' && <Icon name="bell" size={14} />}{p.name}
               <button type="button" aria-label={`${t('remove')} ${p.name}`} onClick={() => setPicked(picked.filter((x) => !same(x, p)))}><Icon name="close" size={12} /></button>
             </span>
           ))}
@@ -242,12 +316,13 @@ function AddPeople({ view, backend, busy, onAdd, done }: { view: ShareView; back
       {open && options.length > 0 && (
         <ul className="sd-options" id="sd-options" role="listbox">
           {options.map((o, i) => (
-            <li key={`${o.type}${o.id}`} id={`sd-opt-${i}`} role="option" aria-selected={i === cursor} className={i === cursor ? 'on' : ''} onMouseDown={(e) => { e.preventDefault(); pick(o) }}>
-              <Avatar name={o.name} group={o.type === 'group'} /><span className="sd-who"><span>{o.name}</span><span className="muted small">{o.detail}</span></span>
+            <li key={o.type === 'email' ? 'e' + o.email : `${o.type}${o.id}`} id={`sd-opt-${i}`} role="option" aria-selected={i === cursor} className={`${i === cursor ? 'on' : ''} ${o.type === 'email' ? 'invite' : ''}`} onMouseDown={(e) => { e.preventDefault(); pick(o) }}>
+              <Avatar name={o.name} group={o.type === 'group'} invite={o.type === 'email'} /><span className="sd-who"><span>{o.type === 'email' ? t('share_invite_option', { email: o.email }) : o.name}</span><span className="muted small">{o.detail}</span></span>
             </li>
           ))}
         </ul>
       )}
+      {hasInvite && <p className="muted small sd-gap">{t('share_invite_note')}</p>}
       {picked.length > 0 && (
         <div className="sd-add-foot">
           <label className="check small"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> {t('share_notify')}</label>
@@ -261,18 +336,20 @@ function AddPeople({ view, backend, busy, onAdd, done }: { view: ShareView; back
   )
 }
 
-function Avatar({ name, group }: { name: string; group?: boolean }) {
-  return <span className={`sd-avatar ${group ? 'group' : ''}`} aria-hidden="true">{group ? <Icon name="people" size={16} /> : (name.trim()[0] ?? '?').toLocaleUpperCase()}</span>
+function Avatar({ name, group, invite }: { name: string; group?: boolean; invite?: boolean }) {
+  return <span className={`sd-avatar ${group ? 'group' : ''} ${invite ? 'pending' : ''}`} aria-hidden="true">{invite ? <Icon name="bell" size={16} /> : group ? <Icon name="people" size={16} /> : (name.trim()[0] ?? '?').toLocaleUpperCase()}</span>
 }
 
 // ---------- one row of "People with access" ----------
-function EntryRow({ e, view, me, busy, onRole }: { e: ShareEntry; view: ShareView; me: number; busy: boolean; onRole: (r: Role | 'remove') => void }) {
+function EntryRow({ e, view, me, busy, onRole, onLeave }: { e: ShareEntry; view: ShareView; me: number; busy: boolean; onRole: (r: Role | 'remove') => void; onLeave: () => void }) {
+  const file = view.item.kind === 'file'
   // Manager is given and taken only by those who may grant it (admins); Editors who share change Viewers and Editors
   const editable = e.editable ?? (e.source === 'direct' && (e.role === 'manager' ? view.can_grant_manager : view.can_manage || !!view.can_share))
-  const roles: Role[] = view.can_grant_manager && e.subject.type === 'person' ? ['viewer', 'editor', 'manager'] : ['viewer', 'editor']
+  const roles: Role[] = view.can_grant_manager && !file && e.subject.type === 'person' ? ['viewer', 'editor', 'manager'] : ['viewer', 'editor']
   if (e.role === 'manager' && !roles.includes('manager')) roles.push('manager')
   const you = e.subject.type === 'person' && e.subject.id === me
-  const detail = e.subject.type === 'group' ? t('share_members_n', { n: e.subject.members ?? 0 }) : e.subject.email ?? ''
+  const detail = [e.subject.type === 'group' ? t('share_members_n', { n: e.subject.members ?? 0 }) : e.subject.email ?? '',
+    e.inherited_role ? t('share_also_from_folder', { role: roleLabel(e.inherited_role) }) : ''].filter(Boolean).join(' · ')
   return (
     <li className="sd-entry">
       <Avatar name={e.subject.name} group={e.subject.type === 'group'} />
@@ -282,11 +359,13 @@ function EntryRow({ e, view, me, busy, onRole }: { e: ShareEntry; view: ShareVie
       </span>
       {editable ? (
         <select className="sd-role" value={e.role} disabled={busy} aria-label={t('share_role_of', { name: e.subject.name })}
-          onChange={(x) => { const v = x.target.value as Role | 'remove'; if (v === 'remove' && !window.confirm(t('share_remove_confirm', { name: e.subject.name }))) { x.target.value = e.role; return } onRole(v) }}>
+          onChange={(x) => { const v = x.target.value as Role | 'remove'; if (v === 'remove' && !window.confirm(t(file ? 'share_remove_confirm_file' : 'share_remove_confirm', { name: e.subject.name }))) { x.target.value = e.role; return } onRole(v) }}>
           {roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
           <option value="remove">{t('share_remove_access')}</option>
         </select>
-      ) : <span className="sd-role-ro muted small">{roleLabel(e.role)}{e.cannot_open ? ` · ${t('share_cannot_open')}` : ''}</span>}
+      ) : <span className="sd-role-ro muted small">{roleLabel(e.role)}{e.cannot_open ? ` · ${t('share_cannot_open')}` : ''}
+        {/* a file shared with me directly: I may give it back */}
+        {file && you && e.source === 'direct' && <button type="button" className="btn ghost small sd-leave" disabled={busy} onClick={onLeave}>{t('share_leave')}</button>}</span>}
     </li>
   )
 }
@@ -309,12 +388,12 @@ function GeneralAccess({ view, busy, canEdit, onChange, onRestrict }: { view: Sh
               <span className="muted small">{open ? t('share_team_help') : t('share_restricted_help')}</span></>
           ) : inherited ? (
             <><span className="strong">{team} · {t(`share_role_${g.effective!.level}`)}</span>
-              <span className="muted small">{t('share_general_inherited', { folder: g.effective!.from_path! })}</span></>
+              <span className="muted small">{view.item.kind === 'file' ? t('share_general_file_from_folder', { folder: g.effective!.from_path! }) : t('share_general_inherited', { folder: g.effective!.from_path! })}</span></>
           ) : (
             <>
               <select className="sd-plain" value={open ? 'team' : 'restricted'} disabled={busy || !canEdit} aria-label={t('share_general')}
                 onChange={(e) => onChange(e.target.value === 'team' ? { mode: 'team', role: 'viewer' } : { mode: 'restricted' })}>
-                <option value="restricted">{t('share_restricted')}</option>
+                <option value="restricted" disabled={g.can_restrict === false}>{t('share_restricted')}</option>
                 <option value="team">{team}</option>
               </select>
               <span className="muted small">{open ? t('share_team_help') : t('share_restricted_help')}</span>
@@ -389,11 +468,11 @@ function StepUp({ pending, busy, onCancel, onProof, onError }: { pending: Extrac
   )
 }
 
-function CopyLink({ path }: { path: string }) {
+function CopyLink({ path, kind }: { path: string; kind: 'folder' | 'file' }) {
   const [done, setDone] = useState(false)
   return (
     <button type="button" className="btn sd-copy" onClick={() => {
-      navigator.clipboard?.writeText(linkTo(window.location.origin, path)).then(() => { setDone(true); setTimeout(() => setDone(false), 1800) }, () => {})
+      navigator.clipboard?.writeText(linkTo(window.location.origin, path, kind)).then(() => { setDone(true); setTimeout(() => setDone(false), 1800) }, () => {})
     }}><Icon name={done ? 'check' : 'link'} size={16} /><span>{done ? t('share_link_copied') : t('share_copy_link')}</span></button>
   )
 }

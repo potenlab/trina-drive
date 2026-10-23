@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { get } from '../api'
 import { useSession } from '../App'
 import { fmtDate, t } from '../i18n'
-import { ErrorLine, Loading, Page, useLoad } from '../ui'
+import { EmptyState, ErrorLine, Loading, Page, Skeleton, useLoad } from '../ui'
 
 interface Entry { id: number; at: number; person?: string | null; connection: string; tool: string; command: string | null; files: string[]; outcome: string }
 interface Summary { rows: { person: string | null; connection: string; count: number; last_at: number }[]; chain: { ok: boolean; rows: number; broken_at: number | null } }
@@ -32,7 +32,7 @@ function EntriesView({ view }: { view: 'mine' | 'folders' }) {
   return <>
     {view === 'folders' && <p className="muted small">{t('audit_folders_help')}</p>}
     <ErrorLine error={error} />
-    {entries.length === 0 ? <p className="muted">{t('audit_empty')}</p> : (
+    {entries.length === 0 ? <EmptyState icon="audit" text={t('audit_empty')} /> : (
       <ul className="rows audit">
         {entries.map((x) => (
           <li key={x.id}>
@@ -51,7 +51,7 @@ function EntriesView({ view }: { view: 'mine' | 'folders' }) {
 
 function SummaryView() {
   const { data, error } = useLoad(() => get<Summary>('/audit?view=summary'))
-  if (!data) return <><ErrorLine error={error} />{!error && <Loading />}</>
+  if (!data) return <><ErrorLine error={error} />{!error && <Skeleton rows={6} />}</>
   return <>
     <p className="muted small">{t('audit_summary_help')}</p>
     <p className={data.chain.ok ? 'ok' : 'error'}>{data.chain.ok ? t('audit_chain_ok', { n: data.chain.rows }) : t('audit_chain_broken', { n: data.chain.broken_at ?? '?' })}</p>

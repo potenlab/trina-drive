@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { api, get } from '../api'
 import { fmtDate, t } from '../i18n'
-import { ErrorLine, Loading, Page, useAction, useLoad } from '../ui'
+import { EmptyState, ErrorLine, Page, Skeleton, useAction, useLoad } from '../ui'
 import { at } from './approve-i18n'
 import './approve.css'
 
@@ -19,8 +19,8 @@ export function Drafts() {
     <Page title={t('drafts_title')}>
       <p className="muted">{t('drafts_intro')}</p>
       <ErrorLine error={error} />
-      {!data ? <Loading /> : <>
-        {data.drafts.length === 0 && <p className="muted">{t('drafts_empty')}</p>}
+      {!data ? (error ? null : <Skeleton rows={3} />) : <>
+        {data.drafts.length === 0 && <EmptyState icon="drafts" text={t('drafts_empty')} />}
         <ul className="rows">
           {data.drafts.map((d) => {
             const strong = d.sources.filter((s) => s.strong).map((s) => folderName(s.folder))

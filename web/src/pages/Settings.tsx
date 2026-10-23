@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { api, get } from '../api'
 import { useRoute, useSession } from '../App'
 import { fmtDate, LOCALES, setLocale, t, useLocale, type Key } from '../i18n'
-import { ErrorLine, Loading, Page, useAction, useLoad } from '../ui'
+import { EmptyState, ErrorLine, Page, Skeleton, useAction, useLoad } from '../ui'
 import { SecondFactorSettings } from './SecondFactor'
 import { GdriveSettings } from './GDrive'
 import { dt } from './drive-i18n'
@@ -24,7 +24,7 @@ export function Settings() {
     <Page title={t('settings_title')}>
       <section className="card">
         <h2>{t('notices_title')}</h2>
-        {!notices.data ? <Loading /> : notices.data.notices.length === 0 ? <p className="muted">{t('notices_empty')}</p> : <>
+        {!notices.data ? <Skeleton rows={2} /> : notices.data.notices.length === 0 ? <EmptyState icon="bell" text={t('notices_empty')} /> : <>
           <ul className="rows">
             {notices.data.notices.map((n) => (
               <li key={n.id} className={n.read_at ? 'dim' : ''}>

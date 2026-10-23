@@ -1,15 +1,21 @@
-// Runs the drive UI scenarios (plan 5 / 10.5): node web/e2e/run.mjs [s10 s12 s15 s37 s48]  (default: all)
+// Runs the drive UI scenarios (plan 5 / 10.5): node web/e2e/run.mjs [s10 s12 s13 s15 s16 s37 s48 s50 cloud]  (default: all)
 // Needs a built app (bun run build:web), bun on PATH (the fixture server) and playwright-core with Chromium and WebKit
 // (PLAYWRIGHT_CORE=… when it is not installed here). Each scenario gets a fresh team (web/e2e/fixture.ts).
 import { failed, pw, startFixture } from './lib.mjs'
 import { cloudUi } from './cloud-ui.mjs'
 import { s10 } from './s10-files.mjs'
 import { s12 } from './s12-share-group.mjs'
+import { s13 } from './s13-file-share.mjs'
 import { s15 } from './s15-share-roles.mjs'
+import { s16 } from './s16-invite.mjs'
 import { s37 } from './s37-screens.mjs'
 import { s48 } from './s48-mobile.mjs'
+import { s50 } from './s50-my-files.mjs'
 
-const ALL = { s10: [s10, 'chromium'], s12: [s12, 'chromium'], s15: [s15, 'chromium'], s37: [s37, 'chromium'], s48: [s48, 'webkit'], cloud: [cloudUi, 'chromium', ['--cloud']] }
+const ALL = {
+  s10: [s10, 'chromium'], s12: [s12, 'chromium'], s13: [s13, 'chromium'], s15: [s15, 'chromium'], s16: [s16, 'chromium', ['--cloud']],
+  s37: [s37, 'chromium'], s48: [s48, 'webkit'], s50: [s50, 'chromium', ['--cloud']], cloud: [cloudUi, 'chromium', ['--cloud']],
+}
 const want = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(ALL)
 for (const id of want) {
   const [fn, engine, args] = ALL[id] ?? []
