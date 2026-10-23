@@ -10,7 +10,8 @@
 //   tools/bin/pdftotext        poppler from the build host's Homebrew, relinked with its libraries into tools/lib
 //   tools/licenses/<package>/  license files of the bundled tools
 //   install-macos.sh, uninstall-macos.sh, macos/   the installer (run it from this folder)
-//   docs/                      INSTALL.md, BACKUP-FORMAT.md
+//   LICENSE, NOTICE            Apache-2.0 text and the required notices
+//   docs/                      INSTALL.md, BACKUP-FORMAT.md, THIRD-PARTY.md
 //   release.json               name, version, target, daemons, commit, bun version, minimum macOS
 //   tools.json                 every bundled tool: package, version, source, and each file's SHA-256
 //   SHA256SUMS                 every file above (shasum -a 256 -c SHA256SUMS); the installer checks it
@@ -324,7 +325,8 @@ export async function buildRelease(o: BuildOptions): Promise<string> {
   fs.copyFileSync(path.join(REPO, 'scripts', 'uninstall-macos.sh'), path.join(rel, 'uninstall-macos.sh'))
   for (const f of fs.readdirSync(path.join(REPO, 'scripts', 'macos'))) fs.copyFileSync(path.join(REPO, 'scripts', 'macos', f), path.join(rel, 'macos', f))
   for (const f of ['install-macos.sh', 'uninstall-macos.sh']) fs.chmodSync(path.join(rel, f), 0o755)
-  for (const f of ['INSTALL.md', 'BACKUP-FORMAT.md']) if (fs.existsSync(path.join(REPO, 'docs', f))) fs.copyFileSync(path.join(REPO, 'docs', f), path.join(rel, 'docs', f))
+  for (const f of ['INSTALL.md', 'BACKUP-FORMAT.md', 'THIRD-PARTY.md']) if (fs.existsSync(path.join(REPO, 'docs', f))) fs.copyFileSync(path.join(REPO, 'docs', f), path.join(rel, 'docs', f))
+  for (const f of ['LICENSE', 'NOTICE']) fs.copyFileSync(path.join(REPO, f), path.join(rel, f))
 
   let commit = 'unknown'
   try { commit = run(['git', 'rev-parse', 'HEAD'], { cwd: REPO }).trim() + (run(['git', 'status', '--porcelain'], { cwd: REPO }).trim() ? '-dirty' : '') } catch {}

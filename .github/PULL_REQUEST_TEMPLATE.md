@@ -17,6 +17,7 @@
 
 ## Checklist
 
+- [ ] every commit is signed off (`git commit -s`, [DCO](../CONTRIBUTING.md#developer-certificate-of-origin)); contributions are Apache-2.0
 - [ ] no secrets, real customer data or personal file names in code, tests or screenshots
 - [ ] docs updated (README, `docs/`) if behaviour, commands or settings changed
 - [ ] names come from `src/brand.ts` (no hard-coded product, command or token names)

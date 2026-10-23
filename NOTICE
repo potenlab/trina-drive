@@ -1,0 +1,31 @@
+Trina Drive
+Copyright 2026 Trina Inc.
+
+This product includes software developed at Trina Inc. (https://trina.app).
+Licensed under the Apache License, Version 2.0; see the LICENSE file.
+
+--------------------------------------------------------------------------------
+Third-party material in this repository
+--------------------------------------------------------------------------------
+
+docker/seccomp-bwrap.json and docker/apparmor-trina-drive-bwrap are derived from
+the default seccomp and AppArmor profiles of moby/profiles v0.1.0
+(https://github.com/moby/profiles), Copyright Docker, Inc. and the Moby
+authors, licensed under the Apache License, Version 2.0. Our changes are
+described at the top of docker/apparmor-trina-drive-bwrap and in
+scripts/docker/seccomp.ts.
+
+website/public/fonts/Geist-Variable.woff2 and GeistMono-Variable.woff2 are the
+Geist and Geist Mono fonts, Copyright (c) 2023 Vercel, in collaboration with
+basement.studio, licensed under the SIL Open Font License, Version 1.1; see
+website/public/fonts/OFL-Geist.txt.
+
+The logos in website/public/logos/ are trademarks of their owners and are not
+licensed under the Apache License; see website/LOGO-SOURCES.md.
+
+Release packages and the Docker image also contain third-party programs
+(the Bun runtime, ripgrep, poppler's pdftotext and its libraries, Debian
+packages and npm packages), each under its own license. Their license texts
+ship with them (tools/licenses/, /usr/share/trina-drive/licenses/,
+/usr/share/doc/<package>/copyright, node_modules/<package>/); the list is in
+docs/THIRD-PARTY.md.

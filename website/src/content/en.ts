@@ -30,7 +30,7 @@ const en = {
   },
   // The H1 is two parts so the second can carry the accent gradient. Either part can be swapped freely.
   hero: {
-    pill: 'Source on GitHub · license coming soon',
+    pill: 'Open source · Apache-2.0',
     title: 'Your company folders,',
     titleAccent: 'as your team’s AI knowledge base.',
     sub: 'Your AI searches and reads your team’s files directly. No uploads, no RAG, scoped per person.',
@@ -441,7 +441,8 @@ const en = {
       },
       {
         q: 'Is it open source?',
-        a: 'The source is on GitHub; the license is coming soon. Every security feature stays free and self-hostable.',
+        a: 'Yes, under the Apache-2.0 license: server, CLI and web app. Every security feature stays free and self-hostable.',
+        link: { text: 'Read the license', href: 'https://github.com/potenlab/trina-drive/blob/main/LICENSE' },
       },
     ],
   },

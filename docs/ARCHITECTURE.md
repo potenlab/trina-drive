@@ -249,6 +249,9 @@ bytes are refused at read time. `serve` reconciles on start, every 5 min (`--rec
 
 ## Dependencies and licenses
 
+Trina Drive is Apache-2.0. The full scan of every shipped package, program and font, with what each license requires,
+is in [THIRD-PARTY.md](THIRD-PARTY.md).
+
 | | license | how |
 |---|---|---|
 | just-bash 3.6.0 (vercel-labs) | Apache-2.0 | runtime; its runtime tree is MIT/ISC/Apache-2.0/BSD, plus optional native `node-liblzma` (LGPL-3.0) and `@mongodb-js/zstd` |

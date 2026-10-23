@@ -7,7 +7,7 @@ These Terms govern your use of the paid services we provide for Trina Drive ("**
 
 ## 1. What is free and what is paid
 
-1.1 **Trina Drive software.** Trina Drive is open-source software. The server is licensed under the GNU Affero General Public License v3.0 and the CLI, SDKs and integration examples under the Apache License 2.0, as stated in the source repository. Your use of the software itself is governed by those licenses, not by these Terms. Self-hosting Trina Drive is free, with no limits on users, files, storage or connections.
+1.1 **Trina Drive software.** Trina Drive is open-source software, licensed under the Apache License 2.0 (the server, CLI, web app, SDKs and integration examples), as stated in the LICENSE file of the source repository. Your use of the software itself is governed by that license, not by these Terms; these Terms cover the managed Services described below. Self-hosting Trina Drive is free, with no limits on users, files, storage or connections.
 
 1.2 **Paid Services.** We charge for running Trina Drive for you and for helping you set it up:
 - **Managed plans (Team, Business):** we remotely install, monitor, update, back up and secure a Trina Drive server on hardware you own and keep in your premises (for example, an office Mac mini), plus email support. Plan limits (such as the number of AI-connected people) and response times are shown on our pricing page at the time of your order.
