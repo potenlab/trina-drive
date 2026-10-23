@@ -10,7 +10,15 @@ import s18 from './s18-no-ai'
 import s19 from './s19-managed-rejudge'
 import s24 from './s24-agent-writes'
 import s25 from './s25-scoped-token'
+import s26 from './s26-webdav'
+import s28 from './s28-audit'
+import s29 from './s29-notices-mail'
+import s32 from './s32-upgrade'
+import s33 from './s33-hosts'
+import s34 from './s34-isolation'
+import s35 from './s35-edge'
+import s40 from './s40-mcp-versions'
 import s43 from './s43-agents-never-share'
 import s47 from './s47-noai-webdav'
 
-export const SCENARIOS: Scenario[] = [s10, s12, m01, s14, s15, s17, s18, s19, s24, s25, s43, s47]
+export const SCENARIOS: Scenario[] = [s10, s12, m01, s14, s15, s17, s18, s19, s24, s25, s26, s28, s29, s32, s33, s34, s35, s40, s43, s47]

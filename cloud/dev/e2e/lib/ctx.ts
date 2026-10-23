@@ -25,7 +25,7 @@ export class SkipScenario extends Error {}
 
 export interface Result {
   id: string; title: string; verdict: Verdict; passed: number; failed: number
-  pending: string[]; failures: string[]; skipped?: string; ms: number; uses: string
+  pending: string[]; failures: string[]; warnings: string[]; optional: string[]; skipped?: string; ms: number; uses: string
 }
 
 export class T {
@@ -33,6 +33,8 @@ export class T {
   failed = 0
   pendings: string[] = []
   failures: string[] = []
+  warnings: string[] = []
+  optional: string[] = []
   private started = Date.now()
 
   constructor(public id: string, public target: Target, public http: Http, public features: Features, public fx: Fixture, private verbose: boolean) {}
@@ -49,6 +51,17 @@ export class T {
     }
     return ok
   }
+
+  /** a check outside the plan's assertions (e.g. a stricter RFC detail): reported, never fails the scenario */
+  warn(what: string, ok: boolean, detail?: unknown) {
+    if (ok) { this.passed++; this.log(`    ok   ${what}`); return }
+    const d = detail === undefined ? '' : typeof detail === 'string' ? detail : safeJson(detail)
+    this.warnings.push(`${what}${d ? ` — ${d.slice(0, 300)}` : ''}`)
+    this.log(`    WARN ${what}${d ? ` — ${d.slice(0, 300)}` : ''}`)
+  }
+
+  /** an optional part that did not run here (no CLI, no API key): reported, does not change the verdict */
+  skipPart(what: string, reason: string) { this.optional.push(`${what}: ${reason}`); this.log(`    skip ${what}: ${reason}`) }
 
   /** a part that cannot run yet; the scenario is PARTIAL (or PENDING when nothing ran) */
   pending(what: string, reason: string) {

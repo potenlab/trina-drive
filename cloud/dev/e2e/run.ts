@@ -39,7 +39,7 @@ export async function setup(o: { target: TargetKind; verbose: boolean }): Promis
 async function runOne(s: Scenario, c: Ctx, verbose: boolean): Promise<Result> {
   const t = new T(s.id, c.target, c.http, c.features, c.fx, verbose)
   const t0 = Date.now()
-  const res = (verdict: Result['verdict'], skipped?: string): Result => ({ id: s.id, title: s.title, verdict, passed: t.passed, failed: t.failed, pending: t.pendings, failures: t.failures, skipped, ms: Date.now() - t0, uses: s.uses })
+  const res = (verdict: Result['verdict'], skipped?: string): Result => ({ id: s.id, title: s.title, verdict, passed: t.passed, failed: t.failed, pending: t.pendings, failures: t.failures, warnings: t.warnings, optional: t.optional, skipped, ms: Date.now() - t0, uses: s.uses })
   if (verbose) console.log(`\n== ${s.id} ${s.title}`)
   if (!s.targets.includes(c.target.kind)) return res('SKIP', `local only (${s.targets.join(', ')})`)
   for (const f of s.needs ?? []) {
@@ -63,6 +63,8 @@ function table(rs: Result[]): string {
     lines.push(`${w(r.id, 5)} ${w(r.verdict, 8)} ${w(String(r.passed), 4)} ${w(String(r.failed), 4)} ${w(`${Math.round(r.ms / 1000)}s`, 6)} ${w(r.uses, 14)} ${r.title}`)
     for (const f of r.failures) lines.push(`        ✗ ${f}`)
     for (const p of r.pending) lines.push(`        … ${p}`)
+    for (const x of r.warnings) lines.push(`        ! ${x}`)
+    for (const x of r.optional) lines.push(`        - optional, not run: ${x}`)
     if (r.skipped) lines.push(`        - ${r.skipped}`)
   }
   const n = (v: string) => rs.filter((r) => r.verdict === v).length
