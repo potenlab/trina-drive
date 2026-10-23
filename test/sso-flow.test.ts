@@ -158,6 +158,23 @@ describe('S05: attacks on the callback', () => {
     expect((await b.post({ assertion: 'v1.' + 'a'.repeat(5000) + '.b', state: s.state })).location).toBe('/#/sso-error/malformed')
   })
 
+  test('an office behind one address: good sign-ins are not limited like guesses; refusals still are', async () => {
+    const e = await cloudSetup()
+    await sync(e, members(1))
+    // a 20-person office's morning from 10.0.0.1: 60 Open drives (start + callback each), more than the 50 refusals allowed
+    for (let i = 0; i < 60; i++) expect((await new e.SsoBrowser().sso(MINA)).location).toBe('/#/files')
+    // starting is limited on its own (300 per 15 minutes per address), not with the one-time links (30)
+    const starts = e.db.query<{ n: number }, [string]>('SELECT n FROM rate_limits WHERE scope = ?').get('sso_addr')
+    expect(starts?.n).toBe(60)
+    expect(e.db.query('SELECT 1 FROM rate_limits WHERE scope = ?').get('login_addr')).toBeNull()
+    // refused passes count: after 50 the address waits, even with a good one
+    const b = new e.SsoBrowser()
+    let last = ''
+    for (let i = 0; i < 50; i++) { const s = await b.start(); last = (await b.post({ assertion: 'v1.bad.sig', state: s.state })).location }
+    expect(last).toBe('/#/sso-error/malformed')
+    expect((await new e.SsoBrowser().sso(MINA)).location).toBe('/#/sso-error/rate_limited')
+  })
+
   test('the callback needs no Origin (the console posts it) but GET is not a way in', async () => {
     const e = await cloudSetup()
     expect((await handleWeb(e.w, new Request('http://drive.test/api/sso/callback?assertion=x&state=y'), '10.0.0.1')).status).toBe(405)

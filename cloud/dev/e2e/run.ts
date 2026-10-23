@@ -38,8 +38,9 @@ export async function setup(o: { target: TargetKind; verbose: boolean }): Promis
 
 
 /**
- * Local only: every scenario comes from this one address, and the console counts sign-ups (10 an hour) and sign-ins
- * (30 per 15 minutes) per address, the drive its sign-ins (50 per 15 minutes). Their counters are cleared between
+ * Local only: every scenario comes from this one address (an office range for Caddy: up.sh), and the console counts
+ * sign-ups (10 an hour) and sign-ins (30 per 15 minutes) per address, the drive its sign-ins (50 per 15 minutes) and
+ * Trina Cloud sign-in starts (300 per 15 minutes). Their counters are cleared between
  * scenarios so the gate measures the flows, not the order they ran in; the limits themselves are tested in
  * cloud/control/test and test/ (and by the legacy suite's rate-limit checks).
  */
@@ -47,7 +48,7 @@ function resetLocalLimits(c: Ctx) {
   if (c.target.kind !== 'local') return
   const sql = (db: string, q: string) => `const { Database } = require('bun:sqlite'); const d = new Database(${JSON.stringify(db)}); d.exec('PRAGMA busy_timeout = 5000'); d.run(${JSON.stringify(q)})`
   sh(['docker', 'exec', 'tdc-control', 'bun', '-e', sql(`${c.target.devEnv.TDCLOUD_STATE_DIR}/control.db`, "DELETE FROM rate WHERE key LIKE 'signup:%' OR key LIKE 'login%' OR key LIKE 'verify:%'")])
-  c.target.inTeam?.(c.target.team, ['/usr/local/bin/bun', '-e', sql('/data/db/store.db', "DELETE FROM rate_limits WHERE scope IN ('login_addr', 'login_name')")])
+  c.target.inTeam?.(c.target.team, ['/usr/local/bin/bun', '-e', sql('/data/db/store.db', "DELETE FROM rate_limits WHERE scope IN ('login_addr', 'login_name', 'sso_addr')")])
 }
 
 async function runOne(s: Scenario, c: Ctx, verbose: boolean): Promise<Result> {

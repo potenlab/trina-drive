@@ -66,7 +66,7 @@ export class Features {
     switch (f) {
       case 'team': return (await this.status('GET', `${team}/api/state`)) === 200
       case 'sso': {
-        // /api/state says so (B1); /api/sso/start sits in Caddy's sign-in rate zone, so it is not the probe
+        // /api/state says so (B1); /api/sso/start is rate-limited (Caddy's SSO zone, the drive's starts), so it is not the probe
         const r = await this.http.req('GET', `${team}/api/state`, { timeoutMs: 15_000 })
         return r.status === 200 && !!r.json().sso?.console_url
       }

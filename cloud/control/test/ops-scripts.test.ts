@@ -48,12 +48,15 @@ describe('resend-domain: the records Resend shows today', () => {
 })
 
 describe('the rollout config', () => {
-  test('Caddy: /dav/* has its own body cap and timeout, the sign-in zone covers SSO, office zones exist', () => {
+  test('Caddy: /dav/* has its own body cap and timeout, SSO its own zone (120/min), office zones exist', () => {
     const t = read('caddy/team_routes.caddy')
     expect(t).toMatch(/request_body @dav \{\s+max_size \{\$TDCLOUD_DAV_MAX_BODY:4GiB\}/)
     expect(t).toMatch(/request_body @notdav \{\s+max_size 25MB/)
     expect(t).toContain('/api/sso/*')
     for (const z of ['signin_office', 'mcp_office', 'all_office']) expect(t).toContain(`zone ${z} {`)
+    // SSO hops (2–3 per Open drive, no password) have their own zone, not the 30/min password sign-in one
+    expect(/zone signin \{[^}]*\/api\/sso/.test(t)).toBe(false)
+    expect(t).toMatch(/zone sso \{\s*match \{\s*path \/api\/sso\/\*/)
     expect(t).toMatch(/reverse_proxy @dav [\s\S]*?response_header_timeout 10m/)
     expect(read('host/bootstrap.sh')).toContain('TDCLOUD_TRUSTED_OFFICE_CIDRS=${OFFICE_CIDRS:-192.0.2.0/32}')
   })

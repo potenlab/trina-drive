@@ -96,20 +96,23 @@ export const authRoutes: Route[] = [
     return json({ me: views.me(w, { personId: acc.person_id, admin: !!acc.admin }), csrf: ss.csrf }, 200, { 'set-cookie': ss.cookie })
   }),
   R('POST', '/login/second', false, async ({ w, req, body: b, s, addr }) => {
-    if (!w.loginByAddr.hit(addr)) throw rateLimited(w.loginByAddr.retryAfter(addr))
+    // failures count against the address (a ticket guessed, a wrong code); a good second factor does not — after a
+    // Trina Cloud pass every Open drive of a person with 2FA comes here, a whole office from one address
+    if (w.loginByAddr.blocked(addr)) throw rateLimited(w.loginByAddr.retryAfter(addr))
     const ticket = typeof b.ticket === 'string' ? b.ticket : ''
     const pid = ticketPerson(w.db, ticket)
-    if (pid == null) throw new ApiError(401, 'bad_ticket', 'sign in again')
+    if (pid == null) { w.loginByAddr.hit(addr); throw new ApiError(401, 'bad_ticket', 'sign in again') }
     const key = `mfa:${pid}`
     if (w.loginByName.blocked(key)) throw rateLimited(w.loginByName.retryAfter(key))
     let method: string
     try { method = await approve.checkSecondFactor(w, ticket, pid, b) } catch (e) {
       ticketFailed(w.db, ticket)
       w.loginByName.hit(key)
+      w.loginByAddr.hit(addr)
       throw e
     }
     const p = w.db.query<{ admin: number; active: number }, [number]>('SELECT admin, active FROM people WHERE id = ?').get(pid)
-    if (!p?.active || !consumeTicket(w.db, ticket)) throw new ApiError(401, 'bad_ticket', 'sign in again')
+    if (!p?.active || !consumeTicket(w.db, ticket)) { w.loginByAddr.hit(addr); throw new ApiError(401, 'bad_ticket', 'sign in again') }
     w.loginByName.reset(key)
     if (method === 'recovery') appendAudit(w.db, { personId: pid, tokenId: null, tool: 'web', command: 'signed in with a recovery code', files: [], outcome: 'ok' })
     // after a Trina Cloud pass (src/tdcloud/sso.ts): fresh from the console's auth_time, back to where the person was going

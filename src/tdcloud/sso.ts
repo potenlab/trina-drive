@@ -63,7 +63,7 @@ export function rememberState(db: DB, state: string, returnTo: string, reauth: b
 // ---------- GET /api/sso/start ----------
 export function start(w: WebCtx, req: Request, url: URL, addr: string): Response {
   const cfg = cloudOr404(w)
-  if (!w.linkByAddr.hit(`sso:${addr}`)) throw rateLimited(w.linkByAddr.retryAfter(`sso:${addr}`))
+  if (!w.ssoByAddr.hit(addr)) throw rateLimited(w.ssoByAddr.retryAfter(addr))
   const reauth = url.searchParams.get('reauth') === '1'
   const state = crypto.randomBytes(32).toString('base64url')
   rememberState(w.db, state, safeReturn(url.searchParams.get('return')), reauth, cfg.now())
@@ -122,10 +122,13 @@ export async function callback(w: WebCtx, req: Request, addr: string, base: stri
   const cfg = cloudOr404(w)
   const db = w.db
   ensureWebSchema(db)
-  if (!w.loginByAddr.hit(addr)) return failTo(req, 'rate_limited')
-  if (!(req.headers.get('content-type') ?? '').includes('application/x-www-form-urlencoded') || Number(req.headers.get('content-length') ?? 0) > CALLBACK_MAX_BYTES) return failTo(req, 'malformed')
+  // refusals count against the address (bad, replayed or expired assertions); a good sign-in does not: an office of
+  // 20 behind one address opens the drive all morning, and an assertion is signed by the console, not guessed
+  if (w.loginByAddr.blocked(addr)) return failTo(req, 'rate_limited')
+  const refuse = (code: string) => { w.loginByAddr.hit(addr); return failTo(req, code) }
+  if (!(req.headers.get('content-type') ?? '').includes('application/x-www-form-urlencoded') || Number(req.headers.get('content-length') ?? 0) > CALLBACK_MAX_BYTES) return refuse('malformed')
   const text = await req.text()
-  if (text.length > CALLBACK_MAX_BYTES) return failTo(req, 'malformed')
+  if (text.length > CALLBACK_MAX_BYTES) return refuse('malformed')
   const form = new URLSearchParams(text)
   const state = form.get('state'), cookieState = readCookie(req, stateCookieName(req)) ?? null
   const nowMs = cfg.now(), nowS = Math.floor(nowMs / 1000)
@@ -133,7 +136,7 @@ export async function callback(w: WebCtx, req: Request, addr: string, base: stri
   const v = verifyAssertion(cfg, { assertion: form.get('assertion'), state, cookieState, now: nowS, seen: (jti) => !!db.query('SELECT 1 FROM sso_used WHERE jti = ?').get(jti) })
   if (!v.ok) {
     appendAudit(db, { personId: null, tokenId: null, tool: 'cloud', command: `sso sign-in refused: ${v.error}`, files: [], outcome: 'denied' })
-    return failTo(req, v.error)
+    return refuse(v.error)
   }
   const c = v.claims
   let who!: SignedIn, stored!: { return_to: string; reauth: number }
@@ -162,7 +165,7 @@ export async function callback(w: WebCtx, req: Request, addr: string, base: stri
     const code = e instanceof SsoFail ? e.code : e instanceof PeopleLimitError ? 'people_limit' : null
     if (!code) throw e
     appendAudit(db, { personId: null, tokenId: null, tool: 'cloud', command: `sso sign-in refused: ${code}`, files: [], outcome: 'denied' })
-    return failTo(req, code)
+    return refuse(code)
   }
   if (who.newAdmin) await announceNewAdmins({ db, mailer: w.mailer, baseUrl: base }, [who.personId], 'Trina Cloud sign-in')
   if (widened) await tellWidened({ db, mailer: w.mailer, baseUrl: base }, widened)
@@ -195,11 +198,12 @@ export async function callback(w: WebCtx, req: Request, addr: string, base: stri
 // ---------- the drive's second factor after an SSO pass ----------
 /** POST /api/sso/second {ticket}: what the person proves next (passkey options, TOTP, recovery code). */
 export async function secondChallenge(w: WebCtx, body: { ticket?: unknown }, addr: string) {
-  if (!w.loginByAddr.hit(addr)) throw rateLimited(w.loginByAddr.retryAfter(addr))
+  // like the callback: only a wrong ticket counts against the address
+  if (w.loginByAddr.blocked(addr)) throw rateLimited(w.loginByAddr.retryAfter(addr))
   const ticket = typeof body.ticket === 'string' ? body.ticket : ''
   const pid = ticketPerson(w.db, ticket)
   ensureWebSchema(w.db)
-  if (pid == null || !w.db.query('SELECT 1 FROM sso_tickets WHERE ticket_hash = ?').get(sha256(ticket))) throw new ApiError(401, 'bad_ticket', 'sign in again')
+  if (pid == null || !w.db.query('SELECT 1 FROM sso_tickets WHERE ticket_hash = ?').get(sha256(ticket))) { w.loginByAddr.hit(addr); throw new ApiError(401, 'bad_ticket', 'sign in again') }
   return { second_factor: await approve.secondFactorChallenge(w, ticket, pid) }
 }
 

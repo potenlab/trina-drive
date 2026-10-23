@@ -30,6 +30,9 @@ for a in "$@"; do
 done
 : "${TDCLOUD_IMAGE:=trina-drive:cloud-dev}"
 : "${TDCLOUD_PUBLIC_PORT:=8443}"
+# Every request from this machine reaches Caddy from Docker's port forwarder at the control network's gateway: this
+# machine is the office (Caddy's office zones, as Terraform office_cidrs gives a real office), so a whole test run from
+# one address meets the office limits; 10.250.250.50 (a container) stays an ordinary client. The checks prove both.
 TDCLOUD_DOMAIN=cloud.localhost
 
 say() { printf '\n== %s\n' "$*"; }
@@ -79,6 +82,7 @@ TDCLOUD_APPARMOR=$APPARMOR
 TDCLOUD_CADDY_ASK_KEY=$(rand)
 PADDLE_WEBHOOK_SECRET=pdl_ntfset_dev_$(rand)
 TDCLOUD_TEAM_MAIL_FROM=Trina Drive (dev) <drive@trina.test>
+TDCLOUD_TRUSTED_OFFICE_CIDRS=${TDCLOUD_TRUSTED_OFFICE_CIDRS:-10.250.250.1/32}
 EOF
 umask 022
 

@@ -154,10 +154,14 @@ load balancer or CDN is ever added:
 
 The control plane works the same way (`caddy/Caddyfile.control`; it reads the right-most entry, from 127.0.0.1 only).
 
-**Rate limits per client address** (`caddy/team_routes.caddy`): sign-in, setup, one-time links, re-auth, SSO
-(`/api/sso/*`) and OAuth 30/min, MCP 300/min, everything 1,200/min. One office behind one NAT address is a whole team
-at once (Finder's WebDAV sends a PROPFIND per folder), so **office ranges** get their own zones: 300 / 1,500 / 6,000 per
-minute. Terraform `office_cidrs` (e.g. `["203.0.113.7/32"]`, in `terraform.tfvars`) → `OFFICE_CIDRS` in each host's
+**Rate limits per client address** (`caddy/team_routes.caddy`): sign-in, setup, one-time links, re-auth and OAuth
+30/min, Sign in with Trina Cloud (`/api/sso/*`: 2–3 requests per Open drive, no password) 120/min, MCP 300/min,
+everything 1,200/min. One office behind one NAT address is a whole team at once (Finder's WebDAV sends a PROPFIND per
+folder), so **office ranges** get their own zones: 300 (sign-in and SSO) / 1,500 / 6,000 per minute. Behind Caddy the
+drive counts SSO starts (300 per 15 min) and refused passes or second factors (50 per 15 min) per address; a good
+sign-in is not counted there. The local stack (`cloud/dev/up.sh`) makes this machine an office range
+(`10.250.250.1/32`, Docker's port forwarder; `TDCLOUD_TRUSTED_OFFICE_CIDRS=… cloud/dev/up.sh` to change it) and its
+end-to-end checks prove both kinds of zone. Terraform `office_cidrs` (e.g. `["203.0.113.7/32"]`, in `terraform.tfvars`) → `OFFICE_CIDRS` in each host's
 `host.conf` → `TDCLOUD_TRUSTED_OFFICE_CIDRS` in Caddy's env; unset, the zones match nobody (`192.0.2.0/32`). A running
 host takes a change with `OFFICE_CIDRS='…'` in `/etc/tdcloud/host.conf` and a bootstrap rerun (Caddy restarts; teams keep
 running). **Uploads**: 25 MB per request, except `/dav/*` (WebDAV clients PUT whole files): `TDCLOUD_DAV_MAX_BODY`,
