@@ -57,13 +57,16 @@ output "control_env_template" {
     TDCLOUD_KMS_KEY_ID=${aws_kms_alias.main.name}
     TDCLOUD_BACKUP_TARGET=s3://${aws_s3_bucket.backups.id}
     TDCLOUD_BACKUP_KEEP=7
-    TDCLOUD_MAX_TEAMS_PER_HOST=20
+    # slots per host for ${var.host_instance_type} (Team 1, Business 2, Free 0.25; README "Sizing")
+    TDCLOUD_MAX_TEAMS_PER_HOST=${local.host_slots}
     TDCLOUD_ASG_NAME=${aws_autoscaling_group.hosts.name}
     TDCLOUD_MAX_HOSTS=${var.host_max}
     TDCLOUD_SPARE_SLOTS=0
     TDCLOUD_EMPTY_HOST_GRACE=6h
-    # Free plan (cloud/README.md "Free plan"): the cap; free teams never launch the last host of TDCLOUD_MAX_HOSTS
-    TDCLOUD_MAX_FREE_TEAMS=50
+    # Free plan (cloud/README.md "Free plan"): the cap; free teams never launch the last host of TDCLOUD_MAX_HOSTS.
+    # 0 = public free sign-up closed (plan v1.1 O2: until Resend's daily limit is planned for; operators still
+    # `teams create`). Raise it (e.g. 10) to open sign-ups.
+    TDCLOUD_MAX_FREE_TEAMS=0
     TDCLOUD_FREE_RESERVE_HOSTS=1
     # optional, both or neither: Cloudflare Turnstile on /free
     # TDCLOUD_TURNSTILE_SITE_KEY=<0x…>
@@ -71,12 +74,13 @@ output "control_env_template" {
     TDCLOUD_ROUTE53_ZONE_ID=${aws_route53_zone.cloud.zone_id}
     TDCLOUD_SSM_PREFIX=/${var.name}
     AWS_REGION=${var.region}
-    PADDLE_ENV=live
+    # sandbox until Paddle is wired (live values: README, Deploy step 5); a placeholder webhook secret is fine meanwhile
+    PADDLE_ENV=sandbox
     PADDLE_CHECK_IP=1
     # secrets (fill in):
     TDCLOUD_CADDY_ASK_KEY=<same value as the ${local.ssm_ask_key} parameter>
     PADDLE_WEBHOOK_SECRET=<Paddle → Developer tools → Notifications → the control plane destination's secret>
-    PADDLE_CLIENT_TOKEN=<Paddle client-side token (live_…)>
+    PADDLE_CLIENT_TOKEN=<Paddle client-side token (test_… in sandbox, live_… in live)>
     PADDLE_PRICE_TEAM_MONTHLY=<pri_…>
     PADDLE_PRICE_TEAM_YEARLY=<pri_…>
     PADDLE_PRICE_BUSINESS_MONTHLY=<pri_…>

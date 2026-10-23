@@ -41,6 +41,7 @@ resource "aws_instance" "control" {
     mail_key_param     = local.ssm_control_mail_key
     team_subnets       = var.team_subnets
     front_proxies      = join(" ", var.front_proxies)
+    office_cidrs       = join(" ", var.office_cidrs)
   })
   user_data_replace_on_change = false
 

@@ -4,11 +4,12 @@ domain     = "cloud.trina.app"
 acme_email = "contact@trina.app"
 # mail_domain = ""                 # empty = domain: SES DKIM/DMARC records go into the Route 53 zone
 host_max   = 3                     # the scaler runs 0..host_max hosts (README, "Hosts: scale-out and scale-in")
-# host_instance_type = "m7g.xlarge"
-# host_data_gb       = 300
-trina_image_tag   = "0.2.0-<commit>" # tags are immutable: a new tag per build
-control_image_tag = "0.1.0-<commit>"
-caddy_image_tag   = "2.10.2-1"
+# host_instance_type = "m7g.large"   # 10 slots; m7g.xlarge = 20
+# host_data_gb       = 100           # gp3, grows online
+# office_cidrs       = ["203.0.113.7/32"]   # the office NAT: higher rate limits (caddy/team_routes.caddy)
+trina_image_tag   = "0.3.0-<commit>" # tags are immutable: a new tag per build
+control_image_tag = "0.2.0-<commit>"
+caddy_image_tag   = "2.10.2-2"           # 2.10.2-2: the /dav/* body exception and office zones
 # a deploy identity without kms:PutKeyPolicy / iam:TagRole (README, Deploy step 0):
 # kms_admin_arns                         = ["arn:aws:iam::<account>:user/tdcloud-deploy"]
 # create_autoscaling_service_linked_role = false
