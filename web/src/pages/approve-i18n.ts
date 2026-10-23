@@ -10,6 +10,8 @@ const en = {
   sf_bad: 'That did not work. Try again.', sf_elsewhere: 'Your passkey works on {url}. Sign in there, or use another method.',
   sf_none: 'No second factor can be used on this address. Sign in on the server\'s public address, or ask the server operator to reset your second factors.',
   // settings
+  mfa_enroll_title: 'Protect your admin account', mfa_enroll_intro: 'This server is on the internet, so admins add a second factor before anything else: a passkey, or an authenticator app (6-digit codes). Keep the recovery codes it shows somewhere safe.',
+  mfa_enroll_continue: 'Continue',
   mfa_title: 'Second factor', mfa_intro: 'A passkey (this device, a phone or a security key) or an authenticator app. Sign-in asks for it, and approving a promote needs it on every click.',
   mfa_admin_needed: 'You are an admin: a public address for this server needs every admin to have a second factor.',
   mfa_enrolled: 'Second factor is on.', mfa_off: 'No second factor yet.',
@@ -57,6 +59,8 @@ const ko: Record<ApKey, string> = {
   sf_recovery: '복구 코드', sf_use_recovery: '복구 코드 쓰기', sf_use_code: '인증 앱 쓰기', sf_submit: '계속',
   sf_bad: '확인되지 않았습니다. 다시 하세요.', sf_elsewhere: '패스키는 {url}에서 쓸 수 있습니다. 거기서 로그인하거나 다른 방법을 쓰세요.',
   sf_none: '이 주소에서 쓸 수 있는 두 번째 단계가 없습니다. 서버의 공개 주소에서 로그인하거나, 서버 운영자에게 두 번째 단계 초기화를 요청하세요.',
+  mfa_enroll_title: '관리자 계정 보호', mfa_enroll_intro: '이 서버는 인터넷에 열려 있어 관리자는 먼저 2단계 인증을 추가해야 합니다. 패스키 또는 인증 앱(6자리 코드)을 등록하세요. 표시되는 복구 코드는 안전한 곳에 보관하세요.',
+  mfa_enroll_continue: '계속',
   mfa_title: '2단계 인증', mfa_intro: '패스키(이 기기, 휴대폰, 보안 키) 또는 인증 앱. 로그인할 때 묻고, 초안 반영을 승인할 때는 누를 때마다 묻습니다.',
   mfa_admin_needed: '관리자입니다: 이 서버에 공개 주소를 열려면 관리자 모두에게 2단계 인증이 있어야 합니다.',
   mfa_enrolled: '2단계 인증이 켜져 있습니다.', mfa_off: '아직 2단계 인증이 없습니다.',

@@ -13,6 +13,7 @@ import { RateLimiter } from './auth'
 import type { WebCtx, WebOptions } from './http'
 import { OutboxMailer } from './mail'
 import { forwardedClient } from './proxy'
+import { hostedGate } from './hosted'
 import { ensureWebSchema } from './schema'
 import { handleConsentApi, handleOAuth, isOAuthPath, makeOAuthRuntime, mcpOAuth } from '../oauth'
 import { oauthOptionsFromSettings, readPublicSettings } from '../oauth/settings'
@@ -76,6 +77,9 @@ export async function handleWeb(w: WebCtx, req: Request, addr?: string): Promise
   const { pathname } = new URL(req.url)
   if (pathname === '/mcp' || pathname === '/health') return withHeaders(await handleRequest(w, req, { allowedOrigins: w.opts.allowedOrigins, onRequest: w.opts.onRequest, limiter: w.mcpLimiter, oauth: w.oauth ? mcpOAuth(w.oauth, w.db) : undefined }, addr))
   if (isOAuthPath(pathname)) return withHeaders(w.oauth ? await handleOAuth(w.oauth, w.db, req, addr ?? 'unknown') : Response.json({ error: 'not_found' }, { status: 404 }))
+  // hosted: an admin without a second factor reaches only enrolment (hosted.ts)
+  const gate = pathname === '/api' || pathname.startsWith('/api/') ? hostedGate(w, req, pathname) : null
+  if (gate) return withHeaders(gate)
   if (pathname.startsWith('/api/oauth/')) return withHeaders(await handleConsentApi(w, w.oauth, req))
   if (pathname === '/api' || pathname.startsWith('/api/')) return withHeaders(await handleApi(w, req, addr))
   return withHeaders(serveStatic(w, req))

@@ -5,7 +5,7 @@ import { PRODUCT } from '../../src/brand'
 import { api, get, setCsrf, whenSignedOut, type Me } from './api'
 import { LOCALES, setLocale, t, useLocale } from './i18n'
 import { Approvals } from './pages/Approvals'
-import { SecondFactorSettings } from './pages/SecondFactor'
+import { EnrollSecondFactor, SecondFactorSettings } from './pages/SecondFactor'
 import { at } from './pages/approve-i18n'
 import { Audit } from './pages/Audit'
 import { Drafts } from './pages/Drafts'
@@ -38,6 +38,9 @@ export function App() {
   const [setupPending, setSetupPending] = useState(false)
   // served on the public address (src/web/public.ts): only sign-in and OAuth consent are there
   const [publicListener, setPublicListener] = useState(false)
+  // hosted server: an admin without a second factor enrols first; stays until "Continue" (the recovery codes are shown)
+  const [enrolling, setEnrolling] = useState(false)
+  useEffect(() => { if (me?.second_factor_required) setEnrolling(true); else if (!me) setEnrolling(false) }, [me])
 
   const refresh = () => get<{ me: Me; csrf: string }>('/session').then((s) => { setCsrf(s.csrf); setMe(s.me) }, () => setMe(null))
   useEffect(() => {
@@ -49,6 +52,7 @@ export function App() {
   if (!ready) return <main className="center"><Loading /></main>
   const ctx = { me, setMe, refresh }
 
+  if (me && (enrolling || me.second_factor_required)) return <SessionCtx.Provider value={ctx}><Bare wide><EnrollSecondFactor onDone={() => setEnrolling(false)} /></Bare></SessionCtx.Provider>
   // OAuth consent (#/oauth/<id>): sign in first if needed, then decide; on both addresses
   const oauthMatch = /^\/oauth\/([A-Za-z0-9_-]{20,64})$/.exec(route)
   if (oauthMatch) return <SessionCtx.Provider value={ctx}><Bare wide>{me ? <Consent rid={oauthMatch[1]!} /> : <Login onDone={() => {}} />}</Bare></SessionCtx.Provider>

@@ -26,6 +26,8 @@ export interface WebOptions {
   oauth?: OAuthOptions | null
   /** reverse proxies whose forwarded client address is believed on the main listener (proxy.ts); default none */
   trustedProxy?: TrustedProxies | null
+  /** hosted mode (hosted.ts): admins must enrol a second factor before anything else */
+  hosted?: boolean
 }
 
 export interface WebCtx extends Ctx {
