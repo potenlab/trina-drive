@@ -1,6 +1,6 @@
 ---
 import type { Copy } from '../content/en'
-import { LINKS } from '../site'
+import { CLOUD_LIVE, LINKS } from '../site'
 import Icon from './Icon.astro'
 import Logo from './Logo.astro'
 
@@ -25,7 +25,7 @@ const securityPage = '/security'
         <Icon name="moon" class="theme-icon-light" /><Icon name="sun" class="theme-icon-dark" />
       </button>
       <a class="btn btn-secondary btn-sm nav-book" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{n.book}</a>
-      <a class="btn btn-primary btn-sm nav-start" data-cta="get-started" href={a('start')}>{n.start}</a>
+      <a class="btn btn-primary btn-sm nav-start" data-cta={CLOUD_LIVE ? 'get-started' : 'early-access'} href={a('start')}>{CLOUD_LIVE ? n.startLive : n.start}</a>
       <button class="icon-btn menu-btn" type="button" data-menu-toggle aria-expanded="false" aria-controls="mobile-menu" aria-label={n.menu}>
         <Icon name="menu" />
       </button>
