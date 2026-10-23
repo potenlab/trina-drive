@@ -2,6 +2,7 @@
 // new code made: `bun rollback-old-steps.ts <old checkout> <data dir> <names.json>`. Every step must succeed (exit 0)
 // although the database holds file_grants, mfiles.uid/location, groups.uid and via_file columns the old code never
 // reads. Prints one JSON line with what the new code must check afterwards.
+export {}
 const [oldRoot, dataDir, namesFile] = process.argv.slice(2) as [string, string, string]
 const imp = (p: string) => import(`${oldRoot}/src/${p}`)
 const { openDb } = await imp('db.ts')

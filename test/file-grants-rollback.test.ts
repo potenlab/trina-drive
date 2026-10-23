@@ -136,7 +136,7 @@ describe('rollback to an older image and forward again (memo §11.4, S49)', () =
           expect(m.put('/T/d1', 'f9.md', stageBytes(m.s.root, Buffer.from('F9')), 'fail').path).toBe('/T/d1/f9.md')
           const tid = m.removeOne('/T/d1/f1.md')
           expect(m.purge(tid)).toEqual({ ok: true })
-          expect(db.query<{ n: number }, []>('SELECT count(*) AS n FROM file_grants WHERE subject_id = ? AND file_uid != ?').get(ids.P1, 'deadbeef')!.n).toBe(1) // f3's only
+          expect(db.query<{ n: number }, [number, string]>('SELECT count(*) AS n FROM file_grants WHERE subject_id = ? AND file_uid != ?').get(ids.P1, 'deadbeef')!.n).toBe(1) // f3's only
           expect(rescan(ctx).partial).toBeUndefined()
           expect(read(db, ids.P1, '/T/d1/f9.md')).toBeNull()
           await managedIdle(db)
