@@ -1,0 +1,49 @@
+---
+// Benchmark section, driven entirely by t.benchmark (rendered only when t.benchmark.enabled). One horizontal bar per
+// approach on a 0–100 scale: Trina Drive in the accent, the others neutral, every bar labelled with its value (so
+// identity is never colour alone and no legend is needed). The by-type table doubles as the table view of the data.
+import type { Copy } from '../content/en'
+interface Props { t: Copy }
+const { t } = Astro.props
+const b = t.benchmark
+const pct = (v: number) => `${Math.max(0, Math.min(100, v))}%`
+---
+<section class="section" id="benchmark" aria-labelledby="bench-title">
+  <div class="container">
+    <div class="section-head" data-reveal>
+      <span class="eyebrow">{b.eyebrow}</span>
+      <h2 id="bench-title">{b.title}</h2>
+      <p>{b.sub}</p>
+    </div>
+    <div class="bench" data-reveal>
+      <div class="bench-stat">
+        <p class="bench-value">{b.stat.value}</p>
+        <p class="bench-label">{b.stat.label}</p>
+      </div>
+      <figure class="bench-chart">
+        <figcaption>{b.metric}</figcaption>
+        <ul>
+          {b.approaches.map((a) => (
+            <li class={a.us ? 'bench-us' : ''} title={`${a.name}: ${a.value}${b.unit}`}>
+              <span class="bench-name">{a.name}</span>
+              <span class="bench-track"><span class="bench-bar" style={`width:${pct(a.value)}`}></span></span>
+              <span class="bench-num">{a.value}{b.unit}</span>
+            </li>
+          ))}
+        </ul>
+      </figure>
+    </div>
+    <div class="bench-table-wrap" data-reveal>
+      <table class="bench-table">
+        <caption>{b.byType.title}</caption>
+        <thead><tr>{b.byType.cols.map((c, i) => <th scope="col" class={i === 1 ? 'is-us' : ''}>{c}</th>)}</tr></thead>
+        <tbody>
+          {b.byType.rows.map((r) => (
+            <tr><th scope="row">{r.label}</th>{r.cells.map((c, i) => <td class={i === 0 ? 'is-us' : ''}>{c}</td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p class="bench-foot">{b.note} <a href={b.link.href} rel="noopener">{b.link.text} →</a></p>
+  </div>
+</section>

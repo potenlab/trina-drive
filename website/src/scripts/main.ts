@@ -106,7 +106,7 @@ if (term) {
     const me = ++run
     if (replay) replay.hidden = true
     lines.forEach((l) => { l.dataset.hidden = 'true' })
-    setTab('kim')
+    setTab('alex')
     for (let i = 0; i < lines.length; i++) {
       if (me !== run) return
       const line = lines[i]!
@@ -135,7 +135,7 @@ if (term) {
 
   if (reduceMotion) {
     showAll()
-    setTab('boss')
+    setTab('sam')
   } else {
     // Start when the terminal is on screen (it is, on desktop; on phones it is below the fold).
     const io = new IntersectionObserver((entries) => {

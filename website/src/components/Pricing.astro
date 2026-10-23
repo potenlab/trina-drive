@@ -18,7 +18,7 @@ const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bi
 ---
 <section class="section" id="pricing" aria-labelledby="pricing-title" data-pricing data-currency={defaultCurrency} data-billing="monthly">
   <div class="container">
-    <div class="section-head">
+    <div class="section-head center">
       <span class="eyebrow">{p.eyebrow}</span>
       <h2 id="pricing-title">{p.title}</h2>
       <p>{p.sub}</p>
@@ -27,7 +27,7 @@ const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bi
       <div class="pricing-toggles">
         <div class="seg" role="group" aria-label={p.billingLabel}>
           <button type="button" data-billing-btn="monthly" aria-pressed="true">{p.monthly}</button>
-          <button type="button" data-billing-btn="yearly" aria-pressed="false">{p.yearly}</button>
+          <button type="button" data-billing-btn="yearly" aria-pressed="false">{p.yearly} <span class="seg-badge">{p.yearlyBadge}</span></button>
         </div>
       </div>
       <div class="pricing-notes">
@@ -41,8 +41,10 @@ const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bi
         return (
         <article class={`plan${plan.featured ? ' plan-featured' : ''}`} aria-labelledby={`plan-${plan.id}`}>
           {plan.featured && <span class="plan-badge">{p.popular}</span>}
-          <h3 class="plan-name" id={`plan-${plan.id}`}>{plan.name}</h3>
-          <p class="plan-kind">{plan.kind}</p>
+          <div class="plan-head">
+            <h3 class="plan-name" id={`plan-${plan.id}`}>{plan.name}</h3>
+            <p class="plan-kind">{plan.kind}</p>
+          </div>
           {CUR.map((cur) => (
             <div class={curClass(cur)}>
               {plan.yearly

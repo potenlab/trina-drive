@@ -1,0 +1,78 @@
+---
+// "How it works" diagram: AI clients → Trina Drive (permission filter) → your folders. HTML columns with SVG rails in
+// between. Items in a column have a fixed height and are spread with space-around, so item i's centre sits at
+// (i + 0.5) / n of the column height — which is where the rail's curve for it starts or ends. Packets travel along the
+// rails (CSS stroke-dashoffset); no animation with prefers-reduced-motion.
+import type { Copy } from '../content/en'
+import Icon from './Icon.astro'
+import Logo from './Logo.astro'
+interface Props { t: Copy }
+const { t } = Astro.props
+const d = t.how.diagram
+const clients = t.clients.items
+const folders = [...d.folderItems.map((x) => ({ text: x, blocked: false })), { text: d.noAi, blocked: true }]
+const curve = (i: number, n: number, toCenter: boolean) => {
+  const y = ((i + 0.5) / n) * 100
+  return toCenter ? `M0 ${y} C 55 ${y}, 45 50, 100 50` : `M0 50 C 55 50, 45 ${y}, 100 ${y}`
+}
+---
+<figure class="flow" aria-label={d.label} data-reveal>
+  <div class="flow-col flow-left">
+    <p class="flow-head">{d.people}</p>
+    <ul class="flow-items">
+      {clients.map((c) => (
+        <li class="flow-item" data-status={c.status}>
+          <span class="flow-mark"><Icon name="sparkle" /></span>
+          <span class="flow-name">{c.name}</span>
+          <small>{c.status === 'today' ? t.clients.today : t.clients.soon}</small>
+        </li>
+      ))}
+    </ul>
+    <p class="flow-note">{d.peopleNote}</p>
+  </div>
+  <div class="flow-rail" aria-hidden="true">
+    <span class="flow-rail-label">{d.arrow1}</span>
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+      {clients.map((c, i) => (
+        <g data-status={c.status}>
+          <path class="flow-line" d={curve(i, clients.length, true)} vector-effect="non-scaling-stroke" />
+          <path class="flow-packet" d={curve(i, clients.length, true)} pathLength="100" vector-effect="non-scaling-stroke" style={`animation-delay:${(i * 0.45).toFixed(2)}s`} />
+        </g>
+      ))}
+    </svg>
+  </div>
+  <div class="flow-col flow-center">
+    <span class="flow-head" aria-hidden="true"></span>
+    <div class="flow-core">
+      <span class="flow-core-logo"><Logo /></span>
+      <p class="flow-core-title">{d.server}</p>
+      <ul>
+        {d.serverItems.map((x, i) => <li><Icon name={['filter', 'shell', 'log'][i] ?? 'check'} />{x}</li>)}
+      </ul>
+      <p class="flow-note">{d.serverNote}</p>
+    </div>
+  </div>
+  <div class="flow-rail" aria-hidden="true">
+    <span class="flow-rail-label">{d.arrow2}</span>
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+      {folders.map((f, i) => (
+        <g data-blocked={String(f.blocked)}>
+          <path class="flow-line" d={curve(i, folders.length, false)} vector-effect="non-scaling-stroke" />
+          {!f.blocked && <path class="flow-packet" d={curve(i, folders.length, false)} pathLength="100" vector-effect="non-scaling-stroke" style={`animation-delay:${(0.9 + i * 0.5).toFixed(2)}s`} />}
+        </g>
+      ))}
+    </svg>
+  </div>
+  <div class="flow-col flow-right">
+    <p class="flow-head">{d.folders}</p>
+    <ul class="flow-items">
+      {folders.map((f) => (
+        <li class="flow-item" data-blocked={String(f.blocked)}>
+          <Icon name={f.blocked ? 'x' : 'folder'} />
+          <span class="flow-name">{f.text}</span>
+        </li>
+      ))}
+    </ul>
+    <p class="flow-note">{d.folderNote}</p>
+  </div>
+</figure>

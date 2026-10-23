@@ -1,0 +1,31 @@
+---
+// Competitor table, driven entirely by t.competitors (rendered only when t.competitors.enabled). One row per product,
+// Trina Drive first and highlighted. Scrolls sideways inside its own box on small screens.
+import type { Copy } from '../content/en'
+interface Props { t: Copy }
+const { t } = Astro.props
+const c = t.competitors
+---
+<section class="section" id="compare" aria-labelledby="compare-title">
+  <div class="container">
+    <div class="section-head" data-reveal>
+      <span class="eyebrow">{c.eyebrow}</span>
+      <h2 id="compare-title">{c.title}</h2>
+    </div>
+    <div class="compare-wrap" role="region" aria-labelledby="compare-title" tabindex="0">
+      <table class="compare">
+        <caption class="sr-only">{c.caption}</caption>
+        <thead><tr><td></td>{c.cols.map((h) => <th scope="col">{h}</th>)}</tr></thead>
+        <tbody>
+          {c.rows.map((r) => (
+            <tr class={r.us ? 'compare-us-row' : ''}>
+              <th scope="row">{r.name}</th>
+              {r.cells.map((x) => <td>{x}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p class="compare-note">{c.note}</p>
+  </div>
+</section>

@@ -1,0 +1,56 @@
+---
+// Hero product mock: the web app's Files view with the "who can see" panel for the selected folder.
+// Plain HTML/CSS so it stays crisp at any size and follows light/dark. It is an illustration: one figure with a
+// text label for screen readers, the inner UI is aria-hidden.
+import type { Copy } from '../content/en'
+import Icon from './Icon.astro'
+import Logo from './Logo.astro'
+interface Props { t: Copy }
+const { t } = Astro.props
+const m = t.mock
+const p = m.panel
+---
+<figure class="mock" aria-label={m.label}>
+  <div class="mock-chrome" aria-hidden="true">
+    <span class="mock-dots"><span></span><span></span><span></span></span>
+    <span class="mock-url"><Icon name="lock" />{m.url}</span>
+  </div>
+  <div class="mock-app" aria-hidden="true">
+    <aside class="mock-side">
+      <span class="mock-brand"><Logo /><b>Trina Drive</b></span>
+      <ul>
+        {m.nav.map((n, i) => (
+          <li data-active={String(i === 0)}><Icon name={['folder', 'draft', 'log', 'filter'][i] ?? 'folder'} />{n}</li>
+        ))}
+      </ul>
+    </aside>
+    <div class="mock-main">
+      <div class="mock-top">
+        <span class="mock-crumb">{m.crumb}</span>
+        <span class="mock-search"><Icon name="search" />{m.search}</span>
+      </div>
+      <div class="mock-table">
+        <div class="mock-row mock-head">
+          <span>{m.cols.name}</span><span>{m.cols.access}</span><span>{m.cols.ai}</span>
+        </div>
+        {m.rows.map((r) => (
+          <div class="mock-row" data-selected={String(Boolean(r.selected))}>
+            <span class="mock-name"><Icon name="folder" />{r.name}</span>
+            <span class="mock-access">{r.access}</span>
+            <span><span class={`mock-ai mock-ai-${r.ai}`}>{r.ai === 'on' ? m.aiOn : m.aiOff}</span></span>
+          </div>
+        ))}
+      </div>
+    </div>
+    <div class="mock-panel">
+      <p class="mock-panel-title"><Icon name="eye" />{p.title}</p>
+      <dl>
+        <div><dt>{p.nasLabel}</dt><dd class="mock-people">{p.nas.map((n) => <span class="mock-avatar">{n.slice(0, 1).toUpperCase()}</span><span>{n}</span>)}</dd></div>
+        <div><dt>{p.aiLabel}</dt><dd><span class="mock-ai mock-ai-on">{p.ai}</span></dd></div>
+        <div><dt>{p.hiddenLabel}</dt><dd class="mock-hidden"><Icon name="eyeoff" />{p.hidden}</dd></div>
+        <div><dt>{p.draftLabel}</dt><dd class="mock-draft"><Icon name="draft" /><code>{p.draft}</code><span class="mock-prov">{p.draftFrom}</span></dd></div>
+        <div><dt>{p.logLabel}</dt><dd><code class="mock-log">{p.log}</code></dd></div>
+      </dl>
+    </div>
+  </div>
+</figure>
