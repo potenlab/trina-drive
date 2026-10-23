@@ -82,7 +82,16 @@ function sh(argv: string[], input?: string): { code: number; out: string; err: s
   const p = Bun.spawnSync(argv, { stdin: input !== undefined ? new TextEncoder().encode(input) : 'ignore', stdout: 'pipe', stderr: 'pipe' })
   return { code: p.exitCode ?? -1, out: p.stdout.toString(), err: p.stderr.toString() }
 }
-const admin = (...args: string[]) => sh(['docker', 'exec', 'tdc-control', 'bun', '/app/src/main.ts', ...args])
+/** the admin CLI; a second process on the control database can meet "database is locked" while the server writes:
+ * that attempt changed nothing, so it is tried again (a few times, briefly) */
+function admin(...args: string[]) {
+  let r = sh(['docker', 'exec', 'tdc-control', 'bun', '/app/src/main.ts', ...args])
+  for (let i = 0; i < 5 && r.code !== 0 && /database is locked/.test(r.err + r.out); i++) {
+    Bun.sleepSync(400 * (i + 1))
+    r = sh(['docker', 'exec', 'tdc-control', 'bun', '/app/src/main.ts', ...args])
+  }
+  return r
+}
 const tdrive = (slug: string, ...args: string[]) => sh(['docker', 'exec', `tdc-${slug}`, '/usr/local/bin/tdrive', ...args])
 
 let rpcId = 1
