@@ -2,8 +2,9 @@
 // change permissions and share" off for a folder and everything below (off above wins); Editors never grant Manager,
 // Restrict here, turn No AI off, confirm a widening or invite non-members; opening to "Anyone in the team" takes a
 // passkey step-up.
-// ADAPTER (A1): the toggle is sent as POST /api/share { path, editors_can_share } — plan §10.2 #8 names the column
-// (folders.editors_can_share), not the field; fix here when A1 merges.
+// ADAPTER (A1): shapes as C1 announced them for A1 (presence inbox, 2026-10-23): POST /api/share { editors_can_share },
+// 403 { error: 'step_up_required' } → POST /api/share/step-up/options { path } → { method, options } → retry with
+// step_up: { response } | { code }. Fix here if A1 lands differently.
 import type { Scenario } from '../lib/ctx'
 import { share, shareView } from '../lib/share'
 
@@ -42,6 +43,13 @@ export default {
     t.step('"Anyone in the team" by an Editor needs a passkey step-up')
     const any = await share(mina, { path: `/${name}`, general: { mode: 'team', role: 'viewer' } })
     t.check('without a step-up: refused with step_up / passkey required', [401, 403, 409].includes(any.status) && /step_up|passkey|reauth/.test(any.text), any.text)
+    const pk = await fx.ensurePasskey('mina')
+    const o = await mina.api('POST', '/share/step-up/options', { path: `/${name}` })
+    const step = o.status === 200 && o.json().method === 'passkey' ? { response: pk.assert(o.json().options) } : null
+    fx.keepPasskey('mina', pk)
+    const withStep = step ? await share(mina, { path: `/${name}`, general: { mode: 'team', role: 'viewer' }, step_up: step }) : o
+    t.check('with a passkey step-up: opened to the team → 200', withStep.status === 200, withStep.text)
+    await share(kim, { path: `/${name}`, general: { mode: 'restricted' } })
     t.step('the Manager turns Editor sharing off: inherited below')
     const off = await share(kim, { path: `/${name}`, editors_can_share: false })
     t.check('kim (Manager) turns "Editors can change permissions and share" off', off.status === 200, off.text)
