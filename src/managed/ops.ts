@@ -22,7 +22,7 @@ import type { Ctx } from '../session'
 import { ensureFolder, type FolderRow } from '../store'
 import {
   checkName, diskWalk, dropRow, hashFd as hashOf, dropStaged, fileRowOf, freeName, gcBlobs, inManaged, managedMountIds, ManagedError, placeNew, placeReplace,
-  recheckDir, relocateFolderRows, retireFolderRows, stageCopy, stageVersion, taken, trackNew, trackReplace, blobPath, type Placed, type Staged,
+  recheckDir, relocateFolderRows, retireFolderRows, newUid, relocateShared, relocate, dropGrantsOf, grantsOn, stageCopy, stageVersion, taken, trackNew, trackReplace, blobPath, type Placed, type Staged,
 } from './core'
 import { ensureRoot, MANAGED_LIMITS, storageSettings, systemDirs, type StorageSettings } from './settings'
 import { relocateCopies } from '../share/rejudge'
@@ -114,6 +114,34 @@ export class Managed {
     if (this.access.level(node) < 2) throw new ManagedError(403, 'no_write', 'you can open this folder but not change it (your rule here is read)')
   }
   canWrite(node: Node) { return this.access.canRead(node) && inManaged(this.ids, node) && this.access.level(node) >= 2 }
+  /**
+   * A file this person may give a new version (upload a replacement, restore an earlier version): write on its folder,
+   * or a file share as Editor on exactly this file (A2 F7). Rename, move, delete and new files still need the folder.
+   */
+  canWriteFile(f: FileEntry) { return this.access.canReadFile(f) && inManaged(this.ids, f.parent) && this.access.levelOfFile(f) >= 2 }
+  mayWriteFile(f: FileEntry) {
+    if (this.canWriteFile(f)) return
+    if (!inManaged(this.ids, f.parent)) throw new ManagedError(403, 'not_managed', 'this folder is not in managed storage: its files are changed where they live (the NAS), not here')
+    throw new ManagedError(403, 'no_write', 'you can open this file but not change it (you are a viewer)')
+  }
+  /** File-only access: the person reads this file through a file share, not through its folder (A2 F7: no history). */
+  fileOnly(f: FileEntry) { return !this.access.canRead(f.parent) }
+  /**
+   * The folder a staged file goes into: writable, or — for a replace of an existing file — a folder whose file this
+   * person may write by a file share (the folder itself stays read-only to them: 403 for anything else).
+   */
+  writableFor(vpath: unknown, name: unknown, conflict: Conflict, action: string): Node {
+    const e = this.entry(vpath)
+    if (!e || e.kind !== 'dir') this.missing(`files ${action} ${String(vpath)}`)
+    if (conflict === 'replace' && !this.canWrite(e.node) && typeof name === 'string') {
+      let there: string | null = null
+      try { there = taken(e.node.real, name) } catch {}
+      const f = there ? this.access.child(e.node, there) : null
+      if (f?.kind === 'file' && this.canWriteFile(f)) return e.node
+    }
+    this.mayWrite(e.node)
+    return e.node
+  }
   /** The folder an entry lives in (its parent node); a top folder has none. */
   parentOf(e: Entry): Node | null { return e.kind === 'file' ? e.parent : e.node.parent }
   vpathOf(e: Entry) { return e.kind === 'dir' ? e.node.vpath : e.vpath }
@@ -207,18 +235,21 @@ export class Managed {
   /** A staged file into a folder (upload, chunked upload, promote). The staging file is consumed either way. */
   put(parent: unknown, name: unknown, staged: Staged, conflict: Conflict, via = 'upload') {
     try {
-      const node = this.writable(parent, via)
+      const node = this.writableFor(parent, typeof name === 'string' ? name : undefined, conflict, via)
       let n = checkName(name, 'file name')
       refuseLinkLike(staged)
       const there = taken(node.real, n)
+      const folderWrite = this.canWrite(node)
       if (there && conflict === 'replace') {
         const e = this.access.child(node, there)
         if (!e || e.kind !== 'file') throw new ManagedError(409, 'exists', `${there} exists here and is not a file you can replace`)
+        if (!folderWrite) this.mayWriteFile(e) // a file Editor (A2): this file only
         ensureRoom(this.db, this.s, staged.size)
         const p = placeReplace(this.s.root, node, e, staged)
         const { version, fileId } = this.commitPlaced(p, node, `files ${via} ${e.vpath} (new version, ${staged.size} bytes, sha256 ${staged.sha256})`, e.vpath)
         return { path: e.vpath, name: e.name, version, replaced: true, file_id: fileId }
       }
+      if (!folderWrite) this.mayWrite(node) // a new file needs write on the folder
       if (there && conflict === 'rename') n = freeName(node.real, n)
       else if (there) throw new ManagedError(409, 'exists', `${there} already exists here`)
       ensureRoom(this.db, this.s, staged.size)
@@ -245,7 +276,11 @@ export class Managed {
     fs.renameSync(real, to)
     if (e.kind === 'dir') relocateFolderRows(this.db, real, to)
     const vto = `${parent.vpath}/${n}`
-    try { this.db.transaction(() => { relocateCopies(this.db, real, to); this.audit(`files rename ${from} -> ${vto}`, [from, vto]) })() } catch (err) {
+    try { this.db.transaction(() => {
+      relocateCopies(this.db, real, to)
+      if (e.kind === 'file') relocate(this.db, String(e.dev), String(e.ino), () => ensureFolder(this.db, parent.real, parent.dev, parent.ino, parent.birth), n)
+      this.audit(`files rename ${from} -> ${vto}`, [from, vto])
+    })() } catch (err) {
       fs.renameSync(to, real); if (e.kind === 'dir') relocateFolderRows(this.db, to, real); throw err
     }
     return { path: vto }
@@ -255,7 +290,7 @@ export class Managed {
   move(vpaths: unknown, to: unknown, conflict: Conflict = 'fail') {
     const list = this.batch(vpaths)
     const target = this.writable(to, 'move')
-    const out: { from: string; to?: string; error?: string; message?: string; widens?: number }[] = []
+    const out: { from: string; to?: string; error?: string; message?: string; widens?: number; shared_with?: number; unshared?: number }[] = []
     for (const v of list) {
       try { out.push({ from: v, ...this.moveOne(v, target, conflict) }) } catch (e) {
         if (!(e instanceof ManagedError)) throw e
@@ -277,10 +312,15 @@ export class Managed {
     this.mayWrite(parent)
     const real = e.kind === 'dir' ? e.node.real : e.real
     if (parent.real === target.real) return newName === undefined ? { to: vpath } : { to: this.rename(vpath, newName).path, widens: 0 }
+    let files: FileEntry[] = e.kind === 'file' ? [e] : []
     if (e.kind === 'dir') {
       if (target.real === real || target.real.startsWith(real + '/')) throw new ManagedError(400, 'into_itself', 'a folder cannot be moved into itself')
-      this.subtree(e.node)
+      files = this.subtree(e.node).files
     }
+    // file shares (A2): grantees see the new place's folder names; into a personal folder they are removed (R0: only
+    // its owner reads there, and moving it back out must not silently share it again)
+    const sharedWith = grantsOn(this.db, files)
+    const intoPersonal = target.rows.some((r) => r.personal_owner != null)
     let n = newName ?? entryName(e)
     if (taken(target.real, n)) {
       if (conflict !== 'rename') throw new ManagedError(409, 'exists', `${n} already exists in ${target.vpath}`)
@@ -292,13 +332,17 @@ export class Managed {
     if (e.kind === 'dir') relocateFolderRows(this.db, real, dest)
     const vto = `${target.vpath}/${n}`
     const widens = this.widens(parent.rows, target.rows)
+    let unshared = 0
     try {
       this.db.transaction(() => {
         relocateCopies(this.db, real, dest) // AI-draft copies are found where they are now (src/share/rejudge.ts)
-        this.audit(`files move ${vpath} -> ${vto}${widens ? ` (widens: ${widens} more ${widens === 1 ? 'person reads' : 'people read'} it)` : ''}`, [vpath, vto])
+        if (e.kind === 'file') relocate(this.db, String(e.dev), String(e.ino), () => ensureFolder(this.db, target.real, target.dev, target.ino, target.birth), n)
+        if (intoPersonal && sharedWith) unshared = dropGrantsOf(this.db, files)
+        const shareNote = unshared ? ` (unshared: ${unshared})` : sharedWith ? ` (shared with: ${sharedWith})` : ''
+        this.audit(`files move ${vpath} -> ${vto}${widens ? ` (widens: ${widens} more ${widens === 1 ? 'person reads' : 'people read'} it)` : ''}${shareNote}`, [vpath, vto])
       })()
     } catch (err) { fs.renameSync(dest, real); if (e.kind === 'dir') relocateFolderRows(this.db, dest, real); throw err }
-    return { to: vto, widens }
+    return { to: vto, widens, ...(sharedWith ? { shared_with: sharedWith } : {}), ...(unshared ? { unshared } : {}) }
   }
 
   /** Copy files (not folders) into a folder; a name that is taken gets " (1)". */
@@ -387,15 +431,19 @@ export class Managed {
     if (!e || e.kind !== 'file') this.missing(`files ${action} ${String(vpath)}`)
     return e
   }
+  /** Earlier versions are shown to folder readers and to file Editors; a file-only Viewer sees the current one only
+   * (earlier versions may hold content removed before the file was shared: A2 F7). */
+  seesHistory(f: FileEntry) { return !this.fileOnly(f) || this.access.levelOfFile(f) >= 2 }
   versions(vpath: unknown) {
     const f = this.fileAt(vpath, 'versions')
     const row = fileRowOf(this.db, f)
     const who = (id: number | null) => id == null ? null : this.db.query<{ name: string }, [number]>('SELECT name FROM people WHERE id = ?').get(id)?.name ?? null
     const current = { version: row?.version ?? 1, size: f.size, at: row?.updated_at ?? Math.round(f.mtimeMs), by: who(row?.updated_by ?? null), sha256: row?.sha256 ?? null, current: true }
-    const older = row ? this.db.query<{ version: number; sha256: string; size: number; created_at: number; created_by: number | null }, [number]>(
+    const history = this.seesHistory(f)
+    const older = row && history ? this.db.query<{ version: number; sha256: string; size: number; created_at: number; created_by: number | null }, [number]>(
       'SELECT version, sha256, size, created_at, created_by FROM mversions WHERE file_id = ? ORDER BY version DESC').all(row.id) : []
     this.audit(`files versions ${f.vpath}`, [f.vpath])
-    return { path: f.vpath, managed: inManaged(this.ids, f.parent), writable: this.canWrite(f.parent), kept: this.s.versionsKept,
+    return { path: f.vpath, managed: inManaged(this.ids, f.parent), writable: this.canWriteFile(f), history: history ? 'all' as const : 'editors_only' as const, kept: this.s.versionsKept,
       versions: [current, ...older.map((v) => ({ version: v.version, size: v.size, at: v.created_at, by: who(v.created_by), sha256: v.sha256, current: false }))] }
   }
   /** An earlier version's bytes (a path in the versions store, read by the caller), audited like a download. */
@@ -406,6 +454,7 @@ export class Managed {
     return { file: blobPath(this.s.root, v.sha256), size: v.size, name: f.name }
   }
   private olderVersion(f: FileEntry, version: unknown) {
+    if (!this.seesHistory(f)) throw new ManagedError(404, 'no_version', 'no such version')
     const row = fileRowOf(this.db, f)
     const v = row && this.db.query<{ version: number; sha256: string; size: number }, [number, number]>('SELECT version, sha256, size FROM mversions WHERE file_id = ? AND version = ?').get(row.id, Number(version))
     if (!v) throw new ManagedError(404, 'no_version', 'no such version')
@@ -413,7 +462,7 @@ export class Managed {
   }
   restoreVersion(vpath: unknown, version: unknown) {
     const f = this.fileAt(vpath, 'version-restore')
-    this.mayWrite(f.parent)
+    this.mayWriteFile(f)
     const v = this.olderVersion(f, version)
     ensureRoom(this.db, this.s, v.size)
     const staged = stageVersion(this.s.root, v.sha256)
@@ -472,6 +521,8 @@ export class Managed {
       this.db.transaction(() => {
         this.db.query('UPDATE mtrash SET restored_at = ?, restored_by = ? WHERE id = ?').run(Date.now(), this.personId, t.id)
         relocateCopies(this.db, t.trash_path, dest)
+        // a shared file comes back with its shares (its location points where it is again; a folder's rows moved back)
+        if (t.kind === 'file') relocate(this.db, t.dev, t.ino, () => ensureFolder(this.db, parent.real, parent.dev, parent.ino, parent.birth), name)
         this.audit(`trash restore #${t.id} -> ${vto}`, [vto])
       })()
     } catch (e) { fs.renameSync(dest, t.trash_path); if (t.kind === 'dir') relocateFolderRows(this.db, dest, t.trash_path); throw e }
@@ -545,17 +596,21 @@ export function purgeExpired(ctx: Pick<Ctx, 'db' | 'dataDir'>, now = Date.now())
 /**
  * Bring the file rows in line with the disk (files put into the managed root by hand, or a database restored from an
  * older backup): every regular file in the managed folders and the trash has a row with its sha256; rows of files
- * that are gone are dropped. Returns how many rows were added and dropped.
+ * that are gone are dropped (with their versions and file grants). When a walk stopped early (more entries than
+ * MANAGED_LIMITS.walkEntries), rows it did not see are NOT dropped: unseen is not gone (`partial: true`). Shared files
+ * found at another place have their location updated (relocateShared). Returns how many rows were added and dropped.
  */
-export function rescan(ctx: Pick<Ctx, 'db' | 'dataDir'>): { added: number; dropped: number } {
+export function rescan(ctx: Pick<Ctx, 'db' | 'dataDir'>): { added: number; dropped: number; partial?: true; relocated?: number } {
   const db = ctx.db
   const root = storageSettings(db, ctx.dataDir).root
   const mounts = db.query<{ path: string }, []>('SELECT f.path FROM managed_mounts m JOIN folders f ON f.id = m.folder_id').all().map((r) => r.path)
   const seen = new Set<string>()
-  let added = 0, dropped = 0
+  let added = 0, dropped = 0, partial = false
   const now = Date.now()
   for (const top of [...mounts, systemDirs(root).trash]) {
-    for (const f of diskWalk(top).files) {
+    const walk = diskWalk(top)
+    partial ||= walk.partial
+    for (const f of walk.files) {
       if (path.basename(f.real).endsWith('.part')) continue
       seen.add(`${f.dev}:${f.ino}`)
       const st = fs.lstatSync(f.real, { bigint: true })
@@ -566,18 +621,21 @@ export function rescan(ctx: Pick<Ctx, 'db' | 'dataDir'>): { added: number; dropp
       try { h = hashOf(fd) } finally { fs.closeSync(fd) }
       db.transaction(() => {
         dropRow(db, f.dev, f.ino)
-        db.query('INSERT INTO mfiles (dev, ino, size, mtime_ns, sha256, version, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, NULL)')
-          .run(f.dev, f.ino, f.size, String(st.mtimeNs), h.sha256, now, now)
+        db.query('INSERT INTO mfiles (dev, ino, size, mtime_ns, sha256, version, created_at, created_by, updated_at, updated_by, uid) VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, NULL, ?)')
+          .run(f.dev, f.ino, f.size, String(st.mtimeNs), h.sha256, now, now, newUid())
       })()
       added++
     }
   }
   let shas: string[] = []
-  for (const r of db.query<{ dev: string; ino: string }, []>('SELECT dev, ino FROM mfiles').all()) {
-    if (seen.has(`${r.dev}:${r.ino}`)) continue
-    db.transaction(() => { shas = shas.concat(dropRow(db, r.dev, r.ino)) })()
-    dropped++
+  if (!partial) {
+    for (const r of db.query<{ dev: string; ino: string }, []>('SELECT dev, ino FROM mfiles').all()) {
+      if (seen.has(`${r.dev}:${r.ino}`)) continue
+      db.transaction(() => { shas = shas.concat(dropRow(db, r.dev, r.ino)) })()
+      dropped++
+    }
   }
   gcBlobs(db, root, shas)
-  return { added, dropped }
+  const relocated = partial ? 0 : relocateShared(db).moved
+  return { added, dropped, ...(partial ? { partial: true as const } : {}), ...(relocated ? { relocated } : {}) }
 }

@@ -45,8 +45,8 @@ describe('GET /api/share', () => {
     const p1 = await e.share(kim, { path: '/재무', add: [{ subject: e.person('lee'), role: 'viewer' }] })
     const p2 = await e.share(kim, { path: '/없는폴더', add: [{ subject: e.person('lee'), role: 'viewer' }] })
     expect([p1.status, p1.data]).toEqual([p2.status, p2.data])
-    // a visible file: folders only in this version
-    expect((await e.view(kim, '/Projects/readme.md')).data.error).toBe('folders_only')
+    // a visible file: file-level sharing (A2, test/file-grants.test.ts)
+    expect((await e.view(kim, '/Projects/readme.md')).data.item).toMatchObject({ kind: 'file', path: '/Projects/readme.md' })
   })
 
   test('a viewer sees the list of a folder they open; a bare-path visitor only their own entry (finding 11)', async () => {

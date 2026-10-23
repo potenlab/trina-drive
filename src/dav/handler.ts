@@ -229,8 +229,10 @@ function liveProp(c: Ctx, r: Res, name: string): string | null {
     case 'resourcetype': return isDir(r) ? el(DAV, 'collection') : ''
     case 'displayname': return esc(r.kind === 'root' ? PRODUCT : baseName(vp))
     case 'getcontentlength': return r.kind === 'file' ? String(r.f.size) : null
-    case 'getlastmodified': return new Date(r.kind === 'file' ? r.f.mtimeMs : r.kind === 'dir' && r.node.birth > 0n ? ms(r.node.birth) : STARTED).toUTCString()
-    case 'creationdate': return new Date(r.kind === 'dir' && r.node.birth > 0n ? ms(r.node.birth) : r.kind === 'file' ? r.f.mtimeMs : STARTED).toISOString()
+    // a folder seen only as a path to something shared below it (a bare path) shows no time of its own: its birth
+    // time would say when a folder the person cannot read was made (A2: names only)
+    case 'getlastmodified': return new Date(r.kind === 'file' ? r.f.mtimeMs : r.kind === 'dir' && r.node.birth > 0n && c.m.access.canRead(r.node) ? ms(r.node.birth) : STARTED).toUTCString()
+    case 'creationdate': return new Date(r.kind === 'dir' && r.node.birth > 0n && c.m.access.canRead(r.node) ? ms(r.node.birth) : r.kind === 'file' ? r.f.mtimeMs : STARTED).toISOString()
     case 'getetag': return r.kind === 'file' ? esc(etagOf(r.f)) : null
     case 'getcontenttype': return r.kind === 'file' ? TYPES[ext(r.f.name)] ?? 'application/octet-stream' : null
     case 'supportedlock': return el(DAV, 'lockentry', el(DAV, 'lockscope', el(DAV, 'exclusive')) + el(DAV, 'locktype', el(DAV, 'write'))) +
@@ -380,7 +382,8 @@ async function put(c: Ctx): Promise<Response> {
   preconditions(c)
   const existing = find(c.m, c.vpath)
   if (existing && isDir(existing)) return plain(405, 'A folder is there')
-  const parent = parentFor(c, c.vpath)
+  // a new version of a file shared with this person as Editor (A2): the folder itself stays read-only to them
+  const parent = existing?.kind === 'file' && c.m.canWriteFile(existing.f) ? existing.f.parent : parentFor(c, c.vpath)
   mustUnlocked(c, c.vpath)
   if (!existing) mustUnlocked(c, parent.vpath)
   const name = checkName(baseName(c.vpath))

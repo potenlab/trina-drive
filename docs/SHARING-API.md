@@ -8,7 +8,7 @@ never read here: agents cannot share. Errors are `{ error, message }`. **Hidden 
 cannot see answers `404 { error: 'not_found' }`, byte for byte like a path that does not exist — on GET and POST.
 
 Roles: **Viewer** (rule read), **Editor** (write), **Manager** (write + manage). Paths are the virtual paths the files
-view uses (`/Projects/비밀`). Folders only in this version (a visible file → `400 folders_only`).
+view uses (`/Projects/비밀`). A path that is a **file** you can see is file-level sharing: see [Files](#files) below.
 
 ## `GET /api/share?path=…`
 
@@ -64,6 +64,7 @@ All parts apply in one transaction (with the audit row and the R6 re-check) or n
 | `202 { status: 'approval_pending', approval_id, widens }` | an Editor's widening change sent with `confirm_widening`: it waits in the approval inbox for a manager of the sources (or the admin). `status: 'closed'` = nobody can approve it |
 | `409 { error: 'widening', count, people, sources, sources_hidden, can_confirm, needs_approval }` | AI-draft copies here would reach people who cannot read their sources. `sources` = paths the caller can read, `sources_hidden` = how many they cannot ("N folders you cannot see"). Managers/admins: send again with `confirm_widening` (the copies close until a source manager confirms, or are confirmed at once if the caller manages the sources). Editors: `confirm_widening` asks for approval (202) |
 | `403 not_manager` | visible, but the caller cannot share here |
+| `403 personal` | a personal folder (My files): never shared — "Move it to a team folder to share" |
 | `403 editors_cannot_share` | the caller is an Editor and the toggle is off here or above |
 | `403 manager_only` / `admin_only` / `invite_admin_only` | that part needs a manager / an admin |
 | `403 step_up_required` | an Editor opening wider to the team without a valid step-up assertion for this folder and this `general` |
@@ -89,6 +90,9 @@ approve/reject are the same calls as for promote requests (`sha256` = the reques
 the caller or one of their groups (not Anyone in Trina), that they can open now, newest first. Judged again on every
 request (a revoked share is gone at once).
 
+Files shared with the caller are merged into the same list (see [Files](#files)):
+`{ kind: 'file', path, name, role: 'viewer' | 'editor', shared_by, shared_at, size, mtime }`.
+
 ## `GET /api/directory`
 
 `{ people: [{ id, name, display_name?, email? }], groups: [{ id, name, size, everyone? }] }` — for the picker. Names for
@@ -111,3 +115,87 @@ every member; `email` for the admin only. The Everyone group is named "Anyone in
   tells the source managers.
 - **Everyone in cloud mode** is a system group: kept by the member sync (`syncEveryone`), never deleted or edited on
   the People page (`409 managed_by_console`).
+
+## Files
+
+File-level sharing in managed storage (workstream A2; rules in [SECURITY-MODEL.md](SECURITY-MODEL.md#file-shares-managed-storage-trina-cloud-v1-workstream-a2)).
+The same routes take a file's path; types: `FileShareView`, `FileShareChange`, `FileSharedItem`, `RecentItem` in
+`src/share/api-types.ts`. A file you cannot see answers exactly like one that does not exist (404), on GET and POST.
+
+### `GET /api/share?path=<file>`
+
+```jsonc
+{ "mode": "managed",                       // "inplace": NAS files are not shared one by one;
+                                            // "personal": { mode, item, my_role, can_manage: false } → "Move it to a team folder to share"
+  "item": { "path": "/경영/결산/2026-Q3.xlsx", "kind": "file", "name": "2026-Q3.xlsx" },
+  "my_role": "editor",                      // viewer | editor | manager | admin | null
+  "can_manage": true,                       // false (Viewers, Editors with the toggle off): entries [] and general null
+  "manage_as": "admin" | "manager" | "editor",
+  "can_grant_manager": false, "can_ai_off": false,
+  "can_invite": false,                      // admin only (S16: non-members by mail)
+  "can_confirm_widening": false,            // managers and admins
+  "editors_can_share": { "effective": true, "from_path": null },     // from_path: where it was turned off
+  "general": { "effective": { "role": "viewer", "from_path": "/경영" } | null,   // the file's own path when set here
+               "own": "viewer" | null,
+               "can_restrict": false,       // false: General access comes from the folder (a file cannot be narrower)
+               "editor_step_up": true },    // Editors need the step-up to open the file to the whole team
+  "entries": [
+    { "subject": { "type": "person", "id": 12, "name": "mina", "email": null }, "role": "viewer", "source": "direct",
+      "granted_by": { "id": 3, "name": "dion" }, "granted_at": 1761234567000, "editable": true },
+    { "subject": { "type": "group", "id": 4, "name": "finance", "members": 5 }, "role": "editor", "source": "inherited",
+      "from_path": "/경영/결산", "editable": false } ],
+  "inherited": "shown" | "hidden",          // hidden: the caller reads only this file (a file-only Editor): direct entries only
+  "ai": { "no_ai": false, "inherited_no_ai_from": null },            // a file follows its folder's "No AI"
+  "path_names_visible": "/경영/결산",        // say: "People you add will see the folder names /경영/결산"
+  "warnings": [ { "code": "draft_copy" } ] } // this file is a copy of an AI draft
+```
+
+`email` is filled for the admin only. A direct entry whose subject also has a role from the folder carries
+`inherited_role`.
+
+### `POST /api/share` with a file path
+
+```jsonc
+{ "path": "/경영/결산/2026-Q3.xlsx",
+  "add":  [ { "subject": { "type": "person", "id": 12 } | { "type": "group", "id": 4 } | { "email": "x@y" }, "role": "viewer" | "editor" } ],
+  "set":  [ { "subject": { "type": "person", "id": 12 }, "role": "viewer" | "editor" | "remove" } ],
+  "general": { "mode": "restricted" } | { "mode": "team", "role": "viewer" | "editor" },
+  "leave": true,                            // remove my own share on this file (anyone who sees it)
+  "notify": true, "confirm_widening": false, "step_up": "<assertion>" }
+```
+
+| Answer | When |
+|---|---|
+| `200` the GET shape + `{ widens, invited: [{ email, status, granted }] }` | done (one transaction, one audit row per change: `share <path> (file) person:12 none→viewer by editor widens:0`) |
+| `409 { code: 'widening', count, people, sources, sources_hidden, can_confirm, needs_approval }` | the file is a copy of an AI draft and new readers cannot read its sources; managers/admins send `confirm_widening` |
+| `409 inplace` / `personal` | NAS file / a file in a personal folder ("Move it to a team folder to share") |
+| `403 not_manager` / `editors_cannot_share` / `invite_admin_only` / `step_up_required` / `editors_cannot_confirm` | as for folders; an Editor's `confirm_widening` is refused |
+| `400 not_for_files` | `role: 'manager'`, `restrict_here`, `ai_access`, `editors_can_share` (folder settings) |
+| `400 inherited` / `inherited_general` | lower than the folder gives / Restricted while General access comes from the folder |
+| `400 too_many` | more than 200 people and groups on one file |
+| `400 nothing_to_leave` / `bad_subject` / `not_a_member` / `duplicate` | — |
+
+Step-up for a file: the same two calls as for folders (`POST /api/share/step-up/options` and `/step-up` with the
+file's `path` and `general`); the assertion is bound to that file.
+
+Non-members by mail (admin only) go through the invite flow; when the flow hands back the invited person's row the file
+is shared with them at once (`granted: true`), otherwise `granted: false` and a pending invite is kept
+(`share_invites`): it is given when that address becomes an active person — **the member sync must call
+`applyShareInvites(db, personId, email)`** from `src/share/invites.ts` (workstream B2's hook; returns how many were
+given, for one "Items were shared with you" notice). Pending invites expire after 30 days.
+
+### Other routes
+
+- `GET /api/shared-with-me` lists files given to the caller or one of their groups (not Anyone in Trina) that they can
+  open now, newest first, next to folders (`kind: 'file'`, with `size` and `mtime`).
+- `GET /api/recent?limit=50` (max 100) → `{ items: [{ path, name, kind: 'file', at, action: 'opened' | 'edited', size,
+  mtime }], partial }`: the caller's own opens (download, text, versions) and changes (upload, new version, restore,
+  copy, WebDAV PUT) on the web and the mounted drive, newest first, each path judged again now (a file renamed, moved
+  or no longer visible drops out). Agent reads are not listed.
+- `GET /api/files/versions?path=` adds `writable` (true for a file Editor: show "Upload new version") and
+  `history: 'all' | 'editors_only'` (a file-only Viewer gets the current version only; older version downloads 404).
+- `POST /api/files/move` results add `shared_with: n` (grants on what moved: its grantees now see the new folder
+  names) and `unshared: n` (moved into a personal folder: those shares were removed).
+- File Editors upload a new version with `POST /api/files/upload?path=<folder>&conflict=replace`, `POST /api/uploads`
+  `{ …, conflict: 'replace' }`, or WebDAV `PUT` on the file; restore with `POST /api/files/versions/restore`. Anything
+  else in the folder answers 403.

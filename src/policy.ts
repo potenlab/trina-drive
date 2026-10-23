@@ -102,6 +102,13 @@ export function effectiveLevel(rows: FolderRow[], personId: number, groups: Set<
   return best
 }
 
+/**
+ * A file shared with this principal (A2, src/share/file-grants.ts): the file's row (identity, size, mtime as the server
+ * wrote it) and the best level over the person's own grant and their groups' (a group's grant counts only while the
+ * group is the one it was made for: same groups.uid). `folder`/`name`: where it was last seen (finds; never opens).
+ */
+export interface FileGrant { uid: string; dev: string; ino: string; size: number; mtime_ns: string; level: number; folder_id: number | null; name: string | null; folder?: FolderRow }
+
 export class Access {
   readonly personId: number
   readonly groups: Set<number>
@@ -116,6 +123,9 @@ export class Access {
   /** reconciler findings: closed identities (R1 ⑤, R6, R10) and paths of lost rule-bearing folders */
   private readonly closures: Closures
   private readonly indexedAt: (dev: bigint, ino: bigint) => { path: string }[]
+  /** files shared with this principal, by identity (dev:ino) */
+  private readonly fileGrants = new Map<string, FileGrant>()
+  private readonly managedIds: Set<number>
 
   constructor(readonly db: DB, principal: { personId: number; token?: TokenRow; audience?: Audience }, private readonly readdir: Readdir = (p) => fs.readdirSync(p)) {
     this.personId = principal.personId
@@ -128,6 +138,19 @@ export class Access {
     this.closures = loadClosures(db)
     const q = db.query<{ path: string }, [string, string]>('SELECT path FROM fs_index WHERE dev = ? AND ino = ?')
     this.indexedAt = (dev, ino) => q.all(String(dev), String(ino))
+    this.managedIds = new Set(db.query<{ folder_id: number }, []>('SELECT folder_id FROM managed_mounts').all().map((r) => r.folder_id))
+    // R0′ (A2): file shares of this person (the server principal, -1, has none)
+    if (this.personId > 0) {
+      for (const g of db.query<Omit<FileGrant, 'folder'>, [number]>(`
+          SELECT m.uid, m.dev, m.ino, m.size, m.mtime_ns, m.folder_id, m.name, max(g.level) AS level
+          FROM file_grants g JOIN mfiles m ON m.uid = g.file_uid
+          WHERE (g.subject_type = 'person' AND g.subject_id = ?1)
+             OR (g.subject_type = 'group' AND g.subject_id IN (SELECT group_id FROM memberships WHERE person_id = ?1)
+                 AND EXISTS (SELECT 1 FROM groups x WHERE x.id = g.subject_id AND x.uid = g.subject_uid))
+          GROUP BY m.uid`).all(this.personId)) {
+        this.fileGrants.set(identityKey(g.dev, g.ino), { ...g, folder: g.folder_id == null ? undefined : this.byId.get(g.folder_id) })
+      }
+    }
   }
 
   static forToken(db: DB, token: TokenRow, readdir?: Readdir) { return new Access(db, { personId: token.person_id, token }, readdir) }
@@ -141,6 +164,54 @@ export class Access {
   /** R1 ①–④ for files directly in this folder (① holds for every node: walks start at a registered folder) */
   canRead(node: Node) { return !this.flagged(node) && this.level(node) >= 1 && this.inScope(node) }
 
+  // ---------- R0′ / R1′ on a file (A2: file shares in managed storage) ----------
+  /**
+   * FG(P, f): the level a share gives on exactly this file — the same identity, size and mtime as its row (a file
+   * replaced by hand, or another file on a reused inode number, gets nothing). Managed storage only, never inside a
+   * personal folder (only its owner reads there, R0).
+   */
+  fileLevel(f: FileEntry): number {
+    if (!this.fileGrants.size) return 0
+    const g = this.fileGrants.get(identityKey(f.dev, f.ino))
+    if (!g || g.size !== f.size || g.mtime_ns !== String(f.mtimeNs)) return 0
+    const rows = f.parent.rows
+    if (!rows.length || !this.managedIds.has(rows[0]!.id) || rows.some((r) => r.personal_owner != null)) return 0
+    return g.level
+  }
+  /** R0′: level(P, f) = max(level(P, F), FG(P, f)). */
+  levelOfFile(f: FileEntry) { return Math.max(this.level(f.parent), this.fileLevel(f)) }
+  /** R1′ for a file: its folder's flags (for this audience) and token scope, and R0′ ≥ read. */
+  canReadFile(f: FileEntry) { return !this.flagged(f.parent) && this.inScope(f.parent) && this.levelOfFile(f) >= 1 }
+  /** Has file shares at all (cheap checks skip the file-level work for everyone else). */
+  hasFileGrants() { return this.fileGrants.size > 0 }
+  /**
+   * R4 for a source reached through a file share (via_file): this principal reads, right now, some file shared with
+   * them directly in folder `id` (found by its location, opened only by its identity).
+   */
+  canReadSharedIn(id: number): boolean {
+    if (!this.fileGrants.size) return false
+    let node: Node | null | undefined
+    for (const g of this.fileGrants.values()) {
+      if (g.folder_id !== id || g.name == null) continue
+      if (node === undefined) node = this.nodeForFolder(id)
+      if (!node) return false
+      const e = this.child(node, g.name)
+      if (e?.kind === 'file' && this.canReadFile(e)) return true
+    }
+    return false
+  }
+  /** A file shared with this principal lies at or below `node` and can be read: the folder is a bare path to it. */
+  private sharedBelow(node: Node): boolean {
+    for (const g of this.fileGrants.values()) {
+      if (!g.folder || g.name == null || !(g.folder.path === node.real || g.folder.path.startsWith(node.real + '/'))) continue
+      const dir = g.folder.path === node.real ? node : this.descend(node, path.relative(node.real, g.folder.path).split(path.sep))
+      if (!dir || !isFolder(g.folder, dir.dev, dir.ino, dir.birth)) continue // the row is that folder on disk
+      const e = this.child(dir, g.name) // lstat, links closed, identity: the location only finds
+      if (e?.kind === 'file' && this.canReadFile(e)) return true // the file is the shared one (fileLevel checks it)
+    }
+    return false
+  }
+
   /** A folder is shown when it can be read, or when something readable lies below it (then it is a bare path). */
   visible(node: Node): boolean {
     const hit = this.visibleCache.get(node.real)
@@ -152,6 +223,7 @@ export class Access {
         if (below && isFolder(a, below.dev, below.ino, below.birth) && this.canRead(below)) { v = true; break }
       }
     }
+    if (!v && this.fileGrants.size) v = this.sharedBelow(node)
     this.visibleCache.set(node.real, v)
     return v
   }
@@ -253,7 +325,7 @@ export class Access {
       if (matches.length !== 1) return null
       const e = this.child(node, matches[0]!)
       if (!e) return null
-      if (e.kind === 'file') return i === parts.length - 1 && this.canRead(node) ? e : null
+      if (e.kind === 'file') return i === parts.length - 1 && (this.canRead(node) || this.canReadFile(e)) ? e : null
       if (!this.visible(e.node)) return null
       node = e.node
     }
@@ -268,7 +340,7 @@ export class Access {
     for (const name of this.listing(node.real)?.names ?? []) {
       const e = this.child(node, name)
       if (!e) continue
-      if (e.kind === 'dir' ? this.visible(e.node) : readable) out.push(e)
+      if (e.kind === 'dir' ? this.visible(e.node) : readable || this.canReadFile(e)) out.push(e)
     }
     return out.sort((a, b) => entryName(a).localeCompare(entryName(b)))
   }
@@ -392,16 +464,47 @@ export function readersOfChain(db: DB, rows: FolderRow[] | null, as: 'target' | 
   return out
 }
 
-export const readersTarget = (db: DB, folderId: number) => readers(db, folderId, 'target')
+/**
+ * R5 for a file (A2): the active people a file share gives read on file `uid` (in person, or through a group that is
+ * still the one the grant was made for). Conservative for targets: it does not ask whether the file is reachable now.
+ */
+export function fileGrantees(db: DB, uid: string): Set<number> {
+  return new Set(db.query<{ id: number }, [string]>(`
+    SELECT p.id FROM people p WHERE p.active = 1 AND (
+      EXISTS (SELECT 1 FROM file_grants g WHERE g.file_uid = ?1 AND g.subject_type = 'person' AND g.subject_id = p.id)
+      OR EXISTS (SELECT 1 FROM file_grants g JOIN groups x ON x.id = g.subject_id AND x.uid = g.subject_uid
+                 JOIN memberships m ON m.group_id = g.subject_id AND m.person_id = p.id
+                 WHERE g.file_uid = ?1 AND g.subject_type = 'group'))`).all(uid).map((r) => r.id))
+}
+
+/** R5 target readers of folder `folderId`; with `fileUid`, of that file in it: Readers(F) ∪ G(f) (A2 W1). */
+export const readersTarget = (db: DB, folderId: number, fileUid?: string | null) => {
+  const r = readers(db, folderId, 'target')
+  if (fileUid) for (const id of fileGrantees(db, fileUid)) r.add(id)
+  return r
+}
 export const readersSource = (db: DB, folderId: number) => readers(db, folderId, 'source')
 
-/** R6: putting content with sources `src` into folder `target` widens it if some target reader cannot read some source. */
-export function isWidening(db: DB, src: Iterable<number>, target: number): boolean {
-  const rt = readersTarget(db, target)
+/**
+ * R6: putting content with sources `src` into folder `target` widens it if some target reader cannot read some source.
+ * `fileUid`: the content replaces that (shared) file, whose readers include its grantees.
+ */
+export function isWidening(db: DB, src: Iterable<number>, target: number, fileUid?: string | null): boolean {
+  return widenedReaders(db, src, target, fileUid, true).size > 0
+}
+
+/**
+ * The people a write into `target` (replacing the shared file `fileUid`, if given) gives the content to without them
+ * reading some source. A source that is the target folder itself widens nothing for the folder's own readers, but the
+ * people the file is shared with beyond them do count (A2: a file share is wider than its folder).
+ */
+export function widenedReaders(db: DB, src: Iterable<number>, target: number, fileUid?: string | null, first = false): Set<number> {
+  const folder = readers(db, target, 'target')
+  const extra = fileUid ? [...fileGrantees(db, fileUid)].filter((u) => !folder.has(u)) : []
+  const out = new Set<number>()
   for (const s of src) {
-    if (s === target) continue
     const rs = readersSource(db, s)
-    for (const u of rt) if (!rs.has(u)) return true
+    for (const u of s === target ? extra : [...folder, ...extra]) if (!rs.has(u)) { out.add(u); if (first) return out }
   }
-  return false
+  return out
 }

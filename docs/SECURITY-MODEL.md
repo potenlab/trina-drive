@@ -137,6 +137,44 @@ manage grants and flags (`src/share/`, API in [SHARING-API.md](SHARING-API.md)).
 - **Audit:** every change is one row in the same transaction (`share /Projects: person:12 viewer→editor, general
   team:viewer by editor widens: 3`, `restrict-here keep=2 drop=1`), flags also in `folder_history`.
 
+### File shares (managed storage, Trina Cloud v1 workstream A2)
+
+A file in a team folder can be shared with a person or group (Viewer/Editor) or with the team (General access = a
+grant to the Everyone group). level(P, f) = max(folder rule, file share); never inside a personal folder; never on
+in-place (NAS) folders. A file share opens only the file whose identity (dev, ino, size, mtime) matches its record
+(`mfiles.uid`, random, never reused); its remembered location (`mfiles.folder_id/name`) only helps find it and never
+opens anything by itself. The folders above a shared file are shown as bare paths: **their names are visible to the
+people it is shared with** (nothing else: no siblings, sizes, times — WebDAV shows one synthetic date for such folders —
+or readers). Agents see shared files like their person (∩ token scope; "No AI", quarantine and widening flags on the
+folder close them); content read through a file share counts its folder as a source (R3, `via_file`), so drafts made
+from it need approval to reach readers of other folders (R6/R8), and the agent sees such a draft only while it still
+reads some file shared with its person in that folder (R4). A file-only Viewer sees the current version, not earlier
+ones; a file-only Editor may upload a new version or restore one, nothing else (rename, move, delete and new files need
+the folder). Revoking applies to the next request on every path.
+
+- **Who shares a file** (`src/share/file-grants.ts`): the admin and the folder's managers; folder Editors and file
+  Editors where "Editors can change permissions and share" is on (Viewer/Editor, removing direct entries, General
+  access with a step-up for "Anyone in Trina"; never a widening, never an invitation); anyone may `leave` their own
+  share. The actor must see the file through their own view (else the same 404 as a missing path) — admins too.
+  Managers, restrict-here and "No AI" are folder settings (400 `not_for_files`); a file cannot be narrower than its
+  folder (400 `inherited_general`); at most 200 grants per file. Agents never share (Bearer → 401).
+- **Lifecycle.** Rename, move within team folders, new version, restore version and trash → restore keep the share;
+  copy makes a new file with none; moving a file or folder into a personal folder removes its shares (audited
+  `unshared: n`; moving it back out does not share it again); purge, trash expiry and rescan delete the rows and their
+  grants together (`dropRow`, no foreign key, so a delete never fails on grants — also for an older image). A trashed
+  file is gone for its grantees (its location is inert) until restored. A file changed by hand on the server disk loses
+  its shares (fail closed). Group grants keep the group's `uid`: a group deleted and another made with the same id gets
+  nothing.
+- **Rolling back** to an image without file sharing: the new tables and columns are ignored; people lose files shared
+  with them only until the new image is back. Files moved by the older image are found again by the boot relocate
+  (closed until then). Drafts made from shared files are sealed on the older image (fail closed).
+- **R6 for a shared file:** its readers are the folder's plus its grantees: promote overwrite of a shared file counts
+  them (W1); sharing a file that is an AI-draft copy with people who cannot read its sources is a widening (409;
+  managers and admins confirm, Editors cannot).
+- **Known exposure:** the names of the folders above a shared file (the dialog says "People you add will see the folder
+  names …"), also after a move (the move response says `shared_with: n`). A draft from one shared file stays visible to
+  the agent while any other file in that folder is still shared with its person (over-retention, bounded to one folder).
+
 ### Mounting (WebDAV) and Google Drive import
 
 - **A mounted drive is a person, not an agent.** `/dav/` signs in with an app password (one per computer, shown once,

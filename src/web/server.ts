@@ -20,6 +20,7 @@ import { davOptions, DAV_PREFIX, handleDav } from '../dav/handler'
 import { davEnabled } from '../dav/settings'
 import { googleOf } from '../gdrive/web'
 import { storageSettings } from '../managed/settings'
+import { relocateShared } from '../managed/core'
 import { oauthOptionsFromSettings, readPublicSettings } from '../oauth/settings'
 
 export const DEFAULT_WEB_DIR = path.join(import.meta.dir, '..', '..', 'web', 'dist')
@@ -123,6 +124,8 @@ export async function handleWeb(w: WebCtx, req: Request, addr?: string): Promise
 
 export function serveWeb(ctx: Ctx, port: number, hostname = '127.0.0.1', opts: WebOptions = {}) {
   const w = makeWebCtx(ctx, opts)
+  // A2: shared files' remembered locations follow files moved by an older image (in the background; stale = closed)
+  setTimeout(() => { try { relocateShared(ctx.db) } catch (e) { console.error('[share] relocate failed:', e) } }, 0)
   const server = Bun.serve({
     port, hostname,
     // never Bun's development error page (it shows source and stack traces to the caller)
