@@ -1,7 +1,9 @@
-/* Trina Drive site. Signal Orange on warm paper: ink #14110f, paper #f6f2ea, accent #ff5b1f (fills, always with ink
-   text) and #c43d0a (text and links on light, AA); #ff6a33 on dark. Hairline borders, Geist (self-hosted, OFL) for
-   Latin; Hangul falls back to the system's Korean font. The fonts are subset to Latin + punctuation + arrows
-   (pyftsubset, see src/assets/fonts/README) and fingerprinted by Vite under /_astro/, so they cache for a year. */
+/* Trina Drive site. Brand tokens (Signal Orange on warm paper, Geist, radii, shadows, light + dark) come from
+   tokens.css, a copy of brand/tokens.css made by `bun run brand:sync` — never edit it here. This file declares only
+   the site's own tokens (hero image, terminal, grid, glows, gradient, layout). Geist is self-hosted (OFL), subset to
+   Latin + punctuation + arrows (pyftsubset, see src/assets/fonts/README) and fingerprinted by Vite under /_astro/, so
+   it caches for a year. Hangul falls back to the system's Korean font. */
+@import "./tokens.css";
 
 @font-face {
   font-family: "Geist";
@@ -14,42 +16,11 @@
   font-weight: 100 900; font-style: normal; font-display: swap;
 }
 
+/* Site-only tokens. Light: */
 :root {
-  color-scheme: light;
-  /* surfaces: warm white and paper (#f6f2ea), ink text (#14110f) */
-  --bg: #fcfbf8;
-  --bg-soft: #f6f2ea;
-  --bg-tint: #f9f6f0;
-  --bg-elev: #ffffff;
-  --card: #ffffff;
-  --inset: #f3efe7;
-  --fg: #14110f;
-  --fg-muted: #514b45;
-  --fg-faint: #6b645d;          /* 5.2:1 on paper */
-  --border: #e9e3d8;
-  --border-strong: #d8d0c3;
-  --hair: rgba(20, 17, 15, 0.07);
-  /* Signal Orange. --accent is the text/link/icon colour (AA on white and paper); --signal is the fill colour, always
-     with ink text on it (6.06:1), never white. */
-  --accent: #c43d0a;            /* 5.2:1 on white */
-  --accent-strong: #a3320a;
-  --accent-soft: #fdf0e8;
-  --accent-fg: #14110f;
   --accent-grad: linear-gradient(100deg, #b8380a 0%, #de470f 60%, #f0561a 100%);
-  --signal: #ff5b1f;
-  --signal-hover: #ff7440;
-  --signal-fg: #14110f;
   --glow: rgba(255, 91, 31, 0.2);
   --glow-2: rgba(255, 170, 90, 0.16);
-  --cta: var(--signal);
-  --cta-fg: var(--signal-fg);
-  --cta-hover: var(--signal-hover);
-  --btn: #14110f;
-  --btn-fg: #fcfbf8;
-  --btn-hover: #2b2622;
-  --ok: #2f7a4f;
-  --danger: #b42318;
-  --danger-soft: #fdecea;
   --grid: rgba(20, 17, 15, 0.05);
   --dot: rgba(20, 17, 15, 0.09);
   --term-bg: #12100e;
@@ -61,108 +32,34 @@
   --term-err: #ff8b7e;
   --term-prompt: #ff8a5c;
   --term-alt: #8fb3ff;          /* the second person in a two-person terminal */
-  --logo-ink: #14110f;
-  --logo-top: #ff5b1f;
-  --shadow-sm: 0 1px 2px rgba(20, 17, 15, 0.05);
-  --shadow: 0 1px 2px rgba(20, 17, 15, 0.04), 0 10px 30px -10px rgba(20, 17, 15, 0.14);
-  --shadow-lg: 0 2px 4px rgba(20, 17, 15, 0.04), 0 30px 80px -20px rgba(40, 24, 14, 0.26);
   --hero-img: image-set(url("/img/hero-light-2400.avif") type("image/avif"), url("/img/hero-light-2400.webp") type("image/webp"));
   --hero-img-sm: image-set(url("/img/hero-light-960.avif") type("image/avif"), url("/img/hero-light-960.webp") type("image/webp"));
-  --radius: 14px;
-  --radius-lg: 22px;
-  --radius-sm: 9px;
   --max: 1200px;
   --gutter: 24px;
-  --font-sans: "Geist", "Pretendard", "Pretendard Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas,
-    "D2Coding", "Noto Sans Mono CJK KR", monospace;
 }
 
-/* Dark tokens, shared by the system preference and the manual toggle. */
+/* Dark, shared by the system preference and the manual toggle (same selectors as tokens.css). */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --bg: #0e0c0b;
-    --bg-soft: #151210;
-    --bg-tint: #110f0d;
-    --bg-elev: #1a1714;
-    --card: #151210;
-    --inset: #1d1916;
-    --fg: #f6f2ea;
-    --fg-muted: #b3aaa0;
-    --fg-faint: #958c82;
-    --border: rgba(246, 242, 234, 0.08);
-    --border-strong: rgba(246, 242, 234, 0.15);
-    --hair: rgba(246, 242, 234, 0.06);
-    --accent: #ff6a33;            /* 6.8:1 on the dark background */
-    --accent-strong: #ff8a5c;
-    --accent-soft: rgba(255, 106, 51, 0.12);
-    --accent-fg: #14110f;
     --accent-grad: linear-gradient(100deg, #ff6a33 0%, #ff8a4c 55%, #ffab73 100%);
-    --signal: #ff6a33;
-    --signal-hover: #ff8352;
-    --signal-fg: #14110f;
     --glow: rgba(255, 106, 51, 0.22);
     --glow-2: rgba(255, 160, 80, 0.12);
-    --logo-ink: #f6f2ea;
-    --logo-top: #ff6a33;
-    --btn: #f6f2ea;
-    --btn-fg: #14110f;
-    --btn-hover: #e3ddd2;
-    --ok: #7fcf9a;
-    --danger: #ff8b7e;
-    --danger-soft: rgba(255, 139, 126, 0.1);
     --grid: rgba(246, 242, 234, 0.045);
     --dot: rgba(246, 242, 234, 0.08);
     --term-bg: #12100e;
     --term-border: #2c2723;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px -10px rgba(0, 0, 0, 0.6);
-    --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 30px 80px -20px rgba(0, 0, 0, 0.8);
     --hero-img: image-set(url("/img/hero-dark-2400.avif") type("image/avif"), url("/img/hero-dark-2400.webp") type("image/webp"));
     --hero-img-sm: image-set(url("/img/hero-dark-960.avif") type("image/avif"), url("/img/hero-dark-960.webp") type("image/webp"));
   }
 }
 :root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #0e0c0b;
-  --bg-soft: #151210;
-  --bg-tint: #110f0d;
-  --bg-elev: #1a1714;
-  --card: #151210;
-  --inset: #1d1916;
-  --fg: #f6f2ea;
-  --fg-muted: #b3aaa0;
-  --fg-faint: #958c82;
-  --border: rgba(246, 242, 234, 0.08);
-  --border-strong: rgba(246, 242, 234, 0.15);
-  --hair: rgba(246, 242, 234, 0.06);
-  --accent: #ff6a33;            /* 6.8:1 on the dark background */
-  --accent-strong: #ff8a5c;
-  --accent-soft: rgba(255, 106, 51, 0.12);
-  --accent-fg: #14110f;
   --accent-grad: linear-gradient(100deg, #ff6a33 0%, #ff8a4c 55%, #ffab73 100%);
-  --signal: #ff6a33;
-  --signal-hover: #ff8352;
-  --signal-fg: #14110f;
   --glow: rgba(255, 106, 51, 0.22);
   --glow-2: rgba(255, 160, 80, 0.12);
-  --logo-ink: #f6f2ea;
-  --logo-top: #ff6a33;
-  --btn: #f6f2ea;
-  --btn-fg: #14110f;
-  --btn-hover: #e3ddd2;
-  --ok: #7fcf9a;
-  --danger: #ff8b7e;
-  --danger-soft: rgba(255, 139, 126, 0.1);
   --grid: rgba(246, 242, 234, 0.045);
   --dot: rgba(246, 242, 234, 0.08);
   --term-bg: #12100e;
   --term-border: #2c2723;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px -10px rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 30px 80px -20px rgba(0, 0, 0, 0.8);
   --hero-img: image-set(url("/img/hero-dark-2400.avif") type("image/avif"), url("/img/hero-dark-2400.webp") type("image/webp"));
   --hero-img-sm: image-set(url("/img/hero-dark-960.avif") type("image/avif"), url("/img/hero-dark-960.webp") type("image/webp"));
 }
