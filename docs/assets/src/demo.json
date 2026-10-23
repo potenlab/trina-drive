@@ -1,0 +1,57 @@
+[
+  {
+    "note": "Mina is in Sales, Sam is in Finance. Same server, same folders; each AI sees only what its person may.",
+    "cmd": "tdrive sh --token $MINA -c 'ls /'",
+    "stdout": "contracts\ndrafts\nhr\nsales\nshared\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "cmd": "tdrive sh --token $SAM -c 'ls /'",
+    "stdout": "contracts\ndrafts\nfinance\nhr\nsales\nshared\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "note": "A folder you may not read looks exactly like one that does not exist:",
+    "cmd": "tdrive sh --token $MINA -c 'cat /finance/2026-Q3-close.xlsx'",
+    "stdout": "",
+    "stderr": "cat: /finance/2026-Q3-close.xlsx: No such file or directory\n",
+    "exit": 1
+  },
+  {
+    "note": "Sam may. PDFs, Word and Excel files are read as text:",
+    "cmd": "tdrive sh --token $SAM -c 'cat /finance/board-memo-Q3.pdf'",
+    "stdout": "Board memo - 2026 Q3\nRevenue USD 1.42M (+8.4% on Q2)\nDriver: two new retainer clients from August\nConfidential: finance and leadership only\n\f\n",
+    "stderr": "(extracted text: /finance/board-memo-Q3.pdf; original bytes under /.raw/)\n",
+    "exit": 0
+  },
+  {
+    "note": "Search inside every contract at once:",
+    "cmd": "tdrive sh --token $MINA -c 'grep -ri \"termination fee\" /contracts'",
+    "stdout": "/contracts/acme-supply-2026.pdf:12.3 Termination fee: USD 36,000 (three months of fees)\n/contracts/globex-services.pdf:14.1 Termination fee: USD 12,000 flat\n/contracts/northwind-msa.docx:9.2 Termination fee: 10% of the remaining contract value\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "note": "Through Trina Drive, originals are read-only:",
+    "cmd": "tdrive sh --token $MINA -c 'echo note >> /contracts/acme-supply-2026.pdf'",
+    "stdout": "",
+    "stderr": "bash: /contracts/acme-supply-2026.pdf: Originals are read-only. Write to /drafts/ and a person will move it.\n",
+    "exit": 1
+  },
+  {
+    "note": "AI writes drafts instead, and each draft remembers its sources (over MCP, as Claude Code or Codex do):",
+    "cmd": "mcp-call $MINA write '{\"path\":\"/drafts/termination-fees.md\",\"content\":\"Acme 36k (12.3) · Globex 12k (14.1) · Northwind 10% (9.2)\\n\"}'",
+    "stdout": "Wrote /drafts/termination-fees.md (60 bytes, sha256 d924ba29c7624bbbd66ea7a4052613156b4b7ccb68342e7451e8a4581b317685).\nDraft sources: contracts\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "note": "Every call is in a hash-chained audit log:",
+    "cmd": "tdrive audit verify",
+    "stdout": "audit chain ok: 7 rows, head 669ad8d485577a1085ad26d665d7337d5813b2c07109c9d24e0b3c2a7078c0c1\n",
+    "stderr": "",
+    "exit": 0
+  }
+]
