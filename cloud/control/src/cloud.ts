@@ -8,6 +8,8 @@
 //   active/past_due ──(canceled)──▶ (grace) ──▶ suspended ──(deleteAfterDays)──▶ final export ──▶ deleted
 //   suspended ──(active again)──▶ active          paused ──▶ suspended ──(resumed)──▶ active
 //   provisioning ──(driver failed 5×)──▶ failed (ops alerted; `teams retry <slug>`)
+//   Free (free.ts): sign-up without Paddle ──▶ provisioning ──▶ active ──(7 days idle)──▶ suspended (reason inactive)
+//     ──(Wake up)──▶ active;  paused 90 days ──▶ final backup ──▶ deleted;  Paddle checkout ──▶ Team/Business, same team
 import { audit } from './audit'
 import type { BackupTarget } from './backup'
 import { teamUrl, type Config, type PlanId } from './config'
@@ -16,7 +18,8 @@ import type { Driver, HostPool, TeamSpec } from './drivers/types'
 import { hashPassword, verifyPassword, type KeyWrapper } from './keys'
 import type { Mailer } from './mailer'
 import type { EventSummary } from './paddle'
-import { DATA_HEADROOM_GB, planOf, type PlanLimits } from './plans'
+import { FreeTier } from './free'
+import { planOf, type PlanLimits } from './plans'
 import { Scaler } from './scaler'
 import { generateTeamKey } from './seal'
 import { slugProblem } from './slug'
@@ -43,18 +46,25 @@ export class WaitingForHost extends Error {
 export const VERIFY_TTL = 2 * DAY
 export const SESSION_TTL = 7 * DAY
 export const MAX_TEAMS_PER_USER = 5
+export const LOGIN_LINK_TTL = 15 * 60_000
 export const JOB_MAX_ATTEMPTS = 5
 
-type JobKind = 'provision' | 'suspend' | 'resume' | 'limits' | 'grace_check' | 'delete' | 'backup'
+type JobKind = 'provision' | 'suspend' | 'resume' | 'limits' | 'grace_check' | 'delete' | 'backup' | 'wake'
 
 export class Cloud {
   readonly cfg: Config; readonly db: DB; readonly driver: Driver; readonly mailer: Mailer; readonly keys: KeyWrapper; readonly target: BackupTarget
   readonly log: (s: string) => void
   readonly scaler: Scaler | null
+  /** the Free plan: sign-up, waitlist, inactivity pause, wake (free.ts) */
+  readonly free: FreeTier
+  /** the time the Free plan's lifecycle and the scaler go by (tests move it) */
+  readonly clock: () => number
   constructor(d: Deps) {
     this.cfg = d.cfg; this.db = d.db; this.driver = d.driver; this.mailer = d.mailer; this.keys = d.keys; this.target = d.target
     this.log = d.log ?? ((s) => console.log(`${new Date().toISOString()} ${s}`))
+    this.clock = d.clock ?? Date.now
     this.scaler = d.pool ? new Scaler({ cfg: d.cfg, db: d.db, pool: d.pool, alert: (s, t) => this.alertOps(s, t), log: this.log, clock: d.clock }) : null
+    this.free = new FreeTier(this)
   }
 
   // ---------------------------------------------------------------- accounts
@@ -100,6 +110,39 @@ export class Cloud {
     const cookie = random(32), csrf = random(24)
     this.db.query('INSERT INTO sessions (id_hash, user_id, csrf, created_at, expires_at) VALUES (?, ?, ?, ?, ?)').run(sha256(cookie), u.id, csrf, now(), now() + SESSION_TTL)
     return { cookie, csrf, userId: u.id }
+  }
+
+  /** A one-time sign-in link by mail (15 minutes): how owners of free teams (who never chose a password) reach the
+   * dashboard; anyone may use it instead of the password. Unknown or unconfirmed addresses get nothing (same answer). */
+  async requestLoginLink(emailIn: unknown) {
+    const email = typeof emailIn === 'string' ? emailIn.trim().toLowerCase() : ''
+    if (!EMAIL_RE.test(email) || email.length > 254) throw new CloudError('bad_email', 'a valid email address is required')
+    const u = this.db.query<{ id: number; verified_at: number | null }, [string]>('SELECT id, verified_at FROM users WHERE email = ?').get(email)
+    if (!u?.verified_at) return
+    const secret = random(32)
+    this.db.query("UPDATE email_tokens SET used_at = ? WHERE user_id = ? AND kind = 'login' AND used_at IS NULL").run(now(), u.id)
+    this.db.query("INSERT INTO email_tokens (user_id, kind, secret_hash, created_at, expires_at) VALUES (?, 'login', ?, ?, ?)").run(u.id, sha256(secret), now(), now() + LOGIN_LINK_TTL)
+    audit(this.db, { actor: `user:${u.id}`, action: 'user.login_link_sent' })
+    await this.mailer.send({ to: email, subject: 'Your Trina Cloud sign-in link', text: `Sign in to Trina Cloud (your teams, upgrades, waking a paused workspace):
+
+${this.cfg.controlUrl}/login/link?token=${secret}
+
+The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.` })
+  }
+
+  async loginWithLink(token: unknown): Promise<{ cookie: string; csrf: string; userId: number }> {
+    if (typeof token !== 'string' || token.length > 100) throw new CloudError('bad_link', 'this link is used, expired or wrong', 404)
+    const t = this.db.query<{ id: number; user_id: number }, [string, number]>("SELECT id, user_id FROM email_tokens WHERE kind = 'login' AND secret_hash = ? AND used_at IS NULL AND expires_at > ?").get(sha256(token), now())
+    if (!t || this.db.query('UPDATE email_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL').run(now(), t.id).changes !== 1) throw new CloudError('bad_link', 'this link is used, expired or wrong', 404)
+    const cookie = random(32), csrf = random(24)
+    this.db.query('INSERT INTO sessions (id_hash, user_id, csrf, created_at, expires_at) VALUES (?, ?, ?, ?, ?)').run(sha256(cookie), t.user_id, csrf, now(), now() + SESSION_TTL)
+    audit(this.db, { actor: `user:${t.user_id}`, action: 'user.login_link_used' })
+    return { cookie, csrf, userId: t.user_id }
+  }
+
+  /** The owner signed in: their paused free teams wake up (README "Free plan"). */
+  wakeOwned(userId: number) {
+    for (const t of this.teamsOf(userId)) if (this.free.isPaused(t)) this.free.requestWake(t, `user:${userId}`)
   }
 
   session(cookie: string | undefined): { userId: number; csrf: string; idHash: string; email: string; verified: boolean } | null {
@@ -157,7 +200,7 @@ export class Cloud {
       user = { id }
     }
     this.db.query('UPDATE users SET verified_at = coalesce(verified_at, ?) WHERE id = ?').run(now(), user.id)
-    const plan: PlanId = o.plan === 'business' ? 'business' : 'team'
+    const plan: PlanId = o.plan === 'business' ? 'business' : o.plan === 'free' ? 'free' : 'team'
     const name = (o.name ?? slug).trim().replace(/\s+/g, ' ')
     if (!name || name.length > 80 || /[\p{Cc}]/u.test(name)) throw new CloudError('bad_name', 'a team name of 1–80 characters')
     let t: TeamRow
@@ -165,7 +208,7 @@ export class Cloud {
       t = this.db.transaction(() => {
         const number = (this.db.query<{ n: number | null }, []>('SELECT max(number) AS n FROM teams').get()?.n ?? 0) + 1
         const id = Number(this.db.query('INSERT INTO teams (public_id, slug, name, owner_user_id, plan, status, number, sub_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(publicId('team'), slug, name, user!.id, plan, 'provisioning', number, 'complimentary', now(), now()).lastInsertRowid)
+          .run(publicId('team'), slug, name, user!.id, plan, 'provisioning', number, plan === 'free' ? 'free' : 'complimentary', now(), now()).lastInsertRowid)
         return teamById(this.db, id)!
       })()
     } catch (e) {
@@ -219,6 +262,12 @@ export class Cloud {
       return 'stale'
     }
     const plan = e.priceIds.map((p) => this.cfg.paddle.prices[p]).find(Boolean)
+    const fromFree = t.plan === 'free' && !!plan && plan !== 'free' && ['active', 'trialing'].includes(e.status ?? '')
+    if (t.plan === 'free' && !fromFree) {
+      // a free team only ever changes through a paying subscription (no downgrade to Free; README "Free plan")
+      void this.alertOps(`Paddle ${e.type} (${e.status}) for free team ${t.slug} not applied`, `A free team becomes paid only with an active subscription for a Team or Business price. Price ids: ${e.priceIds.join(', ') || '(none)'}.`)
+      return 'free_not_paying'
+    }
     updateTeam(this.db, t.id, {
       subscription_id: e.subscriptionId ?? t.subscription_id, customer_id: e.customerId ?? t.customer_id,
       sub_status: e.status, sub_occurred_at: e.occurredAt, ...(plan ? { plan } : {}),
@@ -226,7 +275,10 @@ export class Cloud {
     t = teamById(this.db, t.id)!
     const actor = `paddle:${e.eventId}`
     audit(this.db, { actor, action: `billing.${e.type}`, teamId: t.id, detail: { status: e.status, subscription: e.subscriptionId, plan: t.plan } })
-    if (plan && ['active', 'past_due'].includes(t.status)) this.enqueue('limits', t.id)
+    if (fromFree) this.upgradedFromFree(t, plan!, actor)
+    // a suspended team's container is made again with the new limits and stays stopped (the limits job), so it does not
+    // matter whether a resume below runs before or after it
+    if (plan && ['active', 'past_due', 'suspended'].includes(t.status)) this.enqueue('limits', t.id)
 
     switch (e.status) {
       case 'active': case 'trialing':
@@ -260,6 +312,21 @@ export class Cloud {
         return 'cancel_grace'
       }
       default: return 'ok'
+    }
+  }
+
+  /** Free → Team/Business on the same team: same data, address and host. Its inactivity state is cleared (paid plans
+   * never pause); a paused one is resumed (applyPaddle), then made again with the new limits. Teams are not moved
+   * between hosts: if the bigger plan no longer fits its host, the host runs over its slots and ops are told. */
+  private upgradedFromFree(t: TeamRow, plan: PlanId, actor: string) {
+    updateTeam(this.db, t.id, { woke_at: null, paused_at: null, idle_warned_at: null, delete_warnings: 0, error: null,
+      ...(this.free.isPaused(t) ? { suspend_reason: 'upgrade' } : {}) })
+    audit(this.db, { actor, action: 'free.upgraded', teamId: t.id, detail: { plan, host: t.host } })
+    if (t.host && this.scaler) {
+      const u = this.scaler.usedSlots().get(t.host)
+      if (u && u.used > this.scaler.capacity + 1e-9) {
+        void this.alertOps(`host ${t.host} is over its slots after ${t.slug} upgraded`, `${t.slug} went from Free (0.25 slot) to ${plan} on ${t.host}, which now holds ${u.used} of ${this.scaler.capacity} slots (${u.teams.join(', ')}). Teams are never moved automatically; the host runs over its share until a team leaves (a \`teams move\` is not built yet).`)
+      }
     }
   }
 
@@ -307,10 +374,18 @@ export class Cloud {
       case 'provision': return this.provision(t)
       case 'suspend': return this.suspend(t, 'billing', 'system')
       case 'resume': return this.resume(t, 'system')
-      case 'limits': if (t.host && ['active', 'past_due'].includes(t.status)) await this.driver.setLimits(t.host, this.spec(t)); return
+      case 'limits':
+        if (t.host && ['active', 'past_due'].includes(t.status)) await this.driver.setLimits(t.host, this.spec(t))
+        else if (t.host && t.status === 'suspended' && (await this.driver.state(t.host, t.slug)) !== 'missing') {
+          // the new plan's container on the same data, left stopped like the team
+          await this.driver.recreate(t.host, this.spec(t))
+          if (teamById(this.db, t.id)?.status === 'suspended') await this.driver.stop(t.host, t.slug)
+        }
+        return
       case 'grace_check': return this.graceCheck(t)
       case 'delete': return this.deleteIfDue(t)
       case 'backup': if (t.host && ['active', 'past_due'].includes(t.status)) await this.backup(t, 'scheduled', 'system'); return
+      case 'wake': return this.free.wake(t)
     }
   }
 
@@ -332,7 +407,9 @@ export class Cloud {
     const filesKey = generateTeamKey()
     const wrapped = await this.keys.wrap(new TextEncoder().encode(JSON.stringify({ product: r.productBackupSecret, files: filesKey.secretKey })), { team: t.public_id, purpose: 'backup-keys' })
     if (r.publicIp && this.dnsHook) await this.dnsHook('UPSERT', t.slug, r.publicIp)
-    updateTeam(this.db, t.id, { status: 'active', host, public_ip: r.publicIp, backup_pub: filesKey.publicKey, backup_key_enc: wrapped, error: null })
+    updateTeam(this.db, t.id, { status: 'active', host, public_ip: r.publicIp, backup_pub: filesKey.publicKey, backup_key_enc: wrapped, error: null,
+      // a free team's idle clock starts when it runs
+      ...(t.plan === 'free' ? { last_activity_at: this.clock(), activity_checked_at: null } : {}) })
     audit(this.db, { actor: 'system', action: 'team.provisioned', teamId: t.id, detail: { host, driver: this.driver.name, plan: t.plan, keys: this.keys.kind } })
     this.log(`provisioned ${t.slug} on ${host}`)
     this.enqueue('backup', t.id, now() + HOUR)
@@ -379,6 +456,7 @@ export class Cloud {
         '',
         `Then connect Claude or ChatGPT: in Claude, Settings → Connectors → Add custom connector → ${url}/mcp`,
         '',
+        ...(t.plan === 'free' ? [`Free plan: ${planOf('free').storageGb} GB of files and up to ${planOf('free').maxPeople} people. It pauses after ${Math.round(this.cfg.free.idlePauseMs / DAY)} days without activity (nothing is deleted; one click wakes it). For more, upgrade at ${this.cfg.controlUrl}/dashboard (sign in with an email link).`, ''] : []),
         'We never see this token again: keep the link to yourself. Lost it? Reply to this mail before setup is done.',
       ].join('\n'),
     })
@@ -398,7 +476,8 @@ export class Cloud {
     if (t.host) await this.driver.stop(t.host, t.slug)
     updateTeam(this.db, t.id, { status: 'suspended', suspended_at: now(), suspend_reason: reason })
     audit(this.db, { actor, action: 'team.suspend', teamId: t.id, detail: { reason } })
-    if (reason !== 'admin') void this.mailOwner(t, 'Your Trina Drive is paused', `${this.url(t)} is paused (${reason}). Nothing has been deleted. Update your subscription at ${this.cfg.controlUrl}/dashboard to turn it back on.`)
+    // free.ts writes its own mail for an inactivity pause
+    if (reason !== 'admin' && reason !== 'inactive') void this.mailOwner(t, 'Your Trina Drive is paused', `${this.url(t)} is paused (${reason}). Nothing has been deleted. Update your subscription at ${this.cfg.controlUrl}/dashboard to turn it back on.`)
   }
 
   async resume(t: TeamRow, actor: string) {
@@ -490,7 +569,7 @@ export class Cloud {
       const prefix = r.object_key.slice(0, r.object_key.lastIndexOf('/') + 1)
       sets.set(prefix, [...(sets.get(prefix) ?? []), r])
     }
-    for (const objs of [...sets.values()].slice(this.cfg.backupKeep)) {
+    for (const objs of [...sets.values()].slice(t.plan === 'free' ? this.cfg.free.backupKeep : this.cfg.backupKeep)) {
       for (const b of objs) {
         await this.target.delete(b.object_key)
         this.db.query('DELETE FROM backups WHERE id = ?').run(b.id)
@@ -512,12 +591,12 @@ export class Cloud {
       // the product enforces the plan's storage itself (TDRIVE_STORAGE_QUOTA); /data beyond it plus the database's
       // headroom means something the quota does not count is growing (or the quota is off): tell the owner and ops
       const plan = planOf(t.plan)
-      const quota = (plan.storageGb + DATA_HEADROOM_GB) * 1024 ** 3
+      const quota = (plan.storageGb + plan.headroomGb) * 1024 ** 3
       const over = bytes != null && bytes > quota
       updateTeam(this.db, t.id, { disk_bytes: bytes ?? t.disk_bytes, disk_checked_at: now(), over_quota_since: over ? (t.over_quota_since ?? now()) : null })
       if (over && !t.over_quota_since) {
         audit(this.db, { actor: 'system', action: 'team.over_quota', teamId: t.id, detail: { bytes, quota } })
-        void this.mailOwner(t, 'Your Trina Drive is over its storage', `${this.url(t)} uses ${(bytes! / 1024 ** 3).toFixed(1)} GB; the plan includes ${plan.storageGb} GB of files. Remove files (and empty the trash) or move to the Business plan.`)
+        void this.mailOwner(t, 'Your Trina Drive is over its storage', `${this.url(t)} uses ${(bytes! / 1024 ** 3).toFixed(1)} GB; the plan includes ${plan.storageGb} GB of files. Remove files (and empty the trash) or move to a bigger plan.`)
         void this.alertOps(`team ${t.slug} over quota`, `${bytes} bytes of ${quota}`)
       }
       out.push({ slug: t.slug, bytes, quota, over })
@@ -559,6 +638,8 @@ export function teamEnv(cfg: Config, publicId: string, plan: PlanLimits, net: Te
     TDRIVE_STORAGE: 'managed',
     TDRIVE_STORAGE_QUOTA: `${plan.storageGb}GB`,
   }
+  // Free: at most this many active people (the product refuses one more on the web and the CLI)
+  if (plan.maxPeople != null) env.TDRIVE_MAX_PEOPLE = String(plan.maxPeople)
   if (cfg.teamMailer === 'off') env.TDRIVE_MAILER = 'off'
   else if (cfg.teamMailer === 'outbox') Object.assign(env, { TDRIVE_MAILER: 'outbox', TDRIVE_MAIL_FROM: cfg.teamMailFrom })
   else {

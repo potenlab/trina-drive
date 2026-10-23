@@ -4,7 +4,7 @@ import { verifyAudit } from '../audit'
 import { canSeeDraft, liveDrafts, sourcesFor, type Draft } from '../drafts'
 import { Access } from '../policy'
 import { Rights, type Actor } from '../rights'
-import type { FolderRow, TokenRow } from '../store'
+import { maxPeople, type FolderRow, type TokenRow } from '../store'
 import { decidableCount, promoteFolderIds, promoteOn } from '../promote'
 import { accountOf } from './auth'
 import { has2FA } from './mfa'
@@ -41,6 +41,8 @@ export function peopleView(w: WebCtx, a: Actor) {
       ...(a.admin || p.id === a.personId ? { email: acc.get(p.id)?.email ?? null, signed_up: !!acc.get(p.id)?.password_hash } : {}),
     })),
     groups: groups(w).map((g) => ({ id: g.id, name: g.name, members: ms.filter((m) => m.group_id === g.id).map((m) => m.person_id) })),
+    // the plan's limit on active people (TDRIVE_MAX_PEOPLE; Trina Cloud Free: 3), null = none
+    max_people: maxPeople(),
   }
 }
 

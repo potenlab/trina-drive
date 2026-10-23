@@ -8,7 +8,7 @@ import { Badge, ErrorLine, Loading, Page, Secret, useAction, useLoad } from '../
 
 export function People() {
   const { me } = useSession()
-  const { data, error, reload } = useLoad(() => get<{ people: Person[]; groups: Group[] }>('/people'))
+  const { data, error, reload } = useLoad(() => get<{ people: Person[]; groups: Group[]; max_people?: number | null }>('/people'))
   const a = useAction()
   const [invite, setInvite] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -22,6 +22,11 @@ export function People() {
     <Page title={t('people_title')}>
       <ErrorLine error={a.error ?? error} />
       {notice && <p className="ok">{notice}</p>}
+      {data.max_people != null && (() => {
+        // the plan's people limit (TDRIVE_MAX_PEOPLE, e.g. Trina Cloud Free): the server refuses a fourth with the same words
+        const n = data.people.filter((p) => p.active).length
+        return <p className={n >= data.max_people ? 'err' : 'muted small'}>{n >= data.max_people ? t('people_limit_full', { max: data.max_people }) : t('people_limit', { n, max: data.max_people })}</p>
+      })()}
       {admin && <AddPerson groups={data.groups} onAdded={(url) => { setInvite(url); reload() }} run={a.run} busy={a.busy} />}
       {invite && <div className="card"><p>{t('invite_link')}</p><Secret text={invite} /><button className="btn small ghost" onClick={() => setInvite(null)}>{t('close')}</button></div>}
 

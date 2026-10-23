@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 // Admin CLI. Usage: bun run src/cli.ts [--data DIR] <command> …   (run without arguments for help)
+import { lastActivity } from './activity'
 import { verifyAudit } from './audit'
 import { CLI, defaultDataDir, ENV_PREFIX, NAME, PRODUCT, VERSION } from './config'
 import { backupCommand } from './backup/cli'
@@ -48,6 +49,7 @@ usage: ${CLI} [--data DIR] <command>
   token create <person> [--name N] [--scope path1,path2] [--read-only] [--ttl 8h]
   token revoke <id>                      (same as connections revoke)
   audit verify
+  activity [--json]                      when people last used the server (web, MCP, WebDAV); Trina Cloud pauses idle Free workspaces
 ${MFA_HELP}
 ${NOTIFY_HELP}
   demo seed                              sample company tree, people, rules and tokens
@@ -99,7 +101,7 @@ async function main(argv: string[]) {
   const args = [...argv]
   const dataDir = takeFlag(args, '--data') ?? defaultDataDir()
   const [cmd, sub] = args
-  const single = ['init', 'sh', 'serve'].includes(cmd ?? '')
+  const single = ['init', 'sh', 'serve', 'activity'].includes(cmd ?? '')
   const rest = args.slice(single ? 1 : 2)
   if (!cmd || cmd === 'help' || cmd === '--help') return console.log(HELP)
   // backup works on a data directory (and may run as root via launchd/sudo): never open or create a database for it
@@ -178,6 +180,12 @@ async function main(argv: string[]) {
       return console.log(t.token)
     }
     case 'token revoke': return notifyCommand(db, dataDir, 'connections revoke', rest)
+    case 'activity': {
+      const a = lastActivity(db)
+      if (rest.includes('--json')) return console.log(JSON.stringify(a))
+      const at = (ms: number | null) => (ms == null ? 'never' : new Date(ms).toISOString())
+      return console.log(`last activity: ${at(a.last_activity_at)}  (web ${at(a.web)}, MCP ${at(a.mcp)}, WebDAV ${at(a.dav)})`)
+    }
     case 'audit verify': {
       if (rest.includes('--against')) return notifyCommand(db, dataDir, 'audit verify', rest)
       const r = verifyAudit(db)

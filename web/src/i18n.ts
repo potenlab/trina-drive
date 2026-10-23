@@ -54,6 +54,7 @@ const en = {
   // people
   people_title: 'People and groups', add_person: 'Add a person', admin: 'Admin', invite_link: 'Invite link (also mailed; works once, 7 days)',
   status_invited: 'Invited', status_active: 'Active', status_inactive: 'Inactive', status_no_account: 'No sign-in',
+  people_limit: '{n} of {max} people on your plan.', people_limit_full: 'Your plan allows {max} people: deactivate someone to add another, or upgrade the plan.',
   reset_password: 'Reset password', reset_confirm: 'Send {name} a one-time reset link by mail? Their tokens and sessions are cut right now, and they are told. You will not see the link.',
   reset_done: 'Reset link sent to their mail. {n} tokens were cut.', deactivate: 'Deactivate', activate: 'Activate', make_admin: 'Make admin', remove_admin: 'Remove admin',
   reinvite: 'Invite', change_email: 'Change mail', change_email_prompt: 'New mail address (the old one is told)', group_name: 'Group name', add_group: 'Add group',
@@ -158,6 +159,7 @@ const ko: Record<Key, string> = {
   reg_warn_home: '누군가의 NAS 홈 폴더처럼 보입니다. 맞다면 개인 폴더로 등록하세요. 해당 사람에게 알렸습니다.',
   people_title: '사람과 그룹', add_person: '사람 더하기', admin: '관리자', invite_link: '초대 링크(메일로도 보냄, 한 번만, 7일)',
   status_invited: '초대됨', status_active: '활성', status_inactive: '비활성', status_no_account: '로그인 없음',
+  people_limit: '요금제 인원 {max}명 중 {n}명', people_limit_full: '요금제 인원 {max}명을 다 썼습니다. 다른 사람을 비활성으로 바꾸거나 요금제를 올리세요.',
   reset_password: '비밀번호 재설정', reset_confirm: '{name}님에게 일회용 재설정 링크를 메일로 보낼까요? 지금 바로 토큰과 세션이 끊기고 본인에게 알립니다. 링크는 관리자에게 보이지 않습니다.',
   reset_done: '재설정 링크를 본인 메일로 보냈습니다. 토큰 {n}개를 끊었습니다.', deactivate: '비활성화', activate: '활성화', make_admin: '관리자로', remove_admin: '관리자 해제',
   reinvite: '초대', change_email: '메일 바꾸기', change_email_prompt: '새 메일 주소(이전 주소로 알립니다)', group_name: '그룹 이름', add_group: '그룹 더하기',

@@ -147,7 +147,7 @@ describe('connecting', () => {
     expect(open(k, 'gdrive:refresh:2', s)).toBe('secret')
     expect(() => open(k, 'gdrive:refresh:3', s)).toThrow(SecretBoxError)
     expect(() => open(Buffer.alloc(32, 1), 'gdrive:refresh:2', s)).toThrow(SecretBoxError)
-    expect(() => open(k, 'gdrive:refresh:2', s.slice(0, -2) + (s.endsWith('A') ? 'B' : 'A') + s.slice(-1))).toThrow(SecretBoxError)
+    expect(() => open(k, 'gdrive:refresh:2', s.slice(0, -2) + (s.at(-2) === 'A' ? 'B' : 'A') + s.slice(-1))).toThrow(SecretBoxError)
     process.env.TDRIVE_SECRET_KEY = Buffer.alloc(32, 7).toString('hex')
     try { expect(dataKey('/nonexistent')).toEqual(Buffer.alloc(32, 7)) } finally { delete process.env.TDRIVE_SECRET_KEY }
   })

@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS hosts (
   note TEXT, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS kv (
   key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+-- Free plan sign-ups (free.ts): email + team name, confirmed by a one-time link (only its hash here), then a team.
+-- email_key: the address as one mailbox (lower case, no +tag, no dots for Gmail) for "one free team per email".
+-- status: pending | provisioned | waitlisted | refused | admitted
+CREATE TABLE IF NOT EXISTS free_signups (
+  id INTEGER PRIMARY KEY, email TEXT NOT NULL COLLATE NOCASE, email_key TEXT NOT NULL, name TEXT NOT NULL, slug TEXT,
+  ip TEXT, secret_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+  verified_at INTEGER, status TEXT NOT NULL, team_id INTEGER REFERENCES teams(id), note TEXT);
+CREATE INDEX IF NOT EXISTS free_signups_key ON free_signups (email_key);
 `
 
 /** columns added after a table was first made (CREATE TABLE IF NOT EXISTS leaves an existing table alone) */
@@ -62,6 +70,15 @@ const ADDED_COLUMNS: [table: string, column: string, decl: string][] = [
   // a paid team with no host to go on yet (scale-out in progress, or the host limit reached)
   ['teams', 'waiting_since', 'INTEGER'],
   ['teams', 'wait_alerted_at', 'INTEGER'],
+  // Free plan (free.ts): when people last used the team (the product's `tdrive activity`, or the time it started),
+  // when that was last asked, the idle warning, the inactivity pause (kept across a wake nobody followed up on), the
+  // deletion warnings sent while paused, and a wake from the paused page that still waits for real use
+  ['teams', 'last_activity_at', 'INTEGER'],
+  ['teams', 'activity_checked_at', 'INTEGER'],
+  ['teams', 'idle_warned_at', 'INTEGER'],
+  ['teams', 'paused_at', 'INTEGER'],
+  ['teams', 'delete_warnings', 'INTEGER NOT NULL DEFAULT 0'],
+  ['teams', 'woke_at', 'INTEGER'],
 ]
 
 export function openDb(file: string): DB {
@@ -85,6 +102,8 @@ export interface TeamRow {
   disk_bytes: number | null; disk_checked_at: number | null; over_quota_since: number | null
   error: string | null; created_at: number; updated_at: number
   waiting_since: number | null; wait_alerted_at: number | null
+  last_activity_at: number | null; activity_checked_at: number | null; idle_warned_at: number | null; paused_at: number | null
+  delete_warnings: number; woke_at: number | null
 }
 
 export type HostState = 'booting' | 'ready' | 'draining' | 'terminating' | 'gone' | 'lost'

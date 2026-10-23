@@ -39,7 +39,17 @@ export class FakeDriver implements Driver {
       return { part, name, bytes: fs.statSync(p).size, sha256: crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'), localPath: p }
     })
   }
-  async exec(_h: string, slug: string, args: string[]): Promise<ExecResult> { this.calls.push(`exec ${slug} ${args.join(' ')}`); return { code: 0, stdout: '', stderr: '' } }
+  /** what `tdrive activity --json` reports per team (ms; unset = never used); `activityFails` = the exec fails */
+  readonly activity = new Map<string, number | null>()
+  activityFails = false
+  async exec(_h: string, slug: string, args: string[]): Promise<ExecResult> {
+    this.calls.push(`exec ${slug} ${args.join(' ')}`)
+    if (args[0] === 'activity') {
+      if (this.activityFails || this.instances.get(slug)?.state !== 'running') return { code: 1, stdout: '', stderr: 'not running' }
+      return { code: 0, stdout: JSON.stringify({ last_activity_at: this.activity.get(slug) ?? null, web: null, mcp: null, dav: null }) + '\n', stderr: '' }
+    }
+    return { code: 0, stdout: '', stderr: '' }
+  }
 }
 
 /** In-memory host pool for the scaler's tests: an ASG with instances i-1, i-2, … that become ready when the test says. */

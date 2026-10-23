@@ -112,9 +112,44 @@ export interface Config {
   }
   /** metrics: disk usage poll interval (minutes) */
   metricsEveryMinutes: number
+  /** the Free plan (free.ts; README "Free plan") */
+  free: FreeConfig
 }
 
-export type PlanId = 'team' | 'business'
+export interface FreeConfig {
+  /** free teams that may exist at once (not deleted); verified sign-ups beyond it join the waitlist */
+  maxTeams: number
+  /** the share of each host's slots free teams may take (the rest stays for paid teams) */
+  hostShare: number
+  /** free teams never make the scaler launch the last this-many hosts the limit allows (they are for paid teams) */
+  reserveHosts: number
+  /** how long a free sign-up's confirmation link works */
+  verifyTtlMs: number
+  /** free sign-up requests per client address: per hour and per day */
+  signupsPerIpHour: number
+  signupsPerIpDay: number
+  /** extra disposable-mail domains refused (on top of the built-in list) */
+  blockedDomains: string[]
+  /** Cloudflare Turnstile on the free sign-up form; off when the secret is empty */
+  turnstileSecret: string
+  turnstileSiteKey: string
+  /** how often a running free team is asked when people last used it (`tdrive activity`) */
+  activityEveryMs: number
+  /** no activity for this long: the owner is warned; then the team is paused (container stopped, data kept) */
+  idleWarnMs: number
+  idlePauseMs: number
+  /** a team woken from the paused page that nobody then uses is paused again after this (no mail) */
+  wakeGraceMs: number
+  /** paused this long: deleted after a final backup; the owner is warned at each of deleteWarnMs */
+  deleteAfterMs: number
+  deleteWarnMs: number[]
+  /** a deleted free team's final backup is kept this long */
+  finalBackupKeepMs: number
+  /** daily backups kept per free team (paid: backupKeep) */
+  backupKeep: number
+}
+
+export type PlanId = 'team' | 'business' | 'free'
 
 export class ConfigError extends Error {}
 
@@ -229,6 +264,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       asgName: env.TDCLOUD_ASG_NAME || 'tdcloud-hosts',
     },
     metricsEveryMinutes: int(env.TDCLOUD_METRICS_EVERY_MINUTES, 15, 'TDCLOUD_METRICS_EVERY_MINUTES'),
+    free: freeConfig(env),
   }
 
   if (!mailAddress(cfg.teamMailFrom)) throw new ConfigError(`TDCLOUD_TEAM_MAIL_FROM is not a mail address: ${cfg.teamMailFrom}`)
@@ -245,6 +281,37 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (problems.length) throw new ConfigError(`production config:\n  - ${problems.join('\n  - ')}`)
   }
   return cfg
+}
+
+function freeConfig(env: Record<string, string | undefined>): FreeConfig {
+  const share = int(env.TDCLOUD_FREE_HOST_SHARE, 0.5, 'TDCLOUD_FREE_HOST_SHARE')
+  if (share <= 0 || share > 1) throw new ConfigError('TDCLOUD_FREE_HOST_SHARE must be more than 0 and at most 1')
+  const d = (k: string, dflt: string) => parseDuration(env[k], dflt, k, 'd')
+  const warns = (env.TDCLOUD_FREE_DELETE_WARNINGS || '60d,83d').split(',').map((x) => x.trim()).filter(Boolean)
+    .map((x) => parseDuration(x, x, 'TDCLOUD_FREE_DELETE_WARNINGS', 'd')).sort((a, b) => a - b)
+  const f: FreeConfig = {
+    maxTeams: int(env.TDCLOUD_MAX_FREE_TEAMS, 50, 'TDCLOUD_MAX_FREE_TEAMS'),
+    hostShare: share,
+    reserveHosts: int(env.TDCLOUD_FREE_RESERVE_HOSTS, 1, 'TDCLOUD_FREE_RESERVE_HOSTS'),
+    verifyTtlMs: parseDuration(env.TDCLOUD_FREE_VERIFY_TTL, '24h', 'TDCLOUD_FREE_VERIFY_TTL'),
+    signupsPerIpHour: int(env.TDCLOUD_FREE_SIGNUPS_PER_IP_HOUR, 5, 'TDCLOUD_FREE_SIGNUPS_PER_IP_HOUR'),
+    signupsPerIpDay: int(env.TDCLOUD_FREE_SIGNUPS_PER_IP_DAY, 20, 'TDCLOUD_FREE_SIGNUPS_PER_IP_DAY'),
+    blockedDomains: (env.TDCLOUD_FREE_BLOCKED_DOMAINS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
+    turnstileSecret: env.TDCLOUD_TURNSTILE_SECRET || '',
+    turnstileSiteKey: env.TDCLOUD_TURNSTILE_SITE_KEY || '',
+    activityEveryMs: parseDuration(env.TDCLOUD_FREE_ACTIVITY_EVERY, '1h', 'TDCLOUD_FREE_ACTIVITY_EVERY'),
+    idleWarnMs: d('TDCLOUD_FREE_IDLE_WARN', '6d'),
+    idlePauseMs: d('TDCLOUD_FREE_IDLE_PAUSE', '7d'),
+    wakeGraceMs: parseDuration(env.TDCLOUD_FREE_WAKE_GRACE, '1h', 'TDCLOUD_FREE_WAKE_GRACE'),
+    deleteAfterMs: d('TDCLOUD_FREE_DELETE_AFTER', '90d'),
+    deleteWarnMs: warns,
+    finalBackupKeepMs: d('TDCLOUD_FREE_FINAL_BACKUP_KEEP', '30d'),
+    backupKeep: Math.max(1, int(env.TDCLOUD_FREE_BACKUP_KEEP, 3, 'TDCLOUD_FREE_BACKUP_KEEP')),
+  }
+  if (f.idleWarnMs >= f.idlePauseMs) throw new ConfigError('TDCLOUD_FREE_IDLE_WARN must be shorter than TDCLOUD_FREE_IDLE_PAUSE')
+  if (f.deleteWarnMs.some((w) => w >= f.deleteAfterMs)) throw new ConfigError('TDCLOUD_FREE_DELETE_WARNINGS must come before TDCLOUD_FREE_DELETE_AFTER')
+  if (!!f.turnstileSecret !== !!f.turnstileSiteKey) throw new ConfigError('set both TDCLOUD_TURNSTILE_SECRET and TDCLOUD_TURNSTILE_SITE_KEY (or neither)')
+  return f
 }
 
 /** https://<slug>.<domain>[:port] */
