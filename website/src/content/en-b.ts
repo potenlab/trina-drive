@@ -2,6 +2,8 @@
 // app. Shared facts (pricing, the security promise, legal, terminal demo) come from en.ts unchanged; everything a
 // non-developer reads first is rewritten in plain language here.
 //
+// Cloud-first (2026-10-23): Trina Cloud is the main product and is in early access (CLOUD_LIVE in src/site.ts);
+// self-hosting and on-site installs are the alternative. Google Drive import is "coming soon".
 // Accuracy rules (same as en.ts): no "real bash"; AI can't change originals *through Trina Drive*; open source =
 // "Apache-2.0, source on GitHub"; never say Drive connectors can't read files; no fake logos, testimonials or YC claims; USD.
 // Client logos: only official files the brand allows (public/logos/SOURCES.md); Claude stays text (needs approval).
@@ -36,21 +38,19 @@ const enB = {
     ...en.meta,
     title: 'Trina Drive — ask Claude or ChatGPT about your company’s files',
     description:
-      'Your company folders, as your team’s AI knowledge base. Ask Claude or ChatGPT about last quarter’s numbers, past proposals or any contract and get answers from the real documents. No uploading, no knowledge-base project, and each person’s AI only sees what they’re allowed to. Set up for you, for teams of 5 to 20.',
+      'Put your team’s files in Trina Cloud and ask Claude or ChatGPT about last quarter’s numbers, past proposals or any contract — answers come from the real documents. No knowledge-base project, and each person’s AI only sees what they’re allowed to. For teams of 5 to 20.',
   },
   hero: {
     ...en.hero,
-    pill: 'Claude and ChatGPT connections rolling out now',
-    title: 'Your company folders,',
+    pill: 'Trina Cloud · early access',
+    title: 'Your company files,',
     titleAccent: 'as your team’s AI knowledge base.',
-    sub: 'Ask Claude or ChatGPT about your company’s files. No uploads. Everyone sees only what they should.',
-    primary: 'See what your team can ask',
-    secondary: 'Book a setup call',
+    sub: 'Put your team’s files in Trina Cloud. Ask Claude or ChatGPT about them. Everyone sees only what they should.'
   },
   proof: [
     { icon: 'user', text: 'Built for teams of 5 to 20' },
-    { icon: 'folder', text: 'Always the current file — nothing to upload' },
-    { icon: 'sparkle', text: 'We set it up for you' },
+    { icon: 'upload', text: 'Drag and drop, or mount as a drive' },
+    { icon: 'sparkle', text: 'Nothing to install' },
   ],
   // Hero visual: a neutral AI chat window (no vendor branding) beside the company folders it can read.
   chat: {
@@ -75,7 +75,7 @@ const enB = {
     hidden: 'Hidden from this AI',
     noAi: 'No AI',
     reading: 'Reading',
-    filesFoot: 'Files stay on your office network',
+    filesFoot: 'Files in your team’s Trina Cloud',
     turns: [
       {
         who: 'Sam',
@@ -225,8 +225,8 @@ const enB = {
   },
   works: {
     eyebrow: 'Works where you already work',
-    title: 'Keep your AI app.\nKeep your folders.',
-    sub: 'Nothing moves, and nobody learns a new tool.',
+    title: 'Keep your AI app.\nBring your files.',
+    sub: 'Nobody learns a new tool.',
     appsTitle: 'The AI apps your team uses',
     apps: [
       { name: 'Claude app & claude.ai', note: 'desktop, web and mobile', status: 'soon' },
@@ -237,24 +237,24 @@ const enB = {
     devApps: ['Claude Code', 'Codex CLI', 'Cursor'],
     today: 'available today',
     soon: 'rolling out (v0.2)',
-    filesTitle: 'Where your files already live',
+    filesTitle: 'How your files get in',
     files: [
-      { icon: 'nas', name: 'A NAS', note: 'Synology, QNAP and others' },
-      { icon: 'mac', name: 'A folder on the office Mac', note: 'Scans and exports too' },
-      { icon: 'folder', name: 'A synced cloud folder', note: 'Google Drive or Dropbox, synced' },
+      { icon: 'upload', name: 'Drag and drop', note: 'Right in the browser' },
+      { icon: 'folder', name: 'Mount it as a drive', note: 'In Finder or Explorer' },
+      { icon: 'cloud', name: 'Import from Google Drive', note: 'Coming soon' },
     ],
-    filesNote: 'People keep using Finder, Explorer and Office.',
-    center: 'Trina Drive',
-    centerNote: 'on a Mac mini in your office',
+    filesNote: 'Rather keep files in the office? Self-host it on your NAS or Mac mini.',
+    center: 'Trina Cloud',
+    centerNote: 'your team’s own space',
   },
   // One compact comparison in plain language (same shape as en.compare). Never say Drive connectors can't read files.
   compare: {
     eyebrow: 'Why it’s different',
     title: 'No knowledge-base project.\nNo one-file connector.',
-    sub: 'Your AI searches inside every shared folder at once, where files already live.',
+    sub: 'Your AI searches inside every shared folder at once.',
     cols: ['Knowledge-base project', 'Drive connector', 'Trina Drive'],
     rows: [
-      { label: 'Getting started', cells: ['Months of mapping documents', 'Files in Google Drive first', 'Point at the folders you have'] },
+      { label: 'Getting started', cells: ['Months of mapping documents', 'Connect a drive', 'Drop your files in'] },
       { label: '“Which contracts…?”', cells: ['Answers from fragments', 'Opens files one at a time', 'Searches inside all of them at once'] },
       { label: 'A file changes', cells: ['Processed again first', 'Read it again', 'Next question sees it'] },
     ],
@@ -320,20 +320,20 @@ const enB = {
   },
   pricing: {
     ...en.pricing,
-    title: 'We set it up and run it.\nOr self-host it free.',
+    title: 'Start in the cloud.\nOr host it yourself.',
     sub: 'Priced on AI-connected people. File-only people are free.',
   },
   setup: {
-    eyebrow: 'Set up for you',
-    title: 'One call, and your team is asking.',
-    sub: 'We set it up in your office. No IT team needed.',
+    eyebrow: 'How it works',
+    title: 'Three steps.\nNo IT team needed.',
+    sub: '',
     steps: [
-      { title: 'Book a call', body: 'Decide together who should see what.' },
-      { title: 'We set it up in your office', body: 'A Mac mini on your network. Remote, or on-site in Korea.' },
-      { title: 'Everyone connects their AI app', body: 'One sign-in each. We keep it updated and backed up.' },
+      { title: 'Create your team space', body: 'Sign up, invite your team, choose who sees which folder.' },
+      { title: 'Add your files', body: 'Drag and drop, or mount it as a drive. Google Drive import is coming soon.' },
+      { title: 'Connect your AI app', body: 'One sign-in for Claude or ChatGPT (rolling out). The Codex app works today.' },
     ],
-    selfTitle: 'Have someone technical?',
-    selfBody: 'Self-host free, with every security feature.',
+    selfTitle: 'Rather keep files in the office?',
+    selfBody: 'Self-host free, or we install it on your NAS or Mac mini.',
     selfLink: 'Install guide',
   },
   devs: {
@@ -352,23 +352,27 @@ const enB = {
     items: [
       {
         q: 'Do I need to know anything technical?',
-        a: 'No. We set it up and connect your team’s AI apps. Self-hosting is free but needs someone comfortable with a terminal.',
+        a: 'No. Sign up, drop your files in, connect your AI app. Self-hosting is free but needs someone comfortable with a terminal.',
       },
       {
         q: 'Which AI apps work?',
         a: 'The Codex app, Claude Code, Codex CLI and Cursor today. Claude and ChatGPT connections are rolling out in v0.2; ChatGPT adds it as a custom connector in developer mode, on plans where OpenAI allows it.',
       },
       {
-        q: 'Do I have to move our files?',
-        a: 'No. It reads them where they are: a NAS, the office Mac, or a Google Drive or Dropbox folder synced to it. Nothing is copied to us.',
+        q: 'Where are my files stored?',
+        a: 'In Trina Cloud: your team’s own isolated space, hosted in the US (more regions later). Or in your office, if you self-host.',
       },
       {
-        q: 'Is our data used to train AI?',
-        a: 'Trina Drive trains no model. Text an AI reads goes to your AI company, under your plan with them. Mark folders “No AI” to keep them out.',
+        q: 'Do you train AI on our files?',
+        a: 'No, we don’t. Text an AI reads goes to your AI company, under your plan with them. Mark folders “No AI” to keep them out.',
       },
       {
-        q: 'How is this different from uploading files?',
-        a: 'Uploads are copies that go stale. Here the AI reads the current file, and only where that person may look.',
+        q: 'Can we leave?',
+        a: 'Anytime. Export everything, or run it yourself: the code is open source (Apache-2.0).',
+      },
+      {
+        q: 'Can we host it ourselves?',
+        a: 'Yes, free, with every security feature. Or we install it on your NAS or Mac mini.',
       },
       {
         q: 'Can the AI change or delete our files?',
@@ -379,8 +383,10 @@ const enB = {
   cta: {
     ...en.cta,
     title: 'An AI knowledge base,\nwithout building one.',
-    sub: 'Book a call. We set it up and connect your team.',
-    primary: 'Book a setup call',
+    sub: 'We’re onboarding the first teams now.',
+    subLive: 'Start a 14-day trial on Trina Cloud.',
+    primary: 'Get early access',
+    primaryLive: 'Start free trial',
     secondary: 'See pricing',
   },
 }

@@ -2,7 +2,9 @@
 
 Trina Inc. (주식회사 트리나, "**we**") provides Trina Drive services and the website https://drive.trina.app. This policy explains what personal information we collect about our customers, website visitors and people who contact us, why, and what rights you have. It is written to meet Korea's Personal Information Protection Act (PIPA) and, for visitors in the EU/UK, the GDPR.
 
-**This policy does not cover the files you store in Trina Drive.** Trina Drive runs on your own hardware. When we operate your server under a managed plan, we handle any personal data in your files only as your processor, under §11 of our Terms of Service.
+**This policy does not cover the files you store in Trina Drive.** For those files you are the controller and we act only as your processor, under §11 of our Terms of Service:
+- **Self-hosted or on-site:** Trina Drive runs on your own hardware. When we operate it for you, we handle personal data in your files only as your processor.
+- **Trina Cloud (hosted by us):** your files, permissions database and audit log are stored and processed by Trina Inc. in your team's own instance, on infrastructure provided by Amazon Web Services (AWS) in the United States, which acts as our sub-processor (see §5). *Draft: Trina Cloud is in early access; this section will be finalized before paid sign-ups open.*
 
 ## 1. What we collect and why
 
@@ -38,6 +40,7 @@ We use the following service providers. Several are outside Korea, so your infor
 | Paddle.com Market Ltd | United Kingdom (and its payment partners) | Name, email, company, billing address, tax ID, payment details | Online checkout, tax, invoicing (Paddle is a controller for payment data) | Over the network when you check out | Per Paddle's policy |
 | Vercel Inc. | United States | Website server logs, order notifications from Paddle (no card data) | Hosting drive.trina.app | Over the network, continuously | Up to 30 days |
 | Our email provider | May be outside Korea | Emails you send to us; recipient address and content of service notifications we send | Business email and service notifications | Over the network when an email is sent or received | Per our retention in §1 |
+| Amazon Web Services, Inc. (sub-processor, Trina Cloud only) | United States | Files, permissions database and audit logs of Trina Cloud customers; account emails | Hosting Trina Cloud | Over the network, continuously while you use Trina Cloud | Contract term, then deleted after export (draft) |
 | Tailscale Inc. | Canada / United States | Device names, operator account, connection metadata (not your files) | Secure remote operation of your server | Over the network during operation | Contract term |
 
 All online payments, in Korea and elsewhere, are processed by Paddle.com. We use the National Tax Service's Hometax system only to issue electronic tax invoices for setup services contracted directly by quote.

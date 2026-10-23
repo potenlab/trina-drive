@@ -54,7 +54,7 @@ const home = '/'
 
     <section class="container secpage-block" aria-labelledby="sp-boundary">
       <h2 id="sp-boundary">{sp.boundaryTitle}</h2>
-      <div class="secpage-cards">
+      <div class={`secpage-cards${sp.boundary.length === 3 ? ' secpage-cards-3' : ''}`}>
         {sp.boundary.map((b) => <div class="secpage-card"><h3>{b.title}</h3><p>{b.body}</p></div>)}
       </div>
     </section>

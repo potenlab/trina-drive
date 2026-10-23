@@ -1,0 +1,32 @@
+---
+// Trina Cloud trust section (both variants): four short facts about hosted storage, then one line saying they are
+// design commitments for early access, the hosting region and a link to /security. Copy: t.cloud (content/en.ts).
+import Lines from './Lines.astro'
+import type { Copy } from '../content/en'
+import Icon from './Icon.astro'
+interface Props { t: Pick<Copy, 'cloud'>; tint?: boolean }
+const { t, tint = true } = Astro.props
+const c = t.cloud
+---
+<section class={`section${tint ? ' section-tint' : ''}`} id="cloud" aria-labelledby="cloud-title">
+  <div class="container">
+    <div class="section-head" data-reveal>
+      <span class="eyebrow">{c.eyebrow}</span>
+      <h2 id="cloud-title"><Lines text={c.title} /></h2>
+    </div>
+    <ul class="trust">
+      {c.items.map((it) => (
+        <li class="trust-card" data-reveal>
+          <span class="bento-icon"><Icon name={it.icon} /></span>
+          <h3>{it.title}</h3>
+          {it.body && <p>{it.body}</p>}
+        </li>
+      ))}
+    </ul>
+    <div class="lim trust-foot" data-reveal>
+      <p class="lim-title"><Icon name="eye" />{c.note}</p>
+      <ul><li>{c.region}</li></ul>
+      <a class="lim-link" href="/security">{c.link}<span aria-hidden="true">→</span></a>
+    </div>
+  </div>
+</section>

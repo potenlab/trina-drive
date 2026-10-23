@@ -2,7 +2,8 @@
 import Lines from './Lines.astro'
 import type { Copy } from '../content/en'
 import Base from '../layouts/Base.astro'
-import { LINKS, SITE_URL, CONTACT_EMAIL } from '../site'
+import { CLOUD_LIVE, LINKS, SITE_URL, CONTACT_EMAIL } from '../site'
+import CloudTrust from './CloudTrust.astro'
 import Benchmark from './Benchmark.astro'
 import Bento from './Bento.astro'
 import Compare from './Compare.astro'
@@ -38,13 +39,13 @@ const jsonLd = {
       name: 'Trina Drive',
       url: new URL(home, SITE_URL).href,
       applicationCategory: 'BusinessApplication',
-      operatingSystem: 'macOS, Linux',
+      operatingSystem: 'Web, macOS, Linux',
       description: t.meta.description,
       publisher: { '@id': `${SITE_URL}/#org` },
       offers: [
-        { '@type': 'Offer', name: 'Community (self-hosted)', price: '0', priceCurrency: 'USD' },
-        { '@type': 'Offer', name: 'Team (managed)', price: '99', priceCurrency: 'USD' },
-        { '@type': 'Offer', name: 'Business (managed)', price: '349', priceCurrency: 'USD' },
+        { '@type': 'Offer', name: 'Cloud Team', price: '99', priceCurrency: 'USD' },
+        { '@type': 'Offer', name: 'Cloud Business', price: '349', priceCurrency: 'USD' },
+        { '@type': 'Offer', name: 'Self-hosted', price: '0', priceCurrency: 'USD' },
       ],
     },
     {
@@ -61,19 +62,18 @@ const jsonLd = {
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-bg" aria-hidden="true"></div>
       <div class="container hero-copy">
-        <a class="pill" href={LINKS.github} rel="noopener"><span class="pill-dot" aria-hidden="true"></span>{h.pill}<span class="pill-arrow" aria-hidden="true">→</span></a>
+        <a class="pill" href="#cloud"><span class="pill-dot" aria-hidden="true"></span>{h.pill}<span class="pill-arrow" aria-hidden="true">→</span></a>
         <h1 id="hero-title">{h.title} <span class="accent-text">{h.titleAccent}</span></h1>
         <p class="hero-sub">{h.sub}</p>
         <div class="hero-ctas">
-          <a class="btn btn-primary btn-lg" data-cta="see-how" href="#how">{h.primary}<Icon name="arrow" /></a>
+          {CLOUD_LIVE
+            ? <button class="btn btn-primary btn-lg" type="button" data-plan="team" data-cta="start-trial">{h.primaryLive}<Icon name="arrow" /></button>
+            : <a class="btn btn-primary btn-lg" data-cta="early-access" href={LINKS.earlyAccess(t.lang)}>{h.primary}<Icon name="arrow" /></a>}
           <a class="btn btn-secondary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{h.secondary}</a>
         </div>
+        <p class="hero-note">{CLOUD_LIVE ? h.noteLive : h.note}</p>
         <div class="hero-meta">
-          <div class="install">
-            <code><span class="prompt" aria-hidden="true">$ </span>{h.install}</code>
-            <button class="copy-btn" type="button" data-copy={h.install} data-copied={h.copied}>{h.copy}</button>
-          </div>
-          <a class="hero-gh" href={LINKS.github} rel="noopener"><Icon name="github" />{h.github}<span aria-hidden="true">→</span></a>
+          <a class="hero-gh" data-cta="self-host" href={LINKS.github} rel="noopener"><Icon name="github" />{h.github}<span aria-hidden="true">→</span></a>
         </div>
       </div>
       <div class="container hero-stage">
@@ -148,6 +148,9 @@ const jsonLd = {
       </div>
     </section>
 
+    <!-- Trina Cloud: hosted storage, in four short facts (design commitments while in early access) -->
+    <CloudTrust t={t} />
+
     {t.competitors.enabled && <Competitors t={t} />}
 
     <Pricing t={t} />
@@ -184,14 +187,12 @@ const jsonLd = {
           <div class="cta-bg" aria-hidden="true"></div>
           <span class="cta-logo" aria-hidden="true"><Logo /></span>
           <h2 id="start-title"><Lines text={t.cta.title} /></h2>
-          <p>{t.cta.sub}</p>
+          <p>{CLOUD_LIVE ? t.cta.subLive : t.cta.sub}</p>
           <div class="hero-ctas">
-            <a class="btn btn-primary btn-lg" href={LINKS.github} rel="noopener"><Icon name="github" />{t.cta.primary}</a>
-            <a class="btn btn-secondary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{t.cta.secondary}</a>
-          </div>
-          <div class="install install-dark">
-            <code><span class="prompt" aria-hidden="true">$ </span>{h.install}</code>
-            <button class="copy-btn" type="button" data-copy={h.install} data-copied={h.copied}>{h.copy}</button>
+            {CLOUD_LIVE
+              ? <button class="btn btn-primary btn-lg" type="button" data-plan="team" data-cta="start-trial">{t.cta.primaryLive}<Icon name="arrow" /></button>
+              : <a class="btn btn-primary btn-lg" data-cta="early-access" href={LINKS.earlyAccess(t.lang)}>{t.cta.primary}<Icon name="arrow" /></a>}
+            <a class="btn btn-secondary btn-lg" data-cta="self-host" href={LINKS.github} rel="noopener"><Icon name="github" />{t.cta.secondary}</a>
           </div>
           <p class="cta-install"><a href={LINKS.installGuide} rel="noopener">{t.cta.install} →</a></p>
         </div>
