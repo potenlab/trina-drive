@@ -1,0 +1,41 @@
+# Trina Cloud — Caddy on each team host. Every https://<slug>.<domain> goes to that team's container (tdc-<slug>:8787)
+# over the team's own Docker network (the host agent joins this Caddy to each team network). Nothing else is routed.
+#
+# Environment (set by cloud/host/bootstrap.sh in /etc/tdcloud/caddy.env):
+#   TDCLOUD_DOMAIN        e.g. cloud.trina.app
+#   TDCLOUD_SLUG_LABEL    how many labels TDCLOUD_DOMAIN has (cloud.trina.app → 3): {labels.N} is then the slug
+#   TDCLOUD_ASK_URL       http://<control private IP>:8790/internal/caddy/ask?key=<TDCLOUD_CADDY_ASK_KEY>
+#   ACME_EMAIL            Let's Encrypt account contact
+#
+# TLS: on-demand (HTTP-01 / TLS-ALPN-01), one certificate per team name, issued only for names the control plane
+# says are live teams (`ask`). The wildcard alternative (DNS-01 on Route 53) is in cloud/README.md, "TLS".
+{
+	email {$ACME_EMAIL}
+	admin localhost:2019
+	order rate_limit before reverse_proxy
+	on_demand_tls {
+		ask {$TDCLOUD_ASK_URL}
+	}
+	servers {
+		# the Host header must name the certificate the client asked for (no SNI/Host mismatch tricks)
+		strict_sni_host on
+		protocols h1 h2
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+	}
+	log {
+		output stdout
+		format json
+	}
+}
+
+import /etc/caddy/team_routes.caddy
+
+*.{$TDCLOUD_DOMAIN} {
+	tls {
+		on_demand
+	}
+	import team_routes
+}

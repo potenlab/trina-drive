@@ -1,0 +1,11 @@
+# cp terraform.tfvars.example terraform.tfvars, then edit
+region      = "ap-northeast-2"
+domain      = "cloud.trina.app"
+mail_domain = "trina.app"
+acme_email  = "contact@trina.app"
+host_count  = 1
+# host_instance_type = "m7g.xlarge"
+# host_data_gb       = 500
+trina_image_tag   = "0.2.0"
+control_image_tag = "0.1.0"
+caddy_image_tag   = "2.10.2-1"

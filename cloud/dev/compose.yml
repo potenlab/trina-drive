@@ -1,0 +1,73 @@
+# Local Trina Cloud (cloud/dev/up.sh): the control plane and Caddy. Team containers are not in this file: the control
+# plane creates them (one per team, each on its own network) through the mounted Docker socket — the local driver.
+# Variables come from cloud/dev/.state/dev.env (written by up.sh).
+name: tdcloud-dev
+
+services:
+  control:
+    image: tdcloud-control:dev
+    container_name: tdc-control
+    restart: unless-stopped
+    environment:
+      TDCLOUD_STATE_DIR: ${TDCLOUD_STATE_DIR}
+      TDCLOUD_DOMAIN: ${TDCLOUD_DOMAIN}
+      TDCLOUD_PUBLIC_PORT: ${TDCLOUD_PUBLIC_PORT}
+      TDCLOUD_LISTEN_HOST: 0.0.0.0
+      TDCLOUD_DRIVER: local
+      TDCLOUD_IMAGE: ${TDCLOUD_IMAGE}
+      TDCLOUD_HELPER_IMAGE: tdcloud-control:dev
+      TDCLOUD_SECCOMP: /etc/tdcloud/seccomp-bwrap.json
+      TDCLOUD_APPARMOR: ${TDCLOUD_APPARMOR}
+      TDCLOUD_CADDY_CONTAINER: tdc-caddy
+      TDCLOUD_CADDY_ASK_KEY: ${TDCLOUD_CADDY_ASK_KEY}
+      TDCLOUD_TRUSTED_PROXIES: 10.250.250.10
+      TDCLOUD_OPS_EMAIL: ops@trina.test
+      TDCLOUD_MAIL_FROM: Trina Cloud (dev) <cloud@trina.test>
+      PADDLE_ENV: sandbox
+      PADDLE_WEBHOOK_SECRET: ${PADDLE_WEBHOOK_SECRET}
+      PADDLE_PRICE_TEAM_MONTHLY: pri_dev_team_monthly
+      PADDLE_PRICE_TEAM_YEARLY: pri_dev_team_yearly
+      PADDLE_PRICE_BUSINESS_MONTHLY: pri_dev_business_monthly
+      PADDLE_PRICE_BUSINESS_YEARLY: pri_dev_business_yearly
+    volumes:
+      # the local driver runs docker commands on this engine (root-equivalent: dev only, see the Dockerfile's dev target)
+      - /var/run/docker.sock:/var/run/docker.sock
+      # same absolute path inside and outside, because team backup staging is a bind mount made by this engine
+      - ${TDCLOUD_STATE_DIR}:${TDCLOUD_STATE_DIR}
+      - ../../docker/seccomp-bwrap.json:/etc/tdcloud/seccomp-bwrap.json:ro
+    networks:
+      control:
+        ipv4_address: 10.250.250.11
+
+  caddy:
+    image: tdcloud-caddy:dev
+    container_name: tdc-caddy
+    restart: unless-stopped
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile.dev", "--adapter", "caddyfile"]
+    environment:
+      TDCLOUD_DOMAIN: ${TDCLOUD_DOMAIN}
+      TDCLOUD_SLUG_LABEL: ${TDCLOUD_SLUG_LABEL}
+      TDCLOUD_ASK_URL: http://tdc-control:8790/internal/caddy/ask?key=${TDCLOUD_CADDY_ASK_KEY}
+    ports:
+      - "127.0.0.1:${TDCLOUD_PUBLIC_PORT}:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    networks:
+      control:
+        ipv4_address: 10.250.250.10
+
+networks:
+  control:
+    name: tdc-control
+    ipam:
+      config:
+        - subnet: 10.250.250.0/24
+
+volumes:
+  caddy-data:
+  caddy-config:

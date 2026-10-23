@@ -1,0 +1,26 @@
+#!/bin/bash
+# Trina Cloud first boot: write the instance's settings, fetch the bootstrap script from the artifacts bucket, run it.
+set -euo pipefail
+mkdir -p /etc/tdcloud
+cat > /etc/tdcloud/host.conf <<'CONF'
+ROLE=${role}
+REGION=${region}
+ARTIFACTS_BUCKET=${artifacts_bucket}
+BACKUP_BUCKET=${backup_bucket}
+ECR_REGISTRY=${ecr_registry}
+TRINA_IMAGE=${trina_image}
+CONTROL_IMAGE=${control_image}
+CADDY_IMAGE=${caddy_image}
+DOMAIN=${domain}
+ACME_EMAIL=${acme_email}
+VPC_CIDR=${vpc_cidr}
+EIP_POOL=hosts
+CONTROL_PRIVATE_IP=${control_private_ip}
+CONTROL_ENV_PARAM=${control_env_param}
+CADDY_ASK_KEY_PARAM=${ask_key_param}
+CONF
+chmod 0644 /etc/tdcloud/host.conf
+snap install aws-cli --classic
+/snap/bin/aws s3 cp --region ${region} s3://${artifacts_bucket}/host/bootstrap.sh /usr/local/sbin/tdcloud-bootstrap
+chmod 0755 /usr/local/sbin/tdcloud-bootstrap
+/usr/local/sbin/tdcloud-bootstrap

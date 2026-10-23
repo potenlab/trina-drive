@@ -1,0 +1,285 @@
+// HTTP for the control plane (Bun.serve, behind Caddy): server-rendered pages for people (sign up, confirm email,
+// sign in, dashboard with Paddle checkout), a JSON API with the same operations (/api/*, used by the landing page and
+// the end-to-end test), the Paddle webhook, and two internal endpoints for Caddy and Prometheus.
+import { CloudError, type Cloud } from './cloud'
+import { teamByPublicId, type TeamRow } from './db'
+import { PADDLE_IPS, summarize, verifyPaddle, type PaddleEvent } from './paddle'
+import { suggestSlug } from './slug'
+import { iso, now, timingSafeEqualStr } from './util'
+
+const COOKIE = 'tdcloud_session'
+const MAX_BODY = 64 * 1024
+
+const CSP = [
+  "default-src 'self'", "script-src 'self' https://cdn.paddle.com", "style-src 'self' 'unsafe-inline' https://cdn.paddle.com https://sandbox-cdn.paddle.com",
+  "img-src 'self' data: https://cdn.paddle.com https://sandbox-cdn.paddle.com", "frame-src https://buy.paddle.com https://sandbox-buy.paddle.com",
+  "connect-src 'self' https://api.paddle.com https://sandbox-api.paddle.com", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'",
+].join('; ')
+const HEADERS: Record<string, string> = {
+  'content-security-policy': CSP, 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY',
+  'strict-transport-security': 'max-age=31536000; includeSubDomains', 'cross-origin-opener-policy': 'same-origin-allow-popups',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(self "https://buy.paddle.com" "https://sandbox-buy.paddle.com")',
+}
+
+export class RateLimit {
+  constructor(private readonly cloud: Cloud) {}
+  /** true = allowed (and counted) */
+  hit(key: string, limit: number, windowMs: number): boolean {
+    const db = this.cloud.db, t = now()
+    const r = db.query<{ count: number; reset_at: number }, [string]>('SELECT count, reset_at FROM rate WHERE key = ?').get(key)
+    if (!r || r.reset_at <= t) { db.query('INSERT INTO rate (key, count, reset_at) VALUES (?, 1, ?) ON CONFLICT (key) DO UPDATE SET count = 1, reset_at = excluded.reset_at').run(key, t + windowMs); return true }
+    if (r.count >= limit) return false
+    db.query('UPDATE rate SET count = count + 1 WHERE key = ?').run(key)
+    return true
+  }
+}
+
+const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+
+function page(title: string, body: string, opts: { paddle?: boolean } = {}) {
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)} · Trina Cloud</title><link rel="stylesheet" href="/static/app.css">${opts.paddle ? '<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script><script src="/static/checkout.js" defer></script>' : ''}</head>
+<body><main><p class="brand"><a href="/">Trina Cloud</a></p>${body}</main></body></html>`, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
+}
+
+const CSS = `:root{color-scheme:light dark;--ink:#0a0b0d;--paper:#fbfaf7;--accent:#ff5b1f;--muted:#6b6f76;--line:#e3e1dc}
+@media (prefers-color-scheme:dark){:root{--ink:#f2f1ee;--paper:#111214;--muted:#a2a5ab;--line:#2a2c30}}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 system-ui,sans-serif}main{max-width:640px;margin:0 auto;padding:32px 16px}
+.brand a{font-weight:700;color:var(--ink);text-decoration:none}h1{font-size:28px;margin:16px 0}label{display:block;margin:12px 0}
+input,select{display:block;width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit;font:inherit}
+button,.btn{display:inline-block;padding:10px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
+button.plain{background:transparent;color:var(--ink);border:1px solid var(--line)}.muted{color:var(--muted)}.err{color:#d12}.card{border:1px solid var(--line);border-radius:12px;padding:16px;margin:16px 0}
+code{font-family:ui-monospace,monospace}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}`
+
+const CHECKOUT_JS = `(() => {
+  const cfg = document.getElementById('paddle-config'); if (!cfg || !window.Paddle) return
+  const d = cfg.dataset
+  if (d.env === 'sandbox') Paddle.Environment.set('sandbox')
+  Paddle.Initialize({ token: d.token })
+  for (const b of document.querySelectorAll('[data-price]')) b.addEventListener('click', () => Paddle.Checkout.open({
+    items: [{ priceId: b.dataset.price, quantity: 1 }], customer: { email: d.email },
+    customData: { tdcloud_team: b.dataset.team }, settings: { successUrl: d.success },
+  }))
+})()`
+
+interface Req { req: Request; url: URL; ip: string; cookie?: string }
+
+export function makeHandler(cloud: Cloud) {
+  const rl = new RateLimit(cloud)
+  const cfg = cloud.cfg
+  const controlOrigin = new URL(cfg.controlUrl).origin
+
+  const clientIp = (req: Request, peer: string | undefined) => {
+    const p = peer ?? 'unknown'
+    if (!cfg.trustedProxies.includes(p) && !cfg.trustedProxies.includes('*')) return p
+    return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || p
+  }
+  const readCookie = (req: Request) => {
+    for (const part of (req.headers.get('cookie') ?? '').split(';')) {
+      const i = part.indexOf('=')
+      if (i > 0 && part.slice(0, i).trim() === COOKIE) return part.slice(i + 1).trim()
+    }
+    return undefined
+  }
+  const sameOrigin = (req: Request) => {
+    const o = req.headers.get('origin')
+    if (o) return o === controlOrigin
+    const site = req.headers.get('sec-fetch-site')
+    return !site || site === 'same-origin' || site === 'none'
+  }
+  async function form(req: Request): Promise<Record<string, string>> {
+    const len = Number(req.headers.get('content-length') ?? 0)
+    if (len > MAX_BODY) throw new CloudError('too_large', 'request too large', 413)
+    const text = await req.text()
+    if (text.length > MAX_BODY) throw new CloudError('too_large', 'request too large', 413)
+    const ct = req.headers.get('content-type') ?? ''
+    if (ct.includes('application/json')) { try { const v = JSON.parse(text || '{}'); return v && typeof v === 'object' ? v : {} } catch { throw new CloudError('bad_json', 'bad JSON') } }
+    return Object.fromEntries(new URLSearchParams(text))
+  }
+  const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } })
+  const redirect = (to: string, headers: Record<string, string> = {}) => new Response(null, { status: 303, headers: { location: to, ...headers } })
+  const setCookie = (v: string, maxAge: number) => `${COOKIE}=${v}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${cfg.controlUrl.startsWith('https://') ? '; Secure' : ''}`
+  const limited = (r: Req, key: string, limit: number, windowMs: number) => {
+    if (!rl.hit(`${key}:${r.ip}`, limit, windowMs)) throw new CloudError('rate_limited', 'too many attempts; try again later', 429)
+  }
+  const internalOk = (r: Req) => {
+    const key = r.url.searchParams.get('key') ?? ''
+    if (cfg.caddyAskKey) return timingSafeEqualStr(key, cfg.caddyAskKey)
+    return r.ip === '127.0.0.1' || r.ip === '::1' || cfg.trustedProxies.includes(r.ip)
+  }
+
+  function teamCard(t: TeamRow, csrf: string) {
+    const url = cloud.url(t)
+    const status: Record<string, string> = {
+      pending_payment: 'waiting for payment', provisioning: 'starting (a minute or two; the setup link comes by email)', active: 'running',
+      past_due: `running — payment failed, paused on ${iso(t.grace_until)} unless paid`, suspended: `paused (${t.suspend_reason ?? ''})`,
+      deleting: 'being deleted', failed: 'could not start — we have been alerted', deleted: 'deleted',
+    }
+    const buy = t.status === 'pending_payment' || (t.status === 'suspended' && t.sub_status === 'canceled')
+    const prices = (['monthly', 'yearly'] as const).map((c) => [c, cfg.paddle.checkout[`${t.plan as 'team' | 'business'}_${c}`]] as const).filter(([, p]) => p)
+    return `<div class="card"><h2>${esc(t.name)}</h2><p><code>${esc(url)}</code></p><p class="muted">${esc(t.plan)} plan · ${esc(status[t.status] ?? t.status)}</p>
+${buy ? (prices.length && cfg.paddle.clientToken ? `<div class="row">${prices.map(([c, p]) => `<button type="button" data-price="${esc(p)}" data-team="${esc(t.public_id)}">Subscribe ${c}</button>`).join('')}</div>` : `<p class="muted">Checkout is not configured here; write to ${esc(cfg.opsEmail)}.</p>`) : ''}
+${['active', 'past_due'].includes(t.status) ? `<div class="row"><a class="btn" href="${esc(url)}/">Open</a><form method="post" action="/teams/${esc(t.public_id)}/resend-setup"><input type="hidden" name="csrf" value="${esc(csrf)}"><button class="plain">Mail the setup link again</button></form></div>` : ''}</div>`
+  }
+
+  async function route(r: Req): Promise<Response> {
+    const { req, url } = r
+    const p = url.pathname, m = req.method
+    const s = cloud.session(r.cookie)
+    const signedIn = () => { if (!s) throw new CloudError('signed_out', 'sign in first', 401); return s }
+    const csrfOk = (b: Record<string, string>) => { if (!s || !b.csrf && !req.headers.get('x-csrf-token') || !timingSafeEqualStr(b.csrf ?? req.headers.get('x-csrf-token') ?? '', s.csrf)) throw new CloudError('bad_csrf', 'reload the page and try again', 403) }
+    if (m === 'POST' && !p.startsWith('/paddle/') && !sameOrigin(req)) throw new CloudError('bad_origin', 'cross-site request refused', 403)
+
+    // ---- static, health, internal
+    if (p === '/static/app.css') return new Response(CSS, { headers: { 'content-type': 'text/css', 'cache-control': 'public, max-age=3600' } })
+    if (p === '/static/checkout.js') return new Response(CHECKOUT_JS, { headers: { 'content-type': 'text/javascript', 'cache-control': 'public, max-age=3600' } })
+    if (p === '/healthz') return json({ ok: true })
+    if (p === '/internal/caddy/ask') {
+      if (!internalOk(r)) return new Response('forbidden', { status: 403 })
+      return new Response(null, { status: cloud.hostAllowed(url.searchParams.get('domain') ?? '') ? 200 : 404 })
+    }
+    if (p === '/internal/metrics') {
+      if (!internalOk(r)) return new Response('forbidden', { status: 403 })
+      return new Response(metrics(cloud), { headers: { 'content-type': 'text/plain; version=0.0.4' } })
+    }
+
+    // ---- Paddle
+    if (p === '/paddle/webhook' && m === 'POST') return paddleWebhook(r)
+
+    // ---- JSON API
+    if (p === '/api/signup' && m === 'POST') { limited(r, 'signup', 10, 3600_000); const b = await form(req); await cloud.signup(b.email, b.password); return json({ ok: true, next: 'check your email' }) }
+    if (p === '/api/verify' && m === 'POST') { limited(r, 'verify', 30, 3600_000); const b = await form(req); cloud.verifyEmail(b.token); return json({ ok: true }) }
+    if (p === '/api/login' && m === 'POST') {
+      limited(r, 'login', 30, 900_000)
+      const b = await form(req)
+      if (!rl.hit(`login-email:${String(b.email ?? '').toLowerCase()}`, 10, 900_000)) throw new CloudError('rate_limited', 'too many attempts; try again later', 429)
+      const l = await cloud.login(b.email, b.password)
+      return json({ ok: true, csrf: l.csrf }, 200, { 'set-cookie': setCookie(l.cookie, 7 * 86400) })
+    }
+    if (p === '/api/teams' && m === 'GET') { const u = signedIn(); return json({ teams: cloud.teamsOf(u.userId).map((t) => publicTeam(cloud, t)) }) }
+    if (p === '/api/teams' && m === 'POST') {
+      const u = signedIn(); const b = await form(req); csrfOk(b)
+      return json({ team: publicTeam(cloud, await cloud.createTeam(u.userId, b.name, b.slug, b.plan)) }, 201)
+    }
+
+    // ---- pages
+    if (p === '/' && m === 'GET') return s ? redirect('/dashboard') : page('Your team\'s Trina Drive, hosted', `<h1>Your team's Trina Drive, hosted.</h1>
+<p>Your own isolated Trina Drive at <code>your-team.${esc(cfg.domain)}</code>, with HTTPS, so Claude and ChatGPT connectors work right away.</p>
+<p class="row"><a class="btn" href="/signup">Create an account</a> <a href="/login">Sign in</a></p>`)
+    if (p === '/signup' && m === 'GET') return page('Create an account', `<h1>Create an account</h1><form method="post" action="/signup">
+<label>Work email<input type="email" name="email" required autocomplete="email"></label>
+<label>Password (10+ characters)<input type="password" name="password" required minlength="10" autocomplete="new-password"></label><button>Create account</button></form>
+<p class="muted">Already have one? <a href="/login">Sign in</a></p>`)
+    if (p === '/signup' && m === 'POST') {
+      limited(r, 'signup', 10, 3600_000)
+      const b = await form(req)
+      try { await cloud.signup(b.email, b.password) } catch (e) { if (e instanceof CloudError) return page('Create an account', `<h1>Create an account</h1><p class="err">${esc(e.message)}</p><p><a href="/signup">Back</a></p>`); throw e }
+      return page('Check your email', `<h1>Check your email</h1><p>We sent a confirmation link to <b>${esc(b.email)}</b>.</p>`)
+    }
+    if (p === '/verify' && m === 'GET') {
+      // the link only shows a button: mail scanners that fetch links must not use it up
+      return page('Confirm your email', `<h1>Confirm your email</h1><form method="post" action="/verify"><input type="hidden" name="token" value="${esc(url.searchParams.get('token') ?? '')}"><button>Confirm</button></form>`)
+    }
+    if (p === '/verify' && m === 'POST') {
+      limited(r, 'verify', 30, 3600_000)
+      const b = await form(req)
+      try { cloud.verifyEmail(b.token) } catch (e) { if (e instanceof CloudError) return page('Confirm your email', `<h1>That link did not work</h1><p class="err">${esc(e.message)}</p>`); throw e }
+      return redirect('/login?verified=1')
+    }
+    if (p === '/login' && m === 'GET') return page('Sign in', `<h1>Sign in</h1>${url.searchParams.get('verified') ? '<p>Email confirmed. Sign in to create your team.</p>' : ''}<form method="post" action="/login">
+<label>Email<input type="email" name="email" required autocomplete="email"></label><label>Password<input type="password" name="password" required autocomplete="current-password"></label><button>Sign in</button></form>`)
+    if (p === '/login' && m === 'POST') {
+      limited(r, 'login', 30, 900_000)
+      const b = await form(req)
+      try {
+        if (!rl.hit(`login-email:${String(b.email ?? '').toLowerCase()}`, 10, 900_000)) throw new CloudError('rate_limited', 'too many attempts; try again later', 429)
+        const l = await cloud.login(b.email, b.password)
+        return redirect('/dashboard', { 'set-cookie': setCookie(l.cookie, 7 * 86400) })
+      } catch (e) { if (e instanceof CloudError) return page('Sign in', `<h1>Sign in</h1><p class="err">${esc(e.message)}</p><p><a href="/login">Try again</a></p>`); throw e }
+    }
+    if (p === '/logout' && m === 'POST') { if (s) { const b = await form(req); csrfOk(b); cloud.logout(s.idHash) } return redirect('/', { 'set-cookie': setCookie('', 0) }) }
+    if (p === '/dashboard' && m === 'GET') {
+      if (!s) return redirect('/login')
+      const teams = cloud.teamsOf(s.userId)
+      const pc = cfg.paddle
+      return page('Dashboard', `<h1>Your teams</h1>${url.searchParams.get('paid') ? '<p>Thanks! Your workspace is starting; the setup link arrives by email in a minute or two.</p>' : ''}
+${s.verified ? '' : '<p class="err">Confirm your email address first (check your inbox).</p>'}
+${teams.map((t) => teamCard(t, s.csrf)).join('') || '<p class="muted">No team yet.</p>'}
+<div class="card"><h2>New team</h2><form method="post" action="/teams"><input type="hidden" name="csrf" value="${esc(s.csrf)}">
+<label>Company or team name<input name="name" required maxlength="80"></label>
+<label>Address<input name="slug" required pattern="[a-z0-9](?:[a-z0-9-]{1,30})[a-z0-9]" placeholder="acme"><span class="muted">https://<i>address</i>.${esc(cfg.domain)}</span></label>
+<label>Plan<select name="plan"><option value="team">Team</option><option value="business">Business</option></select></label><button>Create</button></form></div>
+<form method="post" action="/logout"><input type="hidden" name="csrf" value="${esc(s.csrf)}"><button class="plain">Sign out (${esc(s.email)})</button></form>
+<div id="paddle-config" data-env="${esc(pc.env)}" data-token="${esc(pc.clientToken)}" data-email="${esc(s.email)}" data-success="${esc(cfg.controlUrl)}/dashboard?paid=1" hidden></div>`, { paddle: !!pc.clientToken })
+    }
+    if (p === '/teams' && m === 'POST') {
+      const u = signedIn(); const b = await form(req); csrfOk(b)
+      try { await cloud.createTeam(u.userId, b.name, b.slug || suggestSlug(b.name ?? ''), b.plan) } catch (e) {
+        if (e instanceof CloudError) return page('New team', `<h1>New team</h1><p class="err">${esc(e.message)}</p><p><a href="/dashboard">Back</a></p>`)
+        throw e
+      }
+      return redirect('/dashboard')
+    }
+    const resend = /^\/teams\/(team_[0-9a-f]{20})\/resend-setup$/.exec(p)
+    if (resend && m === 'POST') {
+      const u = signedIn(); const b = await form(req); csrfOk(b)
+      limited(r, 'resend', 5, 3600_000)
+      const t = teamByPublicId(cloud.db, resend[1]!)
+      if (!t || t.owner_user_id !== u.userId) throw new CloudError('not_found', 'not found', 404)
+      try { await cloud.resendSetup(t, `user:${u.userId}`) } catch (e) { if (e instanceof CloudError) return page('Setup link', `<p class="err">${esc(e.message)}</p><p><a href="/dashboard">Back</a></p>`); throw e }
+      return page('Setup link', `<p>A new setup link is on its way to your inbox. The old one no longer works.</p><p><a href="/dashboard">Back</a></p>`)
+    }
+    throw new CloudError('not_found', 'not found', 404)
+  }
+
+  async function paddleWebhook(r: Req): Promise<Response> {
+    const pc = cfg.paddle
+    if (pc.checkIp && !PADDLE_IPS[pc.env].includes(r.ip)) { cloud.log(`paddle webhook from ${r.ip} refused (not a Paddle address)`); return new Response('forbidden', { status: 403 }) }
+    const raw = await r.req.text()
+    if (raw.length > 1024 * 1024) return new Response('too large', { status: 413 })
+    const v = verifyPaddle({ rawBody: raw, header: r.req.headers.get('paddle-signature'), secret: pc.webhookSecret, toleranceSec: pc.toleranceSec })
+    if (!v.ok) { cloud.log(`paddle webhook signature rejected: ${v.reason}`); return new Response('invalid signature', { status: 401 }) }
+    let e: PaddleEvent
+    try { e = JSON.parse(raw) } catch { return new Response('bad json', { status: 400 }) }
+    if (!e?.event_id || !e?.event_type || !e.occurred_at) return new Response('bad event', { status: 400 })
+    const sum = summarize(e)
+    const fresh = cloud.db.query('INSERT OR IGNORE INTO paddle_events (event_id, event_type, occurred_at, received_at, subscription_id, outcome) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(sum.eventId, sum.type, sum.occurredAt, now(), sum.subscriptionId, 'received').changes === 1
+    if (!fresh) return new Response('duplicate', { status: 200 })
+    const outcome = cloud.applyPaddle(sum)
+    cloud.db.query('UPDATE paddle_events SET outcome = ? WHERE event_id = ?').run(outcome, sum.eventId)
+    cloud.log(`paddle ${sum.type} ${sum.subscriptionId ?? ''} → ${outcome}`)
+    return new Response('ok', { status: 200 })
+  }
+
+  return async function handle(req: Request, peer: string | undefined): Promise<Response> {
+    const url = new URL(req.url)
+    const r: Req = { req, url, ip: clientIp(req, peer), cookie: readCookie(req) }
+    let res: Response
+    try { res = await route(r) } catch (e) {
+      const wantsJson = url.pathname.startsWith('/api/') || (req.headers.get('accept') ?? '').includes('application/json')
+      if (e instanceof CloudError) res = wantsJson ? json({ error: e.code, message: e.message }, e.status) : page('Error', `<p class="err">${esc(e.message)}</p><p><a href="/">Home</a></p>`)
+      else { cloud.log(`${req.method} ${url.pathname} failed: ${(e as Error).stack ?? e}`); res = json({ error: 'internal' }, 500) }
+      if (e instanceof CloudError && !wantsJson) res = new Response(res.body, { status: e.status, headers: res.headers })
+    }
+    for (const [k, v] of Object.entries(HEADERS)) if (!res.headers.has(k)) res.headers.set(k, v)
+    return res
+  }
+}
+
+export function publicTeam(cloud: Cloud, t: TeamRow) {
+  return { id: t.public_id, slug: t.slug, name: t.name, plan: t.plan, status: t.status, url: cloud.url(t), mcp: `${cloud.url(t)}/mcp`, grace_until: t.grace_until ? iso(t.grace_until) : null }
+}
+
+export function metrics(cloud: Cloud): string {
+  const lines = ['# HELP tdcloud_teams Teams by status', '# TYPE tdcloud_teams gauge']
+  for (const r of cloud.db.query<{ status: string; n: number }, []>('SELECT status, count(*) AS n FROM teams GROUP BY status').all()) lines.push(`tdcloud_teams{status="${r.status}"} ${r.n}`)
+  lines.push('# HELP tdcloud_team_disk_bytes Disk used by a team volume', '# TYPE tdcloud_team_disk_bytes gauge')
+  for (const t of cloud.db.query<{ slug: string; disk_bytes: number | null; plan: string }, []>("SELECT slug, disk_bytes, plan FROM teams WHERE status IN ('active', 'past_due') AND disk_bytes IS NOT NULL").all()) lines.push(`tdcloud_team_disk_bytes{team="${t.slug}",plan="${t.plan}"} ${t.disk_bytes}`)
+  lines.push('# HELP tdcloud_jobs_pending Jobs waiting', '# TYPE tdcloud_jobs_pending gauge', `tdcloud_jobs_pending ${cloud.db.query<{ n: number }, []>('SELECT count(*) AS n FROM jobs WHERE done_at IS NULL').get()!.n}`)
+  lines.push('# HELP tdcloud_jobs_failed_total Jobs that gave up', '# TYPE tdcloud_jobs_failed_total counter', `tdcloud_jobs_failed_total ${cloud.db.query<{ n: number }, []>('SELECT count(*) AS n FROM jobs WHERE done_at IS NOT NULL AND last_error IS NOT NULL AND attempts >= 5').get()!.n}`)
+  lines.push('# HELP tdcloud_last_backup_age_seconds Age of each team\'s newest backup', '# TYPE tdcloud_last_backup_age_seconds gauge')
+  for (const t of cloud.db.query<{ slug: string; last_backup_at: number | null }, []>("SELECT slug, last_backup_at FROM teams WHERE status IN ('active', 'past_due')").all()) lines.push(`tdcloud_last_backup_age_seconds{team="${t.slug}"} ${t.last_backup_at ? Math.round((now() - t.last_backup_at) / 1000) : -1}`)
+  return lines.join('\n') + '\n'
+}

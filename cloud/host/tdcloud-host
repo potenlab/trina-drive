@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Trina Cloud host agent. Installed at /usr/local/sbin/tdcloud-host by bootstrap.sh; called by the control plane
+# through SSM Run Command (as root). Only the host-specific steps live here; the docker commands themselves come from
+# the control plane (cloud/control/src/drivers/docker.ts), identical to the local driver.
+#
+#   tdcloud-host prepare <slug> <uid> <disk-gb> <ssm-parameter>   team directory, XFS project quota, env file (0600)
+#   tdcloud-host cleanup <slug>                                   remove the quota and the team directory
+#   tdcloud-host ship <slug> <s3://bucket/prefix/> <file>...      upload backup files from staging, print JSON lines
+#   tdcloud-host info                                             JSON: instance, Elastic IP, free space, teams
+set -euo pipefail
+export PATH=$PATH:/usr/local/sbin:/snap/bin
+ROOT=/srv/tdcloud
+TEAMS=$ROOT/teams
+umask 077
+
+die() { echo "tdcloud-host: $*" >&2; exit 1; }
+slug_ok() { [[ $1 =~ ^[a-z0-9]([a-z0-9-]{1,30})[a-z0-9]$ ]] || die "bad slug $1"; }
+imds() { # path
+  local t; t=$(curl -sf -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
+  curl -sf -H "X-aws-ec2-metadata-token: $t" "http://169.254.169.254/latest/$1" || true
+}
+region() { imds meta-data/placement/region; }
+
+cmd=${1:-}; shift || true
+case $cmd in
+  prepare)
+    [ $# -eq 4 ] || die "usage: prepare <slug> <uid> <disk-gb> <ssm-parameter>"
+    slug=$1 uid=$2 gb=$3 param=$4
+    slug_ok "$slug"
+    [[ $uid =~ ^[0-9]{5,7}$ ]] || die "bad uid"
+    [[ $gb =~ ^[0-9]{1,5}$ ]] || die "bad size"
+    [[ $param =~ ^/[A-Za-z0-9/_.-]+$ ]] || die "bad parameter name"
+    dir=$TEAMS/$slug
+    mkdir -p "$dir/data" "$dir/staging"
+    chmod 0711 "$dir"
+    # XFS project quota: project id = the team's uid; everything under $dir counts (data and backup staging)
+    grep -q "^$uid:" /etc/projects 2>/dev/null || echo "$uid:$dir" >> /etc/projects
+    grep -q "^tdc-$slug:" /etc/projid 2>/dev/null || echo "tdc-$slug:$uid" >> /etc/projid
+    xfs_quota -x -c "project -s -p $dir $uid" "$ROOT" >/dev/null
+    xfs_quota -x -c "limit -p bhard=${gb}g bsoft=$((gb * 1024 * 9 / 10))m $uid" "$ROOT"
+    chown "$uid:$uid" "$dir/data" "$dir/staging"
+    chmod 0700 "$dir/data" "$dir/staging"
+    # the team's env file: root-only, read by the docker CLI at `docker run/create --env-file`
+    aws ssm get-parameter --region "$(region)" --with-decryption --name "$param" --query Parameter.Value --output text > "$dir/env.tmp"
+    chmod 0600 "$dir/env.tmp" && mv "$dir/env.tmp" "$dir/env"
+    echo "prepared $dir (uid $uid, quota ${gb}G)"
+    ;;
+  cleanup)
+    [ $# -eq 1 ] || die "usage: cleanup <slug>"
+    slug=$1; slug_ok "$slug"
+    dir=$TEAMS/$slug
+    uid=$(awk -F: -v d="$dir" '$2 == d {print $1}' /etc/projects | head -1)
+    if [ -n "$uid" ]; then
+      xfs_quota -x -c "limit -p bhard=0 bsoft=0 $uid" "$ROOT" || true
+      sed -i "\#^$uid:$dir\$#d" /etc/projects
+      sed -i "/^tdc-$slug:/d" /etc/projid
+    fi
+    rm -rf --one-file-system "$dir"
+    echo "removed $dir"
+    ;;
+  ship)
+    [ $# -ge 3 ] || die "usage: ship <slug> <s3://bucket/prefix/> <file>..."
+    slug=$1 dest=$2; shift 2
+    slug_ok "$slug"
+    [[ $dest =~ ^s3://[a-z0-9.-]+/[A-Za-z0-9/._-]*/$ ]] || die "bad destination"
+    for name in "$@"; do
+      [[ $name =~ ^[A-Za-z0-9._-]+$ ]] || die "bad file name"
+      f=$TEAMS/$slug/staging/$name
+      [ -f "$f" ] || die "no $f"
+      sha=$(sha256sum "$f" | cut -d' ' -f1)
+      bytes=$(stat -c %s "$f")
+      # the bucket's default encryption is SSE-KMS; the object is already encrypted to the team's keys
+      aws s3 cp --region "$(region)" --only-show-errors --sse aws:kms "$f" "$dest$name"
+      rm -f "$f"
+      printf '{"name":"%s","bytes":%s,"sha256":"%s","key":"%s"}\n' "$name" "$bytes" "$sha" "${dest#s3://*/}$name"
+    done
+    ;;
+  info)
+    ip=$(imds meta-data/public-ipv4)
+    free=$(df -B1 --output=avail "$ROOT" | tail -1 | tr -d ' ')
+    teams=$(find "$TEAMS" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+    printf '{"instanceId":"%s","publicIp":%s,"freeBytes":%s,"teams":%s}\n' "$(imds meta-data/instance-id)" "$([ -n "$ip" ] && echo "\"$ip\"" || echo null)" "$free" "$teams"
+    ;;
+  *) sed -n '2,10p' "$0"; exit 2 ;;
+esac
