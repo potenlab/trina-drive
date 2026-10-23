@@ -18,10 +18,15 @@ import { approveVersion, designate, folderRowAt, libraries, pendingOf, scan } fr
 import { createSession, hashPassword } from '../../src/web/auth'
 import { OutboxMailer } from '../../src/web/mail'
 import { makeWebCtx, serveWeb } from '../../src/web/server'
+import { setInviteHandler } from '../../src/share/invite'
+import { applyShareInvites } from '../../src/share/invites'
+import { reconcileMyFiles } from '../../src/tdcloud/my-files'
 
 const PASSWORD = 'correct horse battery'
-// --cloud: Trina Cloud mode, SSO only (src/tdcloud): mina and sam come from the console (no password here; their
-// sessions are made directly and printed), boss and the others keep a password. Console at http://console.test.
+// --cloud: Trina Cloud mode, SSO only (src/tdcloud): mina and sam come from the console and have My files; invitations
+// by mail are recorded (GET <hooks>/invited) and POST <hooks>/join {email, name} lets an invited address join as a
+// console member (pending shares applied, a session cookie answered). mina and sam: no password here; their
+// sessions are made directly and printed; boss and the others keep a password. Console at http://console.test.
 const CLOUD = process.argv.includes('--cloud')
 if (CLOUD) {
   const { publicKey } = crypto.generateKeyPairSync('ed25519')
@@ -102,12 +107,37 @@ await fetch(`${base}/api/files/upload?path=${encodeURIComponent('/Skills/proposa
 scan(db, dir)
 
 const sessions: Record<string, string> = {}
+let hooks: string | null = null
 if (CLOUD) {
   for (const n of ['mina', 'sam']) {
     db.query('UPDATE accounts SET cloud_user = ?, password_hash = NULL WHERE person_id = ?').run(`usr_${n}`, pid(n))
     sessions[n] = createSession(db, pid(n)).cookie
   }
+  // My files (workstream B2): the member sync makes one per console member; here once, at the start
+  reconcileMyFiles(db, dir)
+  // S16: the console's invite flow, stood in for (no console here): the address is "invited", the person arrives later
+  const invited: string[] = []
+  setInviteHandler(async (_w, req) => { invited.push(req.email); return { status: 'invited' } })
+  // …and arrives through this hook, as the member sync would: an active console member, pending shares applied, My files made
+  const hook = Bun.serve({
+    port: 0, hostname: '127.0.0.1',
+    async fetch(req) {
+      const u = new URL(req.url)
+      if (u.pathname === '/invited') return Response.json({ invited })
+      if (u.pathname === '/join' && req.method === 'POST') {
+        const { email, name } = (await req.json()) as { email: string; name: string }
+        const p = addPerson(db, name, false)
+        addMember(db, '전체', name)
+        db.query('INSERT INTO accounts (person_id, email, password_hash, created_at, cloud_user) VALUES (?, ?, NULL, ?, ?)').run(p.id, email, Date.now(), `usr_${name}`)
+        const applied = applyShareInvites(db, p.id, email)
+        reconcileMyFiles(db, dir, { only: p.id })
+        return Response.json({ applied, cookie: createSession(db, p.id).cookie })
+      }
+      return new Response('not found', { status: 404 })
+    },
+  })
+  hooks = `http://127.0.0.1:${hook.port}`
 }
-console.log(JSON.stringify({ base, dir, password: PASSWORD, sessions }))
+console.log(JSON.stringify({ base, dir, password: PASSWORD, sessions, hooks }))
 process.on('SIGTERM', () => { server.stop(true); fs.rmSync(dir, { recursive: true, force: true }); process.exit(0) })
 process.on('SIGINT', () => { server.stop(true); fs.rmSync(dir, { recursive: true, force: true }); process.exit(0) })
