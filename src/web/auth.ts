@@ -6,6 +6,7 @@ import type { DB } from '../db'
 import { SECRET_TAG } from '../config'
 import { sha256 } from '../store'
 import { ensureWebSchema, metaGet, metaSet } from './schema'
+import { cloudConfig } from '../tdcloud/config'
 
 export const SESSION_COOKIE = `${SECRET_TAG}_session` // src/client/mcp.ts reads it too
 export const SESSION_IDLE_MS = 12 * 3600_000
@@ -60,13 +61,16 @@ export async function setPassword(db: DB, personId: number, pw: string) {
 // ---------- sessions ----------
 export interface WebSession { idHash: string; personId: number; csrf: string; name: string; admin: boolean }
 
-/** A fresh session id every time (never reuses one the browser brought: no session fixation). */
-export function createSession(db: DB, personId: number, userAgent?: string): { cookie: string; csrf: string } {
+/**
+ * A fresh session id every time (never reuses one the browser brought: no session fixation). `authAt`: when the person
+ * last proved who they are, if not now (a Trina Cloud sign-in: the console password may have been typed hours ago).
+ */
+export function createSession(db: DB, personId: number, userAgent?: string, authAt?: number): { cookie: string; csrf: string; idHash: string } {
   ensureWebSchema(db)
   const cookie = random(32), csrf = random(24), t = now()
-  db.query('INSERT INTO web_sessions (id_hash, person_id, csrf, created_at, last_seen_at, expires_at, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(sha256(cookie), personId, csrf, t, t, t + SESSION_MAX_MS, userAgent?.slice(0, 200) ?? null)
-  return { cookie, csrf }
+  db.query('INSERT INTO web_sessions (id_hash, person_id, csrf, created_at, last_seen_at, expires_at, user_agent, auth_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(sha256(cookie), personId, csrf, t, t, t + SESSION_MAX_MS, userAgent?.slice(0, 200) ?? null, authAt ?? null)
+  return { cookie, csrf, idHash: sha256(cookie) }
 }
 
 export function lookupSession(db: DB, cookie: string | undefined): WebSession | null {
@@ -99,11 +103,15 @@ export function markReauth(db: DB, idHash: string) {
   ensureWebSchema(db)
   db.query('INSERT INTO web_reauth (id_hash, at) VALUES (?, ?) ON CONFLICT (id_hash) DO UPDATE SET at = excluded.at').run(idHash, now())
 }
-/** The session was made by typing the password (sign-in, setup, invite/reset) or the password was typed again, within FRESH_LOGIN_MS. */
+/**
+ * The session was made by typing the password (sign-in, setup, invite/reset) or the password was typed again (or a
+ * passkey / authenticator code, or a Trina Cloud re-authentication), within FRESH_LOGIN_MS. A session made by Trina
+ * Cloud sign-in counts from the console's auth_time, not from when it was made.
+ */
 export function freshLogin(db: DB, idHash: string): boolean {
   ensureWebSchema(db)
   const r = db.query<{ at: number }, [string, string]>(
-    'SELECT max(coalesce((SELECT created_at FROM web_sessions WHERE id_hash = ?), 0), coalesce((SELECT at FROM web_reauth WHERE id_hash = ?), 0)) AS at').get(idHash, idHash)
+    'SELECT max(coalesce((SELECT coalesce(auth_at, created_at) FROM web_sessions WHERE id_hash = ?), 0), coalesce((SELECT at FROM web_reauth WHERE id_hash = ?), 0)) AS at').get(idHash, idHash)
   return !!r && now() - r.at < FRESH_LOGIN_MS
 }
 
@@ -143,27 +151,33 @@ export function consumeLink(db: DB, kind: LinkKind, secret: unknown): number | n
 // ---------- the one-time setup token (printed by `init`) ----------
 export const SETUP_PREFIX = `${SECRET_TAG}_setup_`
 
-/** Issue (or replace) the setup token. Only possible while no admin can sign in on the web. */
+/** Issue (or replace) the setup token. Only possible while no admin can sign in on the web (never under TDRIVE_SSO_ONLY). */
 export function issueSetupToken(db: DB): string | null {
   ensureWebSchema(db)
-  if (setupDone(db)) return null
+  if (setupDone(db) || cloudConfig(db)?.ssoOnly) return null
   const secret = SETUP_PREFIX + random(24)
   metaSet(db, 'web_setup_token', JSON.stringify({ hash: sha256(secret), expires: now() + SETUP_TTL_MS }))
   return secret
 }
+/**
+ * An admin can sign in. Self-hosted: an active admin with a password. Trina Cloud (review finding 6): an active admin
+ * the console vouches for (accounts.cloud_user) — console people have no password, so the self-hosted rule would keep
+ * the setup door open forever.
+ */
 export function setupDone(db: DB): boolean {
   ensureWebSchema(db)
+  if (cloudConfig(db)) return !!db.query('SELECT 1 FROM accounts a JOIN people p ON p.id = a.person_id WHERE p.admin = 1 AND p.active = 1 AND a.cloud_user IS NOT NULL LIMIT 1').get()
   return !!db.query('SELECT 1 FROM accounts a JOIN people p ON p.id = a.person_id WHERE p.admin = 1 AND p.active = 1 AND a.password_hash IS NOT NULL LIMIT 1').get()
 }
 export function setupPending(db: DB): boolean {
-  if (setupDone(db)) return false
+  if (setupDone(db) || cloudConfig(db)?.ssoOnly) return false
   const v = metaGet(db, 'web_setup_token')
   return !!v && (JSON.parse(v) as { expires: number }).expires > now()
 }
 /** Checks and uses up the setup token. */
 export function consumeSetupToken(db: DB, presented: unknown): boolean {
   const v = metaGet(db, 'web_setup_token')
-  if (!v || typeof presented !== 'string' || setupDone(db)) return false
+  if (!v || typeof presented !== 'string' || setupDone(db) || cloudConfig(db)?.ssoOnly) return false
   const { hash, expires } = JSON.parse(v) as { hash: string; expires: number }
   const h = sha256(presented)
   if (expires <= now() || !crypto.timingSafeEqual(Buffer.from(h), Buffer.from(hash))) return false

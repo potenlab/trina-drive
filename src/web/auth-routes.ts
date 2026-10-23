@@ -1,36 +1,57 @@
 // /api routes before sign-in, and signing in and out: server state, first setup, password sign-in, the second factor
 // after it, sign-out, invite and reset links. Moved here unchanged from api.ts (W0 seams) so the Trina Cloud SSO work
 // (workstream B1) changes one module; api.ts puts these first in the route table.
+// Trina Cloud (src/tdcloud): under TDRIVE_SSO_ONLY there is no first setup (404) and console-managed people sign in
+// through the console only (409 use_sso); a second factor after an SSO pass finishes here too (/login/second).
 import { appendAudit } from '../audit'
 import { CLI, NAME, PRODUCT, VERSION } from '../config'
 import { addPerson } from '../store'
 import {
-  accountByLogin, checkPasswordRules, consumeLink, consumeSetupToken, createSession, hashPassword,
+  accountByLogin, checkPasswordRules, consumeLink, consumeSetupToken, createSession, hashPassword, markReauth,
   peekLink, revokeSession, SESSION_COOKIE, SESSION_MAX_MS, setPassword, setupDone, setupPending, verifyPassword, type WebSession,
 } from './auth'
+import { cloudConfig } from '../tdcloud/config'
+import { takeSsoTicket } from '../tdcloud/sso'
 import * as approve from './approve'
 import { consumeTicket, createTicket, has2FA, ticketFailed, ticketPerson } from './mfa'
-import { ApiError, bad, json, rateLimited, type WebCtx } from './http'
+import { ApiError, bad, json, notFound, rateLimited, type WebCtx } from './http'
 import { everyoneGroup } from '../share/rules'
 import { R, type Route } from './route'
 import * as views from './views'
 
-const isHttps = (req: Request) => new URL(req.url).protocol === 'https:' || req.headers.get('x-forwarded-proto') === 'https'
+export const isHttps = (req: Request) => new URL(req.url).protocol === 'https:' || req.headers.get('x-forwarded-proto') === 'https'
 export function sessionCookie(req: Request, value: string, maxAgeS: number) {
   return `${SESSION_COOKIE}=${value}; Path=/api; HttpOnly; SameSite=Strict; Max-Age=${maxAgeS}${isHttps(req) ? '; Secure' : ''}`
 }
 
-/** A new session for this person (and its cookie); the one the request came with, if any, is revoked (no fixation). */
-export function startSession(w: WebCtx, req: Request, personId: number, previous?: WebSession | null) {
+/**
+ * A new session for this person (and its cookie); the one the request came with, if any, is revoked (no fixation).
+ * `authAt`: when the person last proved who they are, if not now (Trina Cloud sign-in: the console's auth_time).
+ */
+export function startSession(w: WebCtx, req: Request, personId: number, previous?: WebSession | null, authAt?: number) {
   if (previous) revokeSession(w.db, previous.idHash) // a new id on every sign-in (no fixation)
-  const s = createSession(w.db, personId, req.headers.get('user-agent') ?? undefined)
-  return { csrf: s.csrf, cookie: sessionCookie(req, s.cookie, SESSION_MAX_MS / 1000) }
+  const s = createSession(w.db, personId, req.headers.get('user-agent') ?? undefined, authAt)
+  return { csrf: s.csrf, cookie: sessionCookie(req, s.cookie, SESSION_MAX_MS / 1000), idHash: s.idHash }
+}
+
+/** Trina Cloud: what the sign-in page needs before anyone is signed in (absent on a self-hosted install). */
+function ssoState(w: WebCtx) {
+  const c = cloudConfig(w.db)
+  return c ? { sso: { only: c.ssoOnly, console_url: c.consoleUrl } } : {}
+}
+/** Under TDRIVE_SSO_ONLY a console-managed person signs in through the console, unless break-glass allows a password for now. */
+function passwordRefused(w: WebCtx, personId: number): boolean {
+  if (!cloudConfig(w.db)?.ssoOnly) return false
+  const a = w.db.query<{ cloud_user: string | null; cloud_invite: string | null; password_ok_until: number | null }, [number]>('SELECT cloud_user, cloud_invite, password_ok_until FROM accounts WHERE person_id = ?').get(personId)
+  return !!a && (a.cloud_user != null || a.cloud_invite != null) && !(a.password_ok_until != null && a.password_ok_until > Date.now())
 }
 
 export const authRoutes: Route[] = [
   // ---------- before sign-in ----------
-  R('GET', '/state', false, ({ w }) => ({ name: NAME, product: PRODUCT, cli: CLI, version: VERSION, setup_pending: setupPending(w.db), setup_done: setupDone(w.db) })),
+  R('GET', '/state', false, ({ w }) => ({ name: NAME, product: PRODUCT, cli: CLI, version: VERSION, setup_pending: setupPending(w.db), setup_done: setupDone(w.db), ...ssoState(w) })),
   R('POST', '/setup', false, async ({ w, req, body: b, s, addr }) => {
+    // Trina Cloud SSO-only: the console makes the admins; a setup token must not be a way around it (review finding 6)
+    if (cloudConfig(w.db)?.ssoOnly) throw notFound()
     if (!w.linkByAddr.hit(`setup:${addr}`)) throw rateLimited(w.linkByAddr.retryAfter(`setup:${addr}`))
     const pw = checkPasswordRules(b.password)
     const hash = await hashPassword(pw)
@@ -59,6 +80,10 @@ export const authRoutes: Route[] = [
     if (w.loginByName.blocked(login)) throw rateLimited(w.loginByName.retryAfter(login))
     if (!w.loginByAddr.hit(addr)) throw rateLimited(w.loginByAddr.retryAfter(addr))
     const acc = accountByLogin(w.db, login)
+    if (acc && passwordRefused(w, acc.person_id)) {
+      await verifyPassword(pw, null) // the same time as a wrong password
+      throw new ApiError(409, 'use_sso', 'sign in with Trina Cloud')
+    }
     const ok = await verifyPassword(pw, acc?.password_hash)
     if (!ok || !acc || !acc.active) {
       w.loginByName.hit(login)
@@ -87,8 +112,11 @@ export const authRoutes: Route[] = [
     if (!p?.active || !consumeTicket(w.db, ticket)) throw new ApiError(401, 'bad_ticket', 'sign in again')
     w.loginByName.reset(key)
     if (method === 'recovery') appendAudit(w.db, { personId: pid, tokenId: null, tool: 'web', command: 'signed in with a recovery code', files: [], outcome: 'ok' })
-    const ss = startSession(w, req, pid, s)
-    return json({ me: views.me(w, { personId: pid, admin: !!p.admin }), csrf: ss.csrf }, 200, { 'set-cookie': ss.cookie })
+    // after a Trina Cloud pass (src/tdcloud/sso.ts): fresh from the console's auth_time, back to where the person was going
+    const sso = takeSsoTicket(w.db, ticket)
+    const ss = startSession(w, req, pid, s, sso?.authAt ?? undefined)
+    if (sso?.freshAt) markReauth(w.db, ss.idHash)
+    return json({ me: views.me(w, { personId: pid, admin: !!p.admin }), csrf: ss.csrf, ...(sso ? { return_to: sso.returnTo } : {}) }, 200, { 'set-cookie': ss.cookie })
   }),
   R('POST', '/logout', true, ({ w, req, s }) => {
     revokeSession(w.db, s!.idHash)
@@ -110,7 +138,7 @@ export const authRoutes: Route[] = [
     await setPassword(w.db, pid, pw)
     appendAudit(w.db, { personId: pid, tokenId: null, tool: 'web', command: kind === 'invite' ? 'invite accepted' : 'password reset completed', files: [], outcome: 'ok' })
     const p = w.db.query<{ admin: number; active: number }, [number]>('SELECT admin, active FROM people WHERE id = ?').get(pid)!
-    if (!p.active) return { ok: true }
+    if (!p.active || passwordRefused(w, pid)) return { ok: true }
     // a reset link does not skip the second factor (R9: a reset mail must not be a way around it)
     if (has2FA(w.db, pid)) return { second_factor: await approve.secondFactorChallenge(w, createTicket(w.db, pid), pid) }
     const ss = startSession(w, req, pid, s)

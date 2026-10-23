@@ -51,7 +51,13 @@ export class PeopleLimitError extends StoreError {
   readonly code = 'people_limit'
   constructor(readonly max: number) { super(`this workspace allows at most ${max} people on its plan: deactivate someone first, or upgrade the plan for more`) }
 }
-export const activePeople = (db: DB) => db.query<{ n: number }, []>('SELECT count(*) AS n FROM people WHERE active = 1').get()!.n
+/** Active people, not counting Trina Cloud invites nobody has accepted yet (rows made so they can be shared with). */
+export function activePeople(db: DB): number {
+  const invites = !!db.query("SELECT 1 FROM pragma_table_info('accounts') WHERE name = 'cloud_invite'").get()
+  return db.query<{ n: number }, []>(invites
+    ? 'SELECT count(*) AS n FROM people WHERE active = 1 AND id NOT IN (SELECT person_id FROM accounts WHERE cloud_invite IS NOT NULL AND cloud_user IS NULL)'
+    : 'SELECT count(*) AS n FROM people WHERE active = 1').get()!.n
+}
 /** Throws PeopleLimitError when one more active person would go past <PREFIX>_MAX_PEOPLE. */
 export function checkPeopleRoom(db: DB) {
   const max = maxPeople()

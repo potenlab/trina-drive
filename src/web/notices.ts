@@ -17,6 +17,8 @@ export type NoticeKind =
   | 'email_changed'         // the sign-in mail address changed (R9: told at the old address)
   | 'home_registered'       // a folder looking like someone's NAS home was registered (5.1)
   | 'second_factor_changed' // a passkey / authenticator app / recovery codes of yours changed
+  | 'admin_added'           // someone became an admin (Trina Cloud sync or sign-in, or the People page): every admin and they hear of it
+  | 'break_glass'           // an emergency sign-in link was made on the server (`people reset-link`): every admin and the person
 
 const SUBJECT: Record<NoticeKind, string> = {
   self_grant: 'An admin gave themselves access',
@@ -30,6 +32,8 @@ const SUBJECT: Record<NoticeKind, string> = {
   email_changed: 'Your sign-in address was changed',
   home_registered: 'A folder that may be your NAS home was registered',
   second_factor_changed: 'Your second factor (passkey, authenticator app or recovery codes) changed',
+  admin_added: 'Someone became an admin of your team',
+  break_glass: 'An emergency sign-in link was made for someone in your team',
 }
 
 export interface NoticeCtx { db: DB; mailer: Mailer; baseUrl: string }

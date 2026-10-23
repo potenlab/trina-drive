@@ -12,6 +12,8 @@ export const ENROLL_ALLOWED = new Set([
   'GET /api/state', 'GET /api/session', 'POST /api/logout',
   'GET /api/me/2fa', 'POST /api/me/reauth', 'POST /api/me/passkeys/options', 'POST /api/me/passkeys',
   'POST /api/me/totp/setup', 'POST /api/me/totp/confirm', 'POST /api/me/recovery-codes',
+  // Trina Cloud: a console admin re-authenticates through the console to enrol (src/tdcloud), or with the options here
+  'GET /api/sso/start', 'POST /api/sso/callback', 'POST /api/sso/second', 'POST /api/me/reauth/options',
 ])
 
 export const hostedFlag = (flag: boolean, env: Record<string, string | undefined>, prefix: string) =>
