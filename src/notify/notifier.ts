@@ -1,8 +1,7 @@
 // Events → in-app inbox (at once, coalesced per kind) and channel deliveries (flushed in coalesced groups, rate limited
 // per destination, weak-only widenings held for the daily digest). Payloads come only from messages.render (R11).
-import path from 'node:path'
 import type { DB } from '../db'
-import { FileOutbox, type Mailer, postSlack, SmtpMailer } from './channels'
+import { mailerFor, type Mailer, postSlack } from './channels'
 import type { NotifyConfig } from './config'
 import type { EventKind, DriveEvent, SignedAnchor } from './events'
 import { anchorBlock, type Lang, type Level, linkFor, render } from './messages'
@@ -43,8 +42,7 @@ export class Notifier {
     this.now = d.now ?? Date.now
     this.fetchImpl = d.fetch ?? fetch
     ensureNotifySchema(d.db)
-    this.mailer = d.mailer ?? (d.cfg.email.mode === 'outbox' ? new FileOutbox(d.cfg.email.outboxDir ?? path.join(d.dataDir, 'outbox'))
-      : d.cfg.email.mode === 'smtp' && d.cfg.email.smtp ? new SmtpMailer(d.cfg.email.smtp) : null)
+    this.mailer = d.mailer ?? mailerFor(d.cfg.email, d.dataDir)
   }
 
   // ---------- contacts ----------

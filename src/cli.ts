@@ -12,6 +12,7 @@ import { addShareRoot, reconcile, shareRoots, startReconciler, summary } from '.
 import { listWidened, rejudgeWidened } from './inplace/widened'
 import { issueSetupToken } from './web/auth'
 import { serveWeb } from './web/server'
+import { RelayMailer } from './web/mail'
 import { trustedProxiesFrom } from './web/proxy'
 import { makeCtx, Session } from './session'
 import { runShell } from './shell'
@@ -54,6 +55,7 @@ ${NOTIFY_HELP}
         [--trusted-proxy IP|CIDR,…] [--client-ip-header x-forwarded-for|cf-connecting-ip]
                                          believe the client address a reverse proxy forwards, only from these peers
                                          (env $${ENV_PREFIX}_TRUSTED_PROXY, $${ENV_PREFIX}_CLIENT_IP_HEADER)
+                                         mail (invites, resets, notifications): notify.json, or $${ENV_PREFIX}_MAILER=smtp|ses (docs/CONFIG.md)
   backup …                 (encrypted backups; see: backup help)
 ${PUBLIC_HELP}
 
@@ -264,7 +266,11 @@ async function main(argv: string[]) {
       const ctx = makeCtx(db, dataDir)
       const notify = attachNotify(ctx)
       notify.start()
-      const { server, w } = serveWeb(ctx, port, host, { allowedOrigins: origin ? [origin] : [], publicUrl, onRequest: notify.onMcpRequest, emit: notify.emit, trustedProxy })
+      // invites and password resets go out through the configured SMTP / SES sender (else <data>/outbox.log)
+      const real = ['smtp', 'ses'].includes(notify.cfg.email.mode) && notify.notifier.mailer
+      const mailer = real ? new RelayMailer(notify.notifier.mailer!, notify.cfg.email.from) : undefined
+      console.log(`mail: ${real ? `${notify.cfg.email.mode} from ${notify.cfg.email.from}` : `${notify.cfg.email.mode} (invites and resets: ${dataDir}/outbox.log)`}`)
+      const { server, w } = serveWeb(ctx, port, host, { allowedOrigins: origin ? [origin] : [], publicUrl, onRequest: notify.onMcpRequest, emit: notify.emit, trustedProxy, mailer })
       console.log(`${PRODUCT} ${VERSION} web: http://${host}:${server.port}/   MCP endpoint: http://${host}:${server.port}/mcp   (data: ${dataDir})`)
       if (trustedProxy) console.log(`client addresses: ${trustedProxy.header} when the peer is ${trustedProxy.spec}`)
       // the public listener (plan 5.2): a separate port for the tunnel, only when `public enable` was run and the gate passes

@@ -3,6 +3,8 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import type { NotifyConfig } from './config'
+import { SesMailer } from './ses'
 import { smtpSend, type SmtpOptions } from './smtp'
 
 export interface Mail { to: string; from: string; subject: string; text: string }
@@ -21,6 +23,14 @@ export class FileOutbox implements Mailer {
 export class SmtpMailer implements Mailer {
   constructor(readonly opts: SmtpOptions) {}
   send(m: Mail) { return smtpSend(this.opts, m.from, m.to, formatMail(m)) }
+}
+
+/** The mailer a configuration asks for (null: mail off, or smtp/ses without their settings). */
+export function mailerFor(email: NotifyConfig['email'], dataDir: string): Mailer | null {
+  if (email.mode === 'outbox') return new FileOutbox(email.outboxDir ?? path.join(dataDir, 'outbox'))
+  if (email.mode === 'smtp' && email.smtp) return new SmtpMailer(email.smtp)
+  if (email.mode === 'ses' && email.ses) return new SesMailer(email.ses)
+  return null
 }
 
 const encodeHeader = (s: string) => /^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${Buffer.from(s).toString('base64')}?=`
