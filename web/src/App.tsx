@@ -18,12 +18,16 @@ import { Consent, PublicOnly } from './pages/Consent'
 import { People } from './pages/People'
 import { Settings } from './pages/Settings'
 import { Tokens } from './pages/Tokens'
+import { takeSetupToken } from './setup-link'
 import { Loading } from './ui'
 
 // ---------- routing ----------
 const subscribe = (f: () => void) => { window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f) }
 export const useRoute = () => useSyncExternalStore(subscribe, () => window.location.hash.replace(/^#/, '') || '/')
 export const go = (to: string) => { window.location.hash = to }
+
+// a setup link's token (#token=…): read once before the first render, then dropped from the address bar (setup-link.ts)
+const setupToken = takeSetupToken(window.location, window.history)
 
 // ---------- session ----------
 interface Session { me: Me | null; setMe: (m: Me | null) => void; refresh: () => void }
@@ -67,7 +71,7 @@ export function App() {
   }
   const linkMatch = /^\/(invite|reset)\/(.+)$/.exec(route)
   if (linkMatch) return <SessionCtx.Provider value={ctx}><Bare><LinkPage kind={linkMatch[1] as 'invite' | 'reset'} token={linkMatch[2]!} /></Bare></SessionCtx.Provider>
-  if (route.startsWith('/setup') && (setupPending || me?.admin)) return <SessionCtx.Provider value={ctx}><Bare wide><Setup pending={setupPending} onDone={() => setSetupPending(false)} /></Bare></SessionCtx.Provider>
+  if (route.startsWith('/setup') && (setupPending || me?.admin)) return <SessionCtx.Provider value={ctx}><Bare wide><Setup pending={setupPending} token={setupToken} onDone={() => setSetupPending(false)} /></Bare></SessionCtx.Provider>
   if (!me) {
     if (setupPending) { go('/setup'); return null }
     return <SessionCtx.Provider value={ctx}><Bare><Login /></Bare></SessionCtx.Provider>

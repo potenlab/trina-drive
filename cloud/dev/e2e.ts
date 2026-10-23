@@ -102,9 +102,9 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   step(`${slug}: one-time setup link from the mail`)
   const ready = outbox().filter((m) => m.to === buyer && m.subject.startsWith('Your Trina Drive is ready')).at(-1)
   check('setup mail sent to the buyer', !!ready)
-  const link = ready!.text.match(/(https:\/\/\S+\/#\/setup\/(\S+))/)!
+  const link = ready!.text.match(/(https:\/\/\S+\/#token=(\S+))/)!
   const setupToken = link[2]!
-  check(`link points at ${teamUrl(slug)}`, link[1]!.startsWith(`${teamUrl(slug)}/#/setup/`))
+  check(`link points at ${teamUrl(slug)}`, link[1]!.startsWith(`${teamUrl(slug)}/#token=`))
   const db = Buffer.concat(['control.db', 'control.db-wal'].map((f) => path.join(STATE, f)).filter((f) => fs.existsSync(f)).map((f) => fs.readFileSync(f)))
   check('setup token is not in the control plane database', !db.includes(Buffer.from(setupToken)))
   check('team serves its web app over HTTPS', (await req('GET', `${teamUrl(slug)}/`)).status === 200)
