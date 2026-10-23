@@ -3,7 +3,7 @@
 Trina Inc. (주식회사 트리나, "**we**") provides Trina Drive services and the website https://drive.trina.app. This policy explains what personal information we collect about our customers, website visitors and people who contact us, why, and what rights you have. It is written to meet Korea's Personal Information Protection Act (PIPA) and, for visitors in the EU/UK, the GDPR.
 
 **This policy does not cover the files you store in Trina Drive.** For those files you are the controller and we act only as your processor, under §11 of our Terms of Service:
-- **Self-hosted or on-site:** Trina Drive runs on your own hardware. When we operate it for you, we handle personal data in your files only as your processor.
+- **Self-hosted or Enterprise on-site:** Trina Drive runs on your own hardware. When we operate it for you, we handle personal data in your files only as your processor.
 - **Trina Cloud (hosted by us):** your files, permissions database and audit log are stored and processed by Trina Inc. in your team's own instance, on infrastructure provided by Amazon Web Services (AWS) in the United States, which acts as our sub-processor (see §5). *Draft: Trina Cloud is in early access; this section will be finalized before paid sign-ups open.*
 
 ## 1. What we collect and why
@@ -11,7 +11,7 @@ Trina Inc. (주식회사 트리나, "**we**") provides Trina Drive services and 
 | Purpose | Information | Legal basis (GDPR) | Kept for |
 |---|---|---|---|
 | Responding to inquiries and setup calls | Name, work email, company, role, phone (optional), message content | Steps before a contract / legitimate interest | 1 year after the last contact, unless you become a customer |
-| Providing managed plans and setup services | Customer contact names, work emails, company details, server and network details needed for operation, support tickets, operator access logs | Contract | For the term of the contract + 1 year (operator access logs: 3 years) |
+| Providing Trina Cloud and Enterprise services | Customer contact names, work emails, company details, server and network details needed for operation, support tickets, operator access logs | Contract | For the term of the contract + 1 year (operator access logs: 3 years) |
 | Billing and taxes | Company name, billing contact, billing address, tax ID, order and invoice records. Card and payment details are collected by our payment providers, not by us | Contract / legal obligation | 5 years as required by Korean tax law (국세기본법) |
 | Product and security emails | Work email | Contract / legitimate interest | Until the contract ends |
 | Newsletter (only if you opt in) | Email | Consent | Until you unsubscribe |

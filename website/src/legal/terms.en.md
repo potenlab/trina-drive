@@ -7,15 +7,15 @@ These Terms govern your use of the paid services we provide for Trina Drive ("**
 
 ## 1. What is free and what is paid
 
-1.1 **Trina Drive software.** Trina Drive is open-source software, licensed under the Apache License 2.0 (the server, CLI, web app, SDKs and integration examples), as stated in the LICENSE file of the source repository. Your use of the software itself is governed by that license, not by these Terms; these Terms cover the managed Services described below. Self-hosting Trina Drive is free, with no limits on users, files, storage or connections.
+1.1 **Trina Drive software.** Trina Drive is open-source software, licensed under the Apache License 2.0 (the server, CLI, web app, SDKs and integration examples), as stated in the LICENSE file of the source repository. Your use of the software itself is governed by that license, not by these Terms; these Terms cover the Services described below. Self-hosting Trina Drive is free, with no limits on users, files, storage or connections.
 
-1.2 **Paid Services.** We charge for running Trina Drive for you and for helping you set it up:
-- **On-site managed service:** we remotely install, monitor, update, back up and secure a Trina Drive server on hardware you own and keep in your premises (for example, an office Mac mini), plus email support. Plan limits (such as the number of AI-connected people) and response times are shown on our pricing page at the time of your order.
-- **Setup & migration:** one-time professional services such as folder and permission design, NAS / Mac mini setup and connection training, as described in a quote or order form.
+1.2 **Services.** We offer Trina Drive as a hosted service and, for larger organizations, as a custom service:
+- **Trina Cloud (Free, Team and Business plans):** we host Trina Drive for you in your team's own instance. Plan limits (storage, number of AI-connected people) and support response times are shown on our pricing page at the time of your order.
+- **Enterprise:** custom plans under a quote or order form, including installing Trina Drive on a server you own and keep on your premises ("on-site"), folder and permission design and team training (setup & migration services).
 
-1.3 **On-site, your data stays on your hardware.** In the on-site managed service your files, permissions database and audit log are stored on your hardware, not on our servers. We do not sell, mine or use your content to train AI models.
+1.3 **Enterprise on-site, your data stays on your hardware.** When we install Trina Drive on your own server, your files, permissions database and audit log are stored on your hardware, not on our servers. We do not sell, mine or use your content to train AI models.
 
-1.4 **Trina Cloud (early access — draft).** Trina Cloud (Cloud Team, Cloud Business) is Trina Drive hosted by us: your files, permissions database and audit log are stored in your team's own instance on infrastructure provided by Amazon Web Services in the United States, our sub-processor. We do not use your content to train AI models, and you can export your data at any time. Trina Cloud is in early access and not yet sold online; these Terms will be updated with its full service terms (including storage limits and uptime) before paid sign-ups open. Sections 1.3 and 4.5 apply to the on-site service only.
+1.4 **Trina Cloud (early access — draft).** Trina Cloud (the Free, Team and Business plans) is Trina Drive hosted by us: your files, permissions database and audit log are stored in your team's own instance on infrastructure provided by Amazon Web Services in the United States, our sub-processor. We do not use your content to train AI models, and you can export your data at any time. The Free plan includes 1 GB of storage and up to 3 people, and a Free team drive is paused after 7 days without activity; paid plans are not paused for inactivity. Trina Cloud is in early access and not yet sold online; these Terms will be updated with its full service terms (including storage limits and uptime) before paid sign-ups open. Sections 1.3, 4 and 9.1 apply to Enterprise on-site services only.
 
 ## 2. Accounts and eligibility
 
@@ -23,11 +23,11 @@ The Services are intended for businesses and other organizations, not for person
 
 ## 3. Free trial
 
-Team plans may include a 14-day free trial starting after a setup call. If you entered a payment method, your subscription starts automatically when the trial ends unless you cancel before then. If you cancel during the trial you will not be charged. We may limit trials to one per organization.
+The Trina Cloud Team plan includes a 14-day free trial. If you entered a payment method, your subscription starts automatically when the trial ends unless you cancel before then. If you cancel during the trial you will not be charged. We may limit trials to one per organization.
 
-## 4. Managed Services — what we do and what you do
+## 4. Enterprise on-site services — what we do and what you do
 
-4.1 **We will:** (a) install Trina Drive on the agreed hardware; (b) apply updates and security fixes within a reasonable time after release (security fixes as a priority); (c) monitor availability and respond to alerts during our business hours; (d) configure and check backups to the destination you provide; (e) respond to support requests within the target response time of your plan (Team: next business day; Business: 4 business hours; business days are Korean business days, 09:00–18:00 KST, unless stated otherwise in your order).
+4.1 **When we install Trina Drive on your hardware, we will:** (a) install Trina Drive on the agreed hardware; (b) apply updates and security fixes within a reasonable time after release (security fixes as a priority); (c) monitor availability and respond to alerts during our business hours; (d) configure and check backups to the destination you provide; (e) respond to support requests within the target response time of your plan (Team: next business day; Business: 4 business hours; business days are Korean business days, 09:00–18:00 KST, unless stated otherwise in your order).
 
 4.2 **You will:** (a) provide and maintain the hardware, power, network and any backup destination; (b) give us the remote access we need and keep it enabled (we use Tailscale, with access limited to named Trina staff); (c) tell us promptly about changes that affect the server (network, NAS, staff leaving); (d) use AI clients in line with their providers' terms.
 
@@ -37,13 +37,13 @@ Team plans may include a 14-day free trial starting after a setup call. If you e
 
 4.5 **No uptime guarantee.** Because the server runs on your hardware and network, we do not guarantee a specific uptime unless a separate signed agreement says so. Service credits apply only where a signed agreement provides them.
 
-## 5. Setup & migration services
+## 5. Setup & migration services (Enterprise)
 
 Scope, price and schedule are set in the quote or order. We perform the work with reasonable skill and care. Unless the quote says otherwise, the work is complete when the agreed items are installed and handed over, or 5 business days after handover if you have not reported a material defect.
 
 ## 6. Acceptable use
 
-You must not use the Services to: break the law; infringe others' rights; store or distribute malware or illegal content; attempt to access systems or data you are not authorized to access; or resell the managed Services without our written consent. We may suspend the Services, after notice where practicable, if your use creates a security risk or legal exposure for us or others.
+You must not use the Services to: break the law; infringe others' rights; store or distribute malware or illegal content; attempt to access systems or data you are not authorized to access; or resell the Services without our written consent. We may suspend the Services, after notice where practicable, if your use creates a security risk or legal exposure for us or others.
 
 ## 7. Prices, payment and taxes
 
@@ -53,15 +53,17 @@ You must not use the Services to: break the law; infringe others' rights; store 
 
 7.3 **Billing.** Subscriptions are billed in advance, monthly or annually, and renew automatically for the same period until cancelled. Additional AI-connected people are billed per person per billing period; when you add people mid-period, the charge is prorated. Prices may change on renewal with at least 30 days' notice by email.
 
-7.4 **Late or failed payment.** If a renewal payment fails, the Merchant of Record (or we, for direct invoices) will retry and notify you. If payment is still outstanding 14 days after the due date we may suspend the managed Services after notice. Suspension stops our operation of the server; it never locks you out of your own server or data.
+7.4 **Late or failed payment.** If a renewal payment fails, the Merchant of Record (or we, for direct invoices) will retry and notify you. If payment is still outstanding 14 days after the due date we may suspend the Services after notice. For Enterprise on-site services, suspension stops our operation of the server; it never locks you out of your own server or data. For Trina Cloud, your data is kept as described in §9.2.
 
 ## 8. Cancellation, refunds and plan changes
 
-You can cancel at any time. Cancellation takes effect at the end of the current billing period, and the managed Services continue until then. Refunds are described in our Refund Policy at https://drive.trina.app/refund, which forms part of these Terms. You can upgrade, downgrade or change the number of AI-connected people at any time; changes are prorated as shown at checkout or on your invoice.
+You can cancel at any time. Cancellation takes effect at the end of the current billing period, and the Services continue until then. Refunds are described in our Refund Policy at https://drive.trina.app/refund, which forms part of these Terms. You can upgrade, downgrade or change the number of AI-connected people at any time; changes are prorated as shown at checkout or on your invoice.
 
 ## 9. When the Services end
 
-When a subscription ends for any reason, we will (a) stop operating the server, (b) remove our remote access and operator credentials within 10 business days, and (c) on request made within 30 days, give you reasonable help to take over operation yourself. Your server, files and logs remain on your hardware, and the open-source software keeps working under its license.
+9.1 **Enterprise on-site.** When the service ends for any reason, we will (a) stop operating the server, (b) remove our remote access and operator credentials within 10 business days, and (c) on request made within 30 days, give you reasonable help to take over operation yourself. Your server, files and logs remain on your hardware, and the open-source software keeps working under its license.
+
+9.2 **Trina Cloud.** When a Trina Cloud subscription ends, your team drive is suspended and its data is kept for 30 days, during which you can ask us for an export or resubscribe; after that, your team's instance and its data are deleted. You can always run the same open-source software yourself.
 
 ## 10. Confidentiality
 
