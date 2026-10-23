@@ -33,6 +33,7 @@ const HELP = `Trina Cloud control plane
   teams link <slug> <subscription_id>     attach a Paddle subscription that arrived without custom_data
   teams set-plan <slug> team|business
   jobs list | jobs run                    pending jobs | run the due ones once
+  db snapshot <file>                      a consistent copy of the control database (the control host ships it to S3 nightly)
   audit verify | audit list [--team slug] [--limit N]
   seal --recipient KEY [--out FILE]       (helper) encrypt stdin to a team backup key
   seal-dir --dir D --recipient KEY --out FILE [--exclude a,b]   (helper) tar a directory and seal it
@@ -208,6 +209,14 @@ export async function main(argv: string[]): Promise<number> {
         writeAudit(cloud.db, { actor, action: 'team.exported', teamId: t.id })
         console.log(`exported to ${out}`)
       } finally { if (!wasRunning && t.host) await cloud.driver.stop(t.host, t.slug) }
+      return 0
+    }
+    case 'db snapshot': {
+      const out = rest[0]
+      if (!out) throw new CloudError('usage', 'db snapshot <file>')
+      cloud.db.query('VACUUM INTO ?').run(out)
+      fs.chmodSync(out, 0o600)
+      console.log(`snapshot: ${out}`)
       return 0
     }
     case 'jobs list':
