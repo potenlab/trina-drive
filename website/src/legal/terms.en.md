@@ -10,10 +10,12 @@ These Terms govern your use of the paid services we provide for Trina Drive ("**
 1.1 **Trina Drive software.** Trina Drive is open-source software, licensed under the Apache License 2.0 (the server, CLI, web app, SDKs and integration examples), as stated in the LICENSE file of the source repository. Your use of the software itself is governed by that license, not by these Terms; these Terms cover the managed Services described below. Self-hosting Trina Drive is free, with no limits on users, files, storage or connections.
 
 1.2 **Paid Services.** We charge for running Trina Drive for you and for helping you set it up:
-- **Managed plans (Team, Business):** we remotely install, monitor, update, back up and secure a Trina Drive server on hardware you own and keep in your premises (for example, an office Mac mini), plus email support. Plan limits (such as the number of AI-connected people) and response times are shown on our pricing page at the time of your order.
+- **On-site managed service:** we remotely install, monitor, update, back up and secure a Trina Drive server on hardware you own and keep in your premises (for example, an office Mac mini), plus email support. Plan limits (such as the number of AI-connected people) and response times are shown on our pricing page at the time of your order.
 - **Setup & migration:** one-time professional services such as folder and permission design, NAS / Mac mini setup and connection training, as described in a quote or order form.
 
-1.3 **Your data stays on your hardware.** In the managed plans your files, permissions database and audit log are stored on your hardware, not on our servers. We do not sell, mine or use your content to train AI models.
+1.3 **On-site, your data stays on your hardware.** In the on-site managed service your files, permissions database and audit log are stored on your hardware, not on our servers. We do not sell, mine or use your content to train AI models.
+
+1.4 **Trina Cloud (early access — draft).** Trina Cloud (Cloud Team, Cloud Business) is Trina Drive hosted by us: your files, permissions database and audit log are stored in your team's own instance on infrastructure provided by Amazon Web Services in the United States, our sub-processor. We do not use your content to train AI models, and you can export your data at any time. Trina Cloud is in early access and not yet sold online; these Terms will be updated with its full service terms (including storage limits and uptime) before paid sign-ups open. Sections 1.3 and 4.5 apply to the on-site service only.
 
 ## 2. Accounts and eligibility
 
