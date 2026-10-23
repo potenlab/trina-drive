@@ -10,7 +10,7 @@ import type { Mailer } from '../web/mail'
 import { ensureWebSchema, metaGet, metaSet } from '../web/schema'
 import type { CloudConfig } from './config'
 import {
-  announceNewAdmins, byCloudUser, byInvite, closeSetupIfCloudAdmin, createCloudPerson, deactivate, syncEveryone, unboundByEmail, unmanaged,
+  announceNewAdmins, byCloudUser, byInvite, closeSetupIfCloudAdmin, createCloudPerson, deactivate, inviteOnly, syncEveryone, unboundByEmail, unmanaged,
   type CloudPerson,
 } from './people'
 
@@ -84,7 +84,9 @@ export async function applySync(d: SyncDeps, raw: unknown): Promise<SyncResult> 
       const touch = (before: CloudPerson | null, id: number, m: SyncMember) => {
         const admin = m.status === 'active' && (m.role === 'owner' || m.role === 'admin')
         const wasActive = !!before?.active
-        if (before && !wasActive) { checkPeopleRoom(db); counts.reactivated++ }
+        // one more person on the plan: back from inactive, or an invite that became a member (invites do not count)
+        if (before && m.status === 'active' && (!wasActive || inviteOnly(before))) checkPeopleRoom(db)
+        if (before && !wasActive) counts.reactivated++
         if (before && (before.admin !== (admin ? 1 : 0) || before.email?.toLowerCase() !== m.email.toLowerCase() || before.cloud_user !== m.cloud_user || !wasActive)) counts.updated++
         if (admin && !(before?.admin && wasActive)) newAdmins.push(id)
         db.query('UPDATE people SET active = 1, admin = ?, display_name = ? WHERE id = ?').run(admin ? 1 : 0, m.name || null, id)

@@ -21,6 +21,8 @@ export const byCloudUser = (db: DB, sub: string) => db.query<CloudPerson, [strin
 export const byInvite = (db: DB, invite: string) => db.query<CloudPerson, [string]>(`${SELECT} WHERE a.cloud_invite = ? AND a.cloud_user IS NULL`).get(invite)
 /** A person not yet tied to a console account with this address (case-insensitive). */
 export const unboundByEmail = (db: DB, email: string) => db.query<CloudPerson, [string]>(`${SELECT} WHERE a.email = ? COLLATE NOCASE AND a.cloud_user IS NULL`).get(email)
+/** An invite row nobody accepted yet: not counted on the plan, not in Everyone. */
+export const inviteOnly = (p: Pick<CloudPerson, 'cloud_user' | 'cloud_invite'>) => p.cloud_user == null && p.cloud_invite != null
 export const cloudPerson = (db: DB, id: number) => db.query<CloudPerson, [number]>(`${SELECT} WHERE p.id = ?`).get(id)
 
 /** The person has a console identity (a member or an open invite): the console decides about them, not the drive. */
@@ -39,10 +41,15 @@ export function freshName(db: DB, email: string): string {
   for (let n = 1; ; n++) { const name = n === 1 ? base : `${base}-${n}`; if (!taken.get(name)) return name }
 }
 
-/** A new person tied to the console (JIT on sign-in, or a member the sync has not seen yet). Counts against TDRIVE_MAX_PEOPLE. */
+/**
+ * A new person tied to the console (JIT on sign-in, a member the sync has not seen yet, or an open invite). A member
+ * counts against TDRIVE_MAX_PEOPLE; an invite nobody accepted yet does not (store.ts activePeople).
+ */
 export function createCloudPerson(db: DB, o: { email: string; displayName: string; admin: boolean; cloudUser: string | null; invite: string | null }): number {
   ensureWebSchema(db)
-  const id = addPerson(db, freshName(db, o.email), o.admin).id
+  const name = freshName(db, o.email)
+  const id = o.cloudUser ? addPerson(db, name, o.admin).id
+    : Number(db.query('INSERT INTO people (name, admin, created_at) VALUES (?, 0, ?)').run(name, Date.now()).lastInsertRowid)
   db.query('UPDATE people SET display_name = ? WHERE id = ?').run(o.displayName || null, id)
   db.query('INSERT INTO accounts (person_id, email, created_at, cloud_user, cloud_invite) VALUES (?, ?, ?, ?, ?)').run(id, o.email, Date.now(), o.cloudUser, o.invite)
   return id

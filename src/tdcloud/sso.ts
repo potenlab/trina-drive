@@ -16,7 +16,7 @@ import * as approve from '../web/approve'
 import { ensureWebSchema, metaGet } from '../web/schema'
 import { stateHash, verifyAssertion, type Claims } from './assertion'
 import { cloudConfig, type CloudConfig } from './config'
-import { announceNewAdmins, byCloudUser, closeSetupIfCloudAdmin, createCloudPerson, syncEveryone, unboundByEmail } from './people'
+import { announceNewAdmins, byCloudUser, closeSetupIfCloudAdmin, createCloudPerson, inviteOnly, syncEveryone, unboundByEmail } from './people'
 
 export const STATE_TTL_MS = 10 * 60_000
 export const REAUTH_WINDOW_S = 120
@@ -88,6 +88,7 @@ export function personFor(db: DB, c: Claims): SignedIn {
     return { personId: id, admin: newer && roleAdmin, created: true, reactivated: false, newAdmin: newer && roleAdmin }
   }
   let reactivated = false
+  if (found.active && inviteOnly(found)) checkPeopleRoom(db) // an invite becomes a member: one more person on the plan
   if (!found.active) {
     if (!newer) throw new SsoFail('deactivated')
     checkPeopleRoom(db)
