@@ -4,7 +4,7 @@ import { get, type FolderSummary } from '../api'
 import { fmtSize } from './Files'
 import { go, useSession } from '../App'
 import { t } from '../i18n'
-import { Badge, ErrorLine, Loading, Page, useLoad, YesNo } from '../ui'
+import { Badge, EmptyState, ErrorLine, Page, Skeleton, useLoad, YesNo } from '../ui'
 import { RegisterForm } from './RegisterForm'
 
 export function FolderBadges({ f }: { f: FolderSummary }) {
@@ -32,7 +32,7 @@ export function Folders() {
       {me?.admin && (managedMode || data?.folders.some((f) => f.managed)) && <StorageCard />}
       {adding && <div className="card"><RegisterForm managed={managedMode} onDone={(id) => { reload(); setAdding(false); go(`/folders/${id}`) }} /></div>}
       <ErrorLine error={error} />
-      {!data ? <Loading /> : data.folders.length === 0 ? <p className="muted">{t('folders_empty')}</p> : (
+      {!data ? <Skeleton rows={4} /> : data.folders.length === 0 ? <EmptyState icon="access" text={t('folders_empty')} /> : (
         <table className="list">
           <thead><tr><th>{t('col_folder')}</th><th className="c">{t('you_ai')}</th>{showNas && <th className="c">{t('you_nas')}</th>}</tr></thead>
           <tbody>

@@ -33,7 +33,7 @@ const en = {
   folder_promote: 'Promote drafts here', folder_promote_help: 'People with "write" here may put their drafts in this folder and below as new files. Widening ones wait for approval. The server\'s NAS account needs write permission on this folder.',
   folder_promote_inherited: 'On from a folder above.', folder_promote_admin: 'Only the admin turns this on or off.', folder_promote_cannot_write: 'The server cannot write to this folder on disk: give its NAS account write permission here.',
   // approvals
-  ap_title: 'Approvals', ap_intro: 'Drafts waiting to go into folders that more people read than the folders they came from. You see one when you can read every source folder and manage the target (or every source).',
+  ap_title: 'Approvals', ap_intro: 'Requests that would let more people read what AI wrote from folders they cannot open: AI drafts going into a folder, and editors’ share requests. You see one when you can decide it (you read every source folder and manage the target or every source), or when it is yours.',
   ap_skills: 'Skill changes', ap_skills_help: 'New or changed team skills you may approve. AI keeps the last approved version until then.',
   ap_empty: 'Nothing to approve.', ap_others: '{n} pending in folders you manage, which you cannot approve (you cannot read every source folder).',
   ap_status_pending: 'Waiting', ap_status_approved: 'Approved', ap_status_rejected: 'Rejected', ap_status_expired: 'Expired', ap_status_closed: 'No one can approve',
@@ -50,6 +50,13 @@ const en = {
   ap_cannot_decide: 'You can no longer decide this request (rules changed).', ap_no_approver: 'No one can approve this request with the current rules.',
   ap_other_origin: 'Passkeys work only on {url}. Open this page there to approve.',
   ap_done: 'Approved: written to {path}.', ap_decided_by: 'Decided by {name}', ap_back: 'All approvals', ap_mine: 'Mine',
+  // kinds of request (C2): a share request (an Editor's widening change), an AI draft into a folder, a team-skill version
+  ap_kind_share: 'Share request', ap_kind_promote: 'AI draft into a folder', ap_kind_skill: 'Skill version', ap_requests: 'Requests',
+  ap_share_title: 'Sharing change on {path}', ap_share_help: 'An editor asked to share this. It lets people open copies of AI drafts made from folders they cannot read, so a manager of those source folders (or an admin) decides. Approving applies the change exactly as asked.',
+  ap_share_change: 'What they asked', ap_share_add: 'Give {role} access to {n} (people or groups)', ap_share_invite: 'Invite {n} by mail as {role}', ap_share_set: 'Change the role of {n} (people or groups)',
+  ap_share_remove: 'Remove access for {n} (people or groups)', ap_share_general_team: 'General access: anyone in the team as {role}', ap_share_general_restricted: 'General access: restricted',
+  ap_share_restrict: 'Restrict access here', ap_share_other: 'Other settings', ap_share_gain: 'Who would read AI-draft copies they could not before',
+  ap_share_done: 'Approved: the change was applied to {path}.', ap_share_no_gain: 'The number is shown to the people who can decide.',
 }
 
 export type ApKey = keyof typeof en
@@ -80,7 +87,7 @@ const ko: Record<ApKey, string> = {
   promote_open: '요청 열기',
   folder_promote: '여기로 초안 반영 허용', folder_promote_help: '여기에 "쓰기"가 있는 사람은 자기 초안을 이 폴더와 아래에 새 파일로 넣을 수 있습니다. 넓어지는 반영은 승인을 기다립니다. 서버의 NAS 계정에 이 폴더 쓰기 권한이 있어야 합니다.',
   folder_promote_inherited: '위 폴더에서 켜져 있습니다.', folder_promote_admin: '전체 관리자만 켜고 끕니다.', folder_promote_cannot_write: '서버가 디스크에서 이 폴더에 쓸 수 없습니다: NAS 계정에 쓰기 권한을 주세요.',
-  ap_title: '승인', ap_intro: '초안이 나온 폴더보다 더 많은 사람이 읽는 폴더로 들어가려고 기다리는 초안입니다. 출처 폴더를 모두 읽을 수 있고 대상 폴더(또는 출처 폴더 모두)를 관리하면 보입니다.',
+  ap_title: '승인', ap_intro: '볼 수 없는 폴더에서 AI가 쓴 내용을 더 많은 사람이 읽게 되는 요청입니다: 폴더로 들어가는 AI 초안과 편집자의 공유 요청. 결정할 수 있거나(출처 폴더를 모두 읽고 대상 폴더나 출처 폴더 모두를 관리) 내 요청이면 보입니다.',
   ap_skills: '스킬 변경', ap_skills_help: '내가 승인할 수 있는 새 스킬·바뀐 스킬입니다. 승인 전까지 AI는 마지막으로 승인된 버전을 씁니다.',
   ap_empty: '승인할 것이 없습니다.', ap_others: '관리하는 폴더에 승인 대기 {n}건이 있지만 승인할 수 없습니다(출처 폴더를 모두 읽지 못함).',
   ap_status_pending: '대기', ap_status_approved: '승인됨', ap_status_rejected: '거절됨', ap_status_expired: '만료', ap_status_closed: '승인할 사람 없음',
@@ -97,6 +104,12 @@ const ko: Record<ApKey, string> = {
   ap_cannot_decide: '이 요청을 더는 결정할 수 없습니다(규칙이 바뀜).', ap_no_approver: '지금 규칙으로는 이 요청을 승인할 사람이 없습니다.',
   ap_other_origin: '패스키는 {url}에서만 됩니다. 승인하려면 거기서 이 페이지를 여세요.',
   ap_done: '승인됨: {path}에 썼습니다.', ap_decided_by: '{name} 결정', ap_back: '모든 승인', ap_mine: '내 요청',
+  ap_kind_share: '공유 요청', ap_kind_promote: 'AI 초안 → 폴더', ap_kind_skill: '스킬 버전', ap_requests: '요청',
+  ap_share_title: '{path} 공유 변경', ap_share_help: '편집자가 공유를 요청했습니다. 이 변경으로 읽을 수 없는 폴더에서 만든 AI 초안 사본을 열 수 있는 사람이 늘어나므로, 그 출처 폴더의 관리자(또는 Admin)가 결정합니다. 승인하면 요청한 그대로 적용됩니다.',
+  ap_share_change: '요청 내용', ap_share_add: '사용자·그룹 {n}곳을 {role}(으)로 추가', ap_share_invite: '{n}명을 {role}(으)로 메일 초대', ap_share_set: '역할 {n}개 변경',
+  ap_share_remove: '사용자·그룹 {n}곳 삭제', ap_share_general_team: '일반 액세스: 팀의 모든 사용자 · {role}', ap_share_general_restricted: '일반 액세스: 제한됨',
+  ap_share_restrict: '여기서부터 액세스 제한', ap_share_other: '기타 설정', ap_share_gain: '전에는 못 읽던 AI 초안 사본을 읽게 되는 사람',
+  ap_share_done: '승인됨: {path}에 변경을 적용했습니다.', ap_share_no_gain: '인원수는 결정할 수 있는 사람에게만 보입니다.',
 }
 
 export function at(key: ApKey, params?: Record<string, string | number>): string {

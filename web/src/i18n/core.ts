@@ -97,6 +97,8 @@ export const en = {
   kind_former_personal_registered: 'A former personal folder was registered', kind_password_reset: 'Password reset started; tokens cut',
   kind_email_changed: 'Sign-in address changed', kind_home_registered: 'A folder that may be your NAS home was registered',
   kind_second_factor_changed: 'Your second factor changed',
+  kind_shared: 'Items were shared with you', kind_widened: 'AI-draft copies were closed for review (more people could read them)',
+  kind_former_member_files: 'Files of people who left moved to Former members',
   // managed storage (cloud mode): the server owns the folders, rules decide who views and who edits
   new_team_folder: 'New team folder', reg_name_managed: 'Folder name (people and agents see it)', managed_badge: 'Managed', col_access: 'Access', access_none: 'No access', access_view: 'Can view', access_edit: 'Can edit',
   access_help_managed: 'People open this folder by these rules: “can view” reads (and their AI reads), “can edit” also uploads, renames, moves and deletes. Folders below inherit and can only add; to narrow, turn on "Start fresh here".',
@@ -222,6 +224,8 @@ export const ko: Record<CoreKey, string> = {
   kind_former_personal_registered: '예전 개인 폴더가 일반 폴더로 등록됐습니다', kind_password_reset: '비밀번호 재설정 시작, 토큰 끊김',
   kind_email_changed: '로그인 메일 주소가 바뀌었습니다', kind_home_registered: '내 NAS 홈 폴더일 수 있는 폴더가 등록됐습니다',
   kind_second_factor_changed: '2단계 인증이 바뀌었습니다',
+  kind_shared: '나와 공유된 항목이 있습니다', kind_widened: 'AI 초안 사본이 검토 대기로 닫혔습니다(더 많은 사람이 읽게 되어서)',
+  kind_former_member_files: '떠난 사람의 파일이 Former members로 옮겨졌습니다',
   new_team_folder: '새 팀 폴더', reg_name_managed: '폴더 이름(사람과 에이전트가 보는 이름)', managed_badge: '관리형', col_access: '권한', access_none: '권한 없음', access_view: '보기', access_edit: '편집',
   access_help_managed: '이 규칙대로 엽니다: “보기”는 읽기(그 사람의 AI도 읽음), “편집”은 올리기·이름 바꾸기·옮기기·지우기까지. 아래 폴더는 물려받고 더할 수만 있습니다. 좁히려면 "여기서부터 새로"를 켜세요.',
   reg_managed_help: '서버가 자기 저장소에 이 폴더를 만듭니다. 사람들은 웹으로 파일을 넣습니다.',

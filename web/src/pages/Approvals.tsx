@@ -1,27 +1,41 @@
 // The approval inbox (plan 5.2, R8). Everything a file holds is shown as plain text (React text nodes inside <pre>),
 // never HTML. The agent's stated reason is folded away and labelled as its claim. Every approve click asks for a
 // fresh passkey (or, on a LAN-only server, an authenticator code) bound to that request and version.
+// Three kinds, each labelled: an AI draft going into a folder (promote), an Editor's share request that would widen
+// AI-draft copies (kind 'share', A1/A2: the change is described, the people who gain are counted), and a team-skill
+// version (workstream I1, decided on its own review page). Source folders the person cannot read are only counted.
 import { useState } from 'react'
 import { api, get } from '../api'
 import { go, useSession } from '../App'
-import { fmtDate } from '../i18n'
+import { fmtDate, t } from '../i18n'
 import { getPasskey } from '../webauthn'
-import { Badge, ErrorLine, Loading, Page, useAction, useLoad } from '../ui'
+import { Badge, EmptyState, ErrorLine, Page, Skeleton, useAction, useLoad } from '../ui'
 import { at, type ApKey } from './approve-i18n'
 import './approve.css'
 import { st } from '../drive/SkillsText'
+import { shareChangeLines, type ShareChangeAsked } from '../drive/share-api'
 
 interface StepUp { method: 'passkey' | 'totp' | null; missing: 'passkey' | 'totp' | null; lan_only: boolean; public_url: string | null }
-interface Item { id: number; status: string; created_at: number; expires_at: number; decided_at: number | null; target: string; name: string; size: number; gain: number; can_decide: boolean; mine: boolean; requester: string; via: 'agent' | 'web'; overwrite?: boolean }
+interface Item { id: number; kind?: 'share' | 'promote'; status: string; created_at: number; expires_at: number; decided_at: number | null; target: string; name: string; size: number; gain: number; can_decide: boolean; mine: boolean; requester: string; via: 'agent' | 'web'; overwrite?: boolean }
 interface Detail extends Item {
-  sha256: string; draft_version: number; draft_path: string; decided_by: string | null; decision_reason: string | null; approvers_exist: boolean | null
-  sources: ({ folder: string; strong: boolean } | string)[]; hidden_sources: number; gainers: { count: number; names: string[] } | null
+  sha256: string; draft_version?: number; draft_path?: string; decided_by: string | null; decision_reason: string | null; approvers_exist: boolean | null
+  /** kind 'share': the change as asked (src/share/api-types.ts ShareChange) */
+  change?: ShareChangeAsked
+  sources: ({ folder: string; strong: boolean } | string)[]; hidden_sources: number; gainers: { count: number; names?: string[] } | null
   requester_token?: string | null; agent_claim: string | null; preview: { text: string; truncated: boolean; binary: boolean } | null; diff: string | null
   step_up: StepUp
 }
 
 const statusKind = (s: string) => s === 'pending' ? 'accent' : s === 'approved' ? 'ok' : s === 'closed' || s === 'failed' || s === 'stale' ? 'danger' : 'neutral'
 export const StatusBadge = ({ s }: { s: string }) => <Badge kind={statusKind(s)}>{at(`ap_status_${s}` as ApKey)}</Badge>
+
+const roleName = (r: string) => r === 'viewer' || r === 'editor' || r === 'manager' ? t(`share_role_${r}`) : r
+/** A share request in words (drive/share-api.ts shareChangeLines: counts and roles, never names). */
+export const describeShareChange = (c: ShareChangeAsked | undefined) =>
+  shareChangeLines(c).map((l) => at(l.key, { ...('n' in l ? { n: l.n } : {}), ...('role' in l ? { role: roleName(l.role) } : {}) }))
+const kindBadge = (k: Item['kind']) => <Badge kind={k === 'share' ? 'accent' : 'neutral'}>{at(k === 'share' ? 'ap_kind_share' : 'ap_kind_promote')}</Badge>
+/** What a request is about: a share request names its folder or file; a draft, the file it would become. */
+const titleOf = (x: Pick<Item, 'kind' | 'target' | 'name'>) => x.kind === 'share' ? x.target : `${x.target}/${x.name}`
 
 export function Approvals({ id }: { id?: number }) {
   if (id) return <ApprovalPage id={id} />
@@ -42,14 +56,15 @@ function ApprovalList() {
     <Page title={at('ap_title')}>
       <p className="muted">{at('ap_intro')}</p>
       <ErrorLine error={error} />
-      {!data ? <Loading /> : <>
+      {!data ? (error ? null : <Skeleton rows={3} />) : <>
         <StepUpNote s={data.step_up} />
-        {data.items.length === 0 && <p className="muted">{at('ap_empty')}</p>}
-        <ul className="rows">
+        <h2 className="ap-h">{at('ap_requests')}</h2>
+        {data.items.length === 0 && <EmptyState icon="approvals" text={at('ap_empty')} />}
+        <ul className="rows ap-list">
           {data.items.map((x) => (
-            <li key={x.id}>
+            <li key={x.id} className={`ap-${x.kind ?? 'promote'}`}>
               <div className="row-main">
-                <a href={`#/approvals/${x.id}`}><strong className="mono">{x.target}/{x.name}</strong></a> <StatusBadge s={x.status} />{x.overwrite && <> <Badge kind="warn">{at('ap_overwrite')}</Badge></>}
+                {kindBadge(x.kind)} <a href={`#/approvals/${x.id}`}><strong className="mono">{titleOf(x)}</strong></a> <StatusBadge s={x.status} />{x.overwrite && <> <Badge kind="warn">{at('ap_overwrite')}</Badge></>}
                 {x.mine && <> <Badge>{at('ap_mine')}</Badge></>}
                 <div className="muted small">
                   {at('ap_by', { name: x.requester })} {at(x.via === 'agent' ? 'ap_via_agent_short' : 'ap_via_web')} · {fmtDate(x.created_at)}
@@ -80,7 +95,7 @@ function SkillChanges() {
         {mine.map((s) => (
           <li key={s.qname}>
             <div className="row-main">
-              <a href={`#/skills/v/${s.pending!.id}`}><strong className="mono">{s.qname}</strong></a> <Badge kind="accent">{st(s.status === 'new' ? 'sk_status_new' : 'sk_status_changed')}</Badge>
+              <Badge>{at('ap_kind_skill')}</Badge> <a href={`#/skills/v/${s.pending!.id}`}><strong className="mono">{s.qname}</strong></a> <Badge kind="accent">{st(s.status === 'new' ? 'sk_status_new' : 'sk_status_changed')}</Badge>
               {s.pending!.has_scripts && <> <Badge kind="warn" title={st('sk_scripts')}>{'</>'}</Badge></>}
               <div className="muted small">{st('sk_editors', { names: [...new Set(s.pending!.editors.map((e) => e ?? st('sk_editor_unknown')))].join(', ') })} · {fmtDate(s.pending!.proposed_at)}</div>
             </div>
@@ -102,9 +117,10 @@ function ApprovalPage({ id }: { id: number }) {
   const [rejecting, setRejecting] = useState(false)
   const [done, setDone] = useState<string | null>(null)
   if (error) return <Page title={at('ap_title')}><ErrorLine error={error} /><a href="#/approvals">← {at('ap_back')}</a></Page>
-  if (!data) return <Loading />
+  if (!data) return <Skeleton rows={4} />
   const d = data
   const pending = d.status === 'pending'
+  const share = d.kind === 'share'
 
   // one click = one step-up for this request and this version, then the approval that uses it up
   const approve = () => a.run(async () => {
@@ -112,7 +128,7 @@ function ApprovalPage({ id }: { id: number }) {
     const proof = o.method === 'passkey' ? { response: await getPasskey(o.options) } : { code }
     const s = await api<{ assertion: string }>('POST', `/approvals/${id}/step-up`, { sha256: d.sha256, ...proof })
     const r = await api<{ path: string }>('POST', `/approvals/${id}/approve`, { sha256: d.sha256, assertion: s.assertion })
-    setCode(''); setDone(at('ap_done', { path: r.path })); reload(); refresh()
+    setCode(''); setDone(share ? at('ap_share_done', { path: d.target }) : at('ap_done', { path: r.path })); reload(); refresh()
   })
   const reject = () => a.run(async () => {
     await api('POST', `/approvals/${id}/reject`, { reason })
@@ -120,21 +136,29 @@ function ApprovalPage({ id }: { id: number }) {
   })
 
   return (
-    <Page title={`${d.target}/${d.name}`} actions={<><StatusBadge s={d.status} />{d.overwrite && <Badge kind="warn">{at('ap_overwrite')}</Badge>}</>}>
+    <Page title={share ? at('ap_share_title', { path: d.target }) : titleOf(d)} actions={<span className="ap-badges">{kindBadge(d.kind)}<StatusBadge s={d.status} />{d.overwrite && <Badge kind="warn">{at('ap_overwrite')}</Badge>}</span>}>
       <p className="crumbs"><a href="#/approvals">← {at('ap_back')}</a></p>
       <section className="card">
         <p>{at('ap_by', { name: d.requester })} {d.via === 'agent' ? at('ap_via_agent', { token: d.requester_token ?? '…' }) : at('ap_via_web')} · {fmtDate(d.created_at)}
           {pending && <> · {at('ap_expires', { when: fmtDate(d.expires_at) })}</>}</p>
-        <p className="muted small mono">/drafts/{d.draft_path} · v{d.draft_version} · {d.size} B · {at('ap_hash')} {d.sha256.slice(0, 16)}…</p>
+        {share ? <p className="muted small">{at('ap_share_help')}</p>
+          : <p className="muted small mono">/drafts/{d.draft_path} · v{d.draft_version} · {d.size} B · {at('ap_hash')} {d.sha256.slice(0, 16)}…</p>}
         {d.decided_by && <p className="small">{at('ap_decided_by', { name: d.decided_by })}{d.decided_at ? ` · ${fmtDate(d.decided_at)}` : ''}{d.decision_reason ? ` — ${d.decision_reason}` : ''}</p>}
         {pending && d.approvers_exist === false && <p className="warn">{at('ap_no_approver')}</p>}
         {done && <p className="ok">{done}</p>}
       </section>
 
+      {share && (
+        <section className="card ap-change">
+          <h2>{at('ap_share_change')}</h2>
+          <ul>{describeShareChange(d.change).map((line) => <li key={line}>{line}</li>)}</ul>
+        </section>
+      )}
+
       <section className="card">
-        <h2>{at('ap_gain')}</h2>
-        <p>{at('ap_gain_n', { n: d.gainers?.count ?? d.gain })}</p>
-        {d.gainers && d.gainers.names.length > 0 && <p className="small">{d.gainers.names.join(', ')}</p>}
+        <h2>{share ? at('ap_share_gain') : at('ap_gain')}</h2>
+        {share && !d.gainers ? <p className="muted small">{at('ap_share_no_gain')}</p> : <p>{at('ap_gain_n', { n: d.gainers?.count ?? d.gain })}</p>}
+        {d.gainers?.names && d.gainers.names.length > 0 && <p className="small">{d.gainers.names.join(', ')}</p>}
         <h2>{at('ap_sources')}</h2>
         <p className="small">{d.sources.map((s) => typeof s === 'string' ? s : s.folder).join(', ') || '—'}{d.hidden_sources > 0 && <span className="muted"> {at('ap_hidden_sources', { n: d.hidden_sources })}</span>}</p>
       </section>
