@@ -2,6 +2,7 @@
 // whole desired membership of the team with a per-team, strictly increasing `seq`. Applied in one transaction, only
 // when `seq` > meta.cloud_sync_seq (a retried old job can never undo a newer one). Removal cuts every credential:
 // sessions, personal access tokens, OAuth grants, app passwords — so a person let back in later starts clean.
+import { tellWidened, withRejudge, type Judgement } from '../share/rejudge'
 import { appendAudit } from '../audit'
 import type { DB } from '../db'
 import { checkPeopleRoom, PeopleLimitError } from '../store'
@@ -76,8 +77,11 @@ export async function applySync(d: SyncDeps, raw: unknown): Promise<SyncResult> 
   const counts = { created: 0, updated: 0, deactivated: 0, reactivated: 0 }
   const newAdmins: number[] = []
   let stale: number | null = null
+  let widened: Judgement | null = null
   try {
-    db.transaction(() => {
+    // the whole sync is one transaction with the R6 re-check of AI-draft copies (src/share/rejudge.ts): a console-side
+    // membership change never opens a copy to people who cannot read its sources — such copies close until confirmed
+    widened = withRejudge(db, () => {
       const current = Number(metaGet(db, 'cloud_sync_seq') ?? 0)
       if (p.seq <= current) { stale = current; return }
       const keep = new Set<number>()
@@ -134,14 +138,17 @@ export async function applySync(d: SyncDeps, raw: unknown): Promise<SyncResult> 
       closeSetupIfCloudAdmin(db)
       metaSet(db, 'cloud_sync_seq', String(p.seq))
       metaSet(db, 'cloud_sync_applied_at', String(now()))
-      appendAudit(db, { personId: null, tokenId: null, tool: 'cloud', command: `member sync ${p.seq}: ${counts.created} created, ${counts.updated} updated, ${counts.deactivated} deactivated, ${counts.reactivated} reactivated`, files: [], outcome: 'ok' })
-    })()
+    }, { mode: 'membership', after: (j) => {
+      if (stale !== null) return
+      appendAudit(db, { personId: null, tokenId: null, tool: 'cloud', command: `member sync ${p.seq}: ${counts.created} created, ${counts.updated} updated, ${counts.deactivated} deactivated, ${counts.reactivated} reactivated${j.pending.length ? `, ${j.pending.length} AI-draft cop${j.pending.length === 1 ? 'y' : 'ies'} closed (widening)` : ''}`, files: [], outcome: 'ok' })
+    } }).judgement
   } catch (e) {
     if (e instanceof PeopleLimitError) return { ok: false, error: 'people_limit', message: e.message }
     throw e
   }
   if (stale !== null) return { ok: true, applied: false, seq: p.seq, current_seq: stale, reason: 'stale' }
   await announceNewAdmins({ db, mailer: d.mailer, baseUrl: d.baseUrl }, newAdmins, `member sync ${p.seq}`)
+  if (widened) await tellWidened({ db, mailer: d.mailer, baseUrl: d.baseUrl }, widened)
   const people = db.query<{ n: number }, []>('SELECT count(*) AS n FROM people p JOIN accounts a ON a.person_id = p.id WHERE p.active = 1 AND (a.cloud_user IS NOT NULL OR a.cloud_invite IS NOT NULL)').get()!.n
   return { ok: true, applied: true, seq: p.seq, ...counts, people, unmanaged: unmanaged(db) }
 }

@@ -54,7 +54,8 @@ and the token's scope is computed inside it.
   that wrote it. Other people and admins never see drafts.
 - **R5/R6 widening** (`isWidening(src, target)`): target readers = rule readers ∪ NAS readers ("unknown" = everyone);
   source readers = rule readers (none if no-AI/quarantined) ∪ NAS readers ("unknown" = nobody); widening if some target
-  reader is not a reader of some source S ≠ target. Function and tests only; no NAS watcher.
+  reader is not a reader of some source S ≠ target. On the NAS the reconciler judges copies on every pass; every rule,
+  sharing and membership change re-judges copies (NAS and managed) in its own transaction — see "Sharing" below.
 - **Audit**: every tool call (command line cut at 4 KB + sha256 of the whole, files touched, outcome), hash-chained;
   secrets in the command line, file names and outcome are redacted before storing (`src/redact.ts`: our tokens keep
   their 4-character hint, e.g. `tdrive_pat_AbCd…[REDACTED:token]`; setup tokens, AWS key ids and secrets, GitHub, GitLab,
@@ -87,6 +88,55 @@ not reserved atomically across processes (one server process writes). Only exact
 upload (no paragraph matching), and copies made outside this server (download, edit, upload) are not tracked.
 Backups (`tdrive backup`) do not yet include the managed root: back it up with the data directory's disk.
 
+## Sharing (Trina Cloud v1: the share dialog, owner decision O1)
+
+Google-Drive-like folder sharing on the same rules — `src/policy.ts` is unchanged; the dialog only writes rules,
+manage grants and flags (`src/share/`, API in [SHARING-API.md](SHARING-API.md)).
+
+- **Roles are a view of the rules.** Viewer = rule `read`, Editor = `write`, Manager = `write` + `manage` (R7). This is
+  how the dialog shows and writes them; stored data is not migrated (a `manage` holder below `write` shows as "Manager
+  (can't open files)" and is never raised silently — not by an upgrade, not by restrict-here). Team admins (console
+  owner/admin) change sharing everywhere but do not read files by that alone (giving themselves access tells the
+  folder's managers and themselves, R9).
+- **General access** "Anyone in Trina" = a rule for the Everyone group (`meta.everyone_group`; in cloud mode a system
+  group: exactly the active console members — not invites — kept by the member sync; the People page cannot delete it
+  or edit its members).
+  Restricted = no Everyone rule here and none from above. Rules only add downward (R0); **Restrict access here** =
+  `inherit_break` on a subfolder: the entries the manager ticks are written here at their *current* level first, and
+  every manager above keeps their *current* level (copied, never raised; 0 stays 0), all in one transaction.
+- **Who may change what.** Admin: everything (Manager grants and removals, "No AI" off, restrict-here, the toggle,
+  sharing with a non-member = the console's invite flow). Manager (not admin): Viewers/Editors, General access,
+  restrict-here, "No AI" on, the toggle. **Editor (O1)**, where "Editors can change permissions and share" is on for the
+  folder and every folder above (stored per folder, `NULL` = as above, `0` turns it off there and below and cannot be
+  turned back on below; skill libraries keep it off): add or raise Viewers/Editors, change General access, remove
+  entries given directly on this folder, turn "No AI" on. Never Manager, restrict-here, "No AI" off, the toggle,
+  invitations, or confirming a widening. **Opening a folder wider to the whole team needs the Editor's step-up** for that
+  folder and that change (passkey where the server has its public https address, else an authenticator code; single
+  use, 2 minutes) — the one widest change is proven by a person, not a script driving their session.
+- **Agents never share.** `/api` reads only the session cookie (a PAT or OAuth Bearer gets 401 on every sharing route),
+  MCP has no sharing tool, WebDAV has no ACL method and refuses protected properties (`test/share-agents.test.ts`).
+- **R6 on every change of readers (review finding 1).** Before: rules changed on the web never re-judged AI-draft
+  copies, and copies in managed storage were never located, so an Editor could narrow a folder, let their AI promote
+  a draft there (not widening: written at once), then open it to the team. Now every sharing, rule, flag, people and
+  membership change (the People page, the console's member sync, an SSO sign-in that creates or reactivates someone) runs, in its own transaction: locate every live copy (NAS: the index; managed: the copy's file row
+  and its last path checked by identity, else a walk of the managed folders), compute its *excess readers* (target
+  readers who cannot read some source) before and after, and treat growth as widening (people and membership changes:
+  only a tracked copy that had none before — someone joining an audience a source manager confirmed, or a copy a
+  person placed wide on purpose, is not reopened). A widening change: the share API answers 409 `widening` (sources
+  the caller cannot read are counted, never named); a manager or admin may send `confirm_widening` — the copies then
+  close to agents and people until a manager of every source (or the admin) confirms them, unless the actor is such a
+  person (confirmed at once); an Editor's request goes to the approval inbox and is applied, as the requester, only
+  when a manager of every source (or the admin) approves it with a step-up. Source managers hear "N widened drafts"
+  (kind, count, link). The audit row of the change says `widens: N`.
+- **Hidden == nonexistent** holds for the dialog (a folder you cannot see is the same 404, also on POST), Shared with
+  me (judged again on every request) and the directory (names for members, addresses for the admin only). The dialog's
+  list is for people who open the folder, its managers and the admin; someone who sees the folder only as a path to
+  something below gets their own entries only. **Known exposure:** people given a subfolder see the names of the folders
+  on its path (not their contents) — the dialog says so.
+- **Notices without names (O7):** "Items were shared with you" carries kind, count and a link to `/#/shared` only.
+- **Audit:** every change is one row in the same transaction (`share /Projects: person:12 viewer→editor, general
+  team:viewer by editor widens: 3`, `restrict-here keep=2 drop=1`), flags also in `folder_history`.
+
 ### Mounting (WebDAV) and Google Drive import
 
 - **A mounted drive is a person, not an agent.** `/dav/` signs in with an app password (one per computer, shown once,
@@ -95,6 +145,10 @@ Backups (`tdrive backup`) do not yet include the managed root: back it up with t
   allows, only managed folders (in-place NAS folders are hidden on the mount), hidden == missing, and writes through
   the same `Managed` path (write rule, quota, versions, trash, audit with tool `webdav`). An app password skips the
   second factor (like any app password); making one needs the password typed within 5 minutes.
+  **A mount is not an AI connection (review finding 16):** "No AI" closes AI connections only, and a mounted drive is
+  the person, so an AI tool running on a computer with the drive mounted (Claude Code, Codex, …) reads and changes
+  what that person can, No AI folders included, originals included (not drafts). Connect AI through MCP for the
+  AI rules; mount only on computers where that is acceptable.
 - **Google Drive** (`drive.file`): Trina sees only the files a person picks. Refresh and access tokens are sealed with
   the install's data key (`TDRIVE_SECRET_KEY` or `<data>/keys/data.key`, 0600; not in backups), bound to the person.
   The OAuth round trip is bound to the browser that started it (state once + a SameSite=Lax cookie + PKCE). Imported

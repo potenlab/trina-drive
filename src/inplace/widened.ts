@@ -111,7 +111,7 @@ export class DraftCorpus {
 
 export interface IndexedFile { path: string; dev: string; ino: string; sha256: string; parent: { path: string; dev: string; ino: string; birthNs: string } }
 
-interface WidenedRow {
+export interface WidenedRow {
   id: number; dev: string; ino: string; path: string; sha256: string; draft_id: number; draft_version: number
   writer_person_id: number; writer_token_id: number; target_folder_id: number; match: string; overlap: number
   widening: number; ever_widening: number; status: 'tracked' | 'pending' | 'confirmed'
@@ -129,7 +129,7 @@ function notifyFor(db: DB, src: number[], target: number) {
 }
 
 /** Put a copy into "widened pending": close it to agents and tell the source managers (R6, R11). */
-function markPending(db: DB, w: WidenedRow, src: number[], now: number, rejudged: boolean) {
+export function markPending(db: DB, w: WidenedRow, src: number[], now: number, rejudged: boolean) {
   db.query("UPDATE widened SET status = 'pending', widening = 1, ever_widening = 1, judged_at = ? WHERE id = ?").run(now, w.id)
   const ev = addEvent(db, { kind: 'widened', path: w.path, dev: w.dev, ino: w.ino, folderId: w.target_folder_id, at: now,
     detail: { widened: w.id, draft: w.draft_id, version: w.draft_version, writer: w.writer_person_id, token: w.writer_token_id,
@@ -177,9 +177,10 @@ export function detectWidened(db: DB, corpus: DraftCorpus | null, f: IndexedFile
 }
 
 /**
- * Judge every tracked or pending copy again (R6: when rules, groups or NAS readers change, and on every reconcile).
- * A tracked copy that widens now becomes pending; a pending one stays pending until confirmed. Never deletes.
- * The admin layer calls this after any rule / group / NAS-reader / flag change.
+ * Judge every tracked or pending copy on the NAS again (on every reconcile and `widened rejudge`): a tracked copy that
+ * widens now becomes pending; a pending one stays pending until confirmed. Never deletes. Copies in managed storage
+ * (no index rows) are judged where they change instead: every rule, sharing and membership change runs the re-check
+ * in its own transaction (src/share/rejudge.ts withRejudge), comparing readers before and after the change.
  */
 export function rejudgeWidened(db: DB, now = Date.now()): { judged: number; flipped: number[] } {
   const flipped: number[] = []

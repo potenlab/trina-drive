@@ -13,10 +13,12 @@ import { accountOf, checkPasswordRules, createLink, FRESH_LOGIN_MS, markReauth, 
 import { ApiError, bad, rateLimited } from './http'
 import { ensureWebSchema, metaGet, metaSet } from './schema'
 import { everyoneGroup } from '../share/rules'
+import { everyoneId } from '../share/service'
 import { cloudConfig } from '../tdcloud/config'
 import { announceNewAdmins, cloudUserOf, isManaged } from '../tdcloud/people'
 import { MfaError, passkeyAssertionOptions, passkeyVerify, totpEnabled, totpVerify } from './mfa'
 import { pkConfig } from './approve'
+import { withRejudge } from '../share/rejudge'
 import { activeAdmins, checkEmail, checkName, groupRow, isUnique, now, personRow, record, requireAdmin, tell, type Op } from './op-common'
 
 const managedByConsole = () => new ApiError(409, 'managed_by_console', 'people are managed in the Trina Cloud console')
@@ -26,7 +28,8 @@ function consoleOnly(op: Op, personId?: number) {
 }
 /** Cloud mode: Everyone is a system group (= the active members, kept by the sync); nobody edits it here (review finding 13). */
 function systemGroup(op: Op, groupId: number) {
-  if (cloudConfig(op.w.db) && metaGet(op.w.db, 'everyone_group') === String(groupId)) throw managedByConsole()
+  // everyoneId: the recorded Everyone group, or the one adopted by name (everyone / 전체 / 전원) before it was recorded
+  if (cloudConfig(op.w.db) && everyoneId(op.w.db) === groupId) throw managedByConsole()
 }
 
 async function sendInvite(op: Op, personId: number, email: string) {
@@ -36,6 +39,9 @@ async function sendInvite(op: Op, personId: number, email: string) {
   return url
 }
 
+
+/** A1 (src/share/rejudge.ts): people and membership changes re-check AI-draft copies in their own transaction. */
+const MEMBERSHIP = { mode: 'membership' as const }
 export async function createPerson(op: Op, body: { name?: unknown; email?: unknown; admin?: unknown; groups?: unknown; everyone?: unknown }) {
   requireAdmin(op)
   consoleOnly(op)
@@ -46,12 +52,12 @@ export async function createPerson(op: Op, body: { name?: unknown; email?: unkno
   const db = op.w.db
   let id = 0
   try {
-    db.transaction(() => {
+    withRejudge(db, () => { // A1: membership changes re-check AI-draft copies (R6) in the same transaction
       id = addPerson(db, name, body.admin === true).id
       db.query('INSERT INTO accounts (person_id, email, created_at) VALUES (?, ?, ?)').run(id, email, now())
       for (const g of new Set(groups)) db.query('INSERT OR IGNORE INTO memberships (group_id, person_id) VALUES (?, ?)').run(g, id)
       record(op, `person add ${name}${body.admin === true ? ' --admin' : ''}`)
-    })()
+    }, MEMBERSHIP)
   } catch (e) { if (isUnique(e)) throw new ApiError(409, 'exists', 'that name or mail address is taken'); throw e }
   const invite_url = await sendInvite(op, id, email)
   return { id, invite_url }
@@ -87,7 +93,7 @@ export async function updatePerson(op: Op, id: unknown, body: { admin?: unknown;
   if (body.active === true && !p.active) checkPeopleRoom(db)
   let oldEmail: string | undefined
   try {
-    db.transaction(() => {
+    withRejudge(db, () => {
       if (typeof body.admin === 'boolean') { db.query('UPDATE people SET admin = ? WHERE id = ?').run(body.admin ? 1 : 0, p.id); record(op, `person ${p.name} admin=${body.admin}`) }
       if (typeof body.active === 'boolean') {
         db.query('UPDATE people SET active = ? WHERE id = ?').run(body.active ? 1 : 0, p.id)
@@ -102,7 +108,7 @@ export async function updatePerson(op: Op, id: unknown, body: { admin?: unknown;
         else db.query('INSERT INTO accounts (person_id, email, created_at) VALUES (?, ?, ?)').run(p.id, email, now())
         record(op, `person ${p.name} email changed`)
       }
-    })()
+    }, MEMBERSHIP)
   } catch (e) { if (isUnique(e)) throw new ApiError(409, 'exists', 'that mail address is taken'); throw e }
   // R9: an address change is told at the old address
   if (oldEmail) await tell(op, [p.id], 'email_changed', '/#/settings', { to: oldEmail })
@@ -163,13 +169,13 @@ export function deleteGroup(op: Op, id: unknown) {
   const g = groupRow(op, id)
   systemGroup(op, g.id)
   const db = op.w.db
-  db.transaction(() => {
+  withRejudge(db, () => {
     db.query(`DELETE FROM rules WHERE subject_type = 'group' AND subject_id = ?`).run(g.id)
     db.query('DELETE FROM memberships WHERE group_id = ?').run(g.id)
     db.query('DELETE FROM groups WHERE id = ?').run(g.id)
     if (metaGet(db, 'everyone_group') === String(g.id)) metaSet(db, 'everyone_group', null)
     record(op, `group delete ${g.name}`)
-  })()
+  }, MEMBERSHIP)
   return { ok: true }
 }
 
@@ -178,11 +184,11 @@ export async function setMember(op: Op, groupId: unknown, personId: unknown, mem
   const g = groupRow(op, groupId), p = personRow(op, personId)
   systemGroup(op, g.id)
   const db = op.w.db
-  db.transaction(() => {
+  withRejudge(db, () => {
     if (member) db.query('INSERT OR IGNORE INTO memberships (group_id, person_id) VALUES (?, ?)').run(g.id, p.id)
     else db.query('DELETE FROM memberships WHERE group_id = ? AND person_id = ?').run(g.id, p.id)
     record(op, `group member ${g.name} ${member ? '+' : '-'}${p.name}`)
-  })()
+  }, MEMBERSHIP)
   // R9: an admin putting themselves in a group tells the managers of every folder that group reads, and themselves
   if (member && p.id === op.actor.personId && op.actor.admin) {
     const r = new Rights(db)

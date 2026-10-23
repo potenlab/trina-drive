@@ -4,6 +4,7 @@
 // with a second factor on this drive, hands over to /#/sso-second/<ticket> first. `reauth=1` asks the console for the
 // password again (max_age=0): the new session then counts as a fresh login (2FA changes, app passwords, provenance
 // reset), which is how a person without a drive password re-authenticates (review finding 4).
+import { tellWidened, withRejudge, type Judgement } from '../share/rejudge'
 import crypto from 'node:crypto'
 import { appendAudit } from '../audit'
 import type { DB } from '../db'
@@ -133,8 +134,10 @@ export async function callback(w: WebCtx, req: Request, addr: string, base: stri
   }
   const c = v.claims
   let who!: SignedIn, stored!: { return_to: string; reauth: number }
+  let widened: Judgement | null = null
   try {
-    db.transaction(() => {
+    // a new or reactivated person joins Everyone here: the R6 re-check runs in the same transaction (src/share/rejudge.ts)
+    widened = withRejudge(db, () => {
       // single use, even with two posts at the same moment
       if (db.query('INSERT OR IGNORE INTO sso_used (jti, expires_at) VALUES (?, ?)').run(c.jti, c.exp + 60).changes !== 1) throw new SsoFail('replayed')
       const s = db.query<{ return_to: string; reauth: number }, [string, number]>('DELETE FROM sso_states WHERE state_hash = ? AND created_at >= ? RETURNING return_to, reauth').get(stateHash(state!), nowMs - STATE_TTL_MS)
@@ -148,7 +151,7 @@ export async function callback(w: WebCtx, req: Request, addr: string, base: stri
       // review finding 3: an owner/admin whose console sign-in had no TOTP is worth a look
       if ((c.role === 'owner' || c.role === 'admin') && !c.amr.includes('totp'))
         appendAudit(db, { personId: who.personId, tokenId: null, tool: 'cloud', command: `warning: ${c.role} ${name} signed in without a console TOTP (amr ${c.amr.join('+')})`, files: [], outcome: 'warning' })
-    })()
+    }, { mode: 'membership' }).judgement
   } catch (e) {
     const code = e instanceof SsoFail ? e.code : e instanceof PeopleLimitError ? 'people_limit' : null
     if (!code) throw e
@@ -156,6 +159,7 @@ export async function callback(w: WebCtx, req: Request, addr: string, base: stri
     return failTo(req, code)
   }
   if (who.newAdmin) await announceNewAdmins({ db, mailer: w.mailer, baseUrl: base }, [who.personId], 'Trina Cloud sign-in')
+  if (widened) await tellWidened({ db, mailer: w.mailer, baseUrl: base }, widened)
   const returnTo = safeReturn(stored.return_to)
   const authAt = c.auth_time * 1000
   const fresh = !!stored.reauth && nowS - c.auth_time <= REAUTH_WINDOW_S

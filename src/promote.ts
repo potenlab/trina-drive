@@ -29,6 +29,8 @@ import { indexLater } from './managed/ops'
 import { versionsKept } from './managed/settings'
 import type { Mirror } from './mirror'
 import { ensureWebSchema } from './web/schema'
+import { addColumns } from './migrations'
+import { applyShareApproval, shareApprovalDetail, shareApproverStatus } from './share/approvals'
 
 export const APPROVAL_TTL_MS = 7 * 86400_000
 export const MAX_PENDING_PER_PERSON = 20
@@ -64,6 +66,9 @@ export function ensurePromoteSchema(db: DB) {
   // managed storage: a promote may replace an existing file (it becomes an earlier version, so nothing is lost)
   if (!db.query<{ name: string }, []>('PRAGMA table_info(approvals)').all().some((c) => c.name === 'overwrite'))
     db.exec('ALTER TABLE approvals ADD COLUMN overwrite INTEGER NOT NULL DEFAULT 0')
+  // sharing (src/share/approvals.ts): an Editor's sharing change that widens AI-draft copies waits here too.
+  // kind NULL = a promote; 'share' = payload holds the change (draft columns are 0/'' for those rows)
+  addColumns(db, 'approvals', [['kind', 'TEXT'], ['payload', 'TEXT']])
   done.add(db)
 }
 
@@ -366,6 +371,8 @@ export interface ApprovalRow {
   draft_path: string; requester_person_id: number; requester_token_id: number | null; target_folder_id: number; target_vpath: string
   name: string; reason: string | null; src: string; gain: number; decided_at: number | null; decided_by: number | null
   decision_reason: string | null; promotion_id: number | null; overwrite?: number
+  /** null = a draft promote; 'share' = a sharing change (payload = the change as JSON) */
+  kind?: string | null; payload?: string | null
 }
 
 export const approvalById = (db: DB, id: number) => { ensurePromoteSchema(db); return db.query<ApprovalRow, [number]>('SELECT * FROM approvals WHERE id = ?').get(id) }
@@ -412,6 +419,7 @@ export interface Eligibility { eligible: boolean; via: 'target' | 'sources' | nu
  */
 export function approverStatus(db: DB, a: ApprovalRow, personId: number, rights = new Rights(db), src = approvalSources(db, a)): Eligibility {
   ensurePromoteSchema(db)
+  if (a.kind === 'share') return shareApproverStatus(db, a, personId, rights)
   const p = db.query<{ active: number }, [number]>('SELECT p.active FROM people p JOIN accounts a ON a.person_id = p.id WHERE p.id = ?').get(personId)
   if (!p || !p.active) return { eligible: false, via: null, why: 'not an active person with a sign-in' }
   const access = new Access(db, { personId })
@@ -471,6 +479,10 @@ export function approve(db: DB, blobs: Blobs, id: number, approverId: number, sh
   if (sha !== a.sha256) throw new PromoteError('hash_mismatch', 'this approval is for another version of the draft; reload the page', 409)
   const el = approverStatus(db, a, approverId)
   if (!el.eligible) throw new PromoteError('not_eligible', `you cannot approve this request (${el.why})`, 403)
+  if (a.kind === 'share') {
+    const { vpath } = applyShareApproval(db, a, approverId, now)
+    return { approval: approvalById(db, a.id)!, promotionId: 0, vpath, placed: { real: '', dev: '', ino: '' } }
+  }
   const l = latest(db, a.draft_id)
   if (!l || l.deleted_at != null || l.sha256 !== a.sha256) {
     db.query("UPDATE approvals SET status = 'stale', decided_at = ?, decided_by = ?, decision_reason = 'the draft changed after the request' WHERE id = ?").run(now, approverId, a.id)
@@ -517,7 +529,7 @@ export function reject(db: DB, id: number, personId: number, reason: unknown, no
   if (!own && !why) throw new PromoteError('reason_required', 'say why you reject it (the requester sees this)')
   db.transaction(() => {
     db.query('UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, decision_reason = ? WHERE id = ?').run(own ? 'cancelled' : 'rejected', now, personId, why || null, a.id)
-    appendAudit(db, { personId, tokenId: null, tool: 'web', outcome: 'ok', files: [], command: `${own ? 'cancel' : 'reject'} promote #${a.id}` })
+    appendAudit(db, { personId, tokenId: null, tool: 'web', outcome: 'ok', files: [], command: `${own ? 'cancel' : 'reject'} ${a.kind === 'share' ? 'share' : 'promote'} #${a.id}` })
   })()
   return approvalById(db, a.id)!
 }
@@ -545,7 +557,7 @@ export function approvalsFor(db: DB, personId: number, now = Date.now()) {
 
 function summary(db: DB, a: ApprovalRow, canDecide: boolean, mine: boolean) {
   return {
-    id: a.id, status: a.status, created_at: a.created_at, expires_at: a.expires_at, decided_at: a.decided_at,
+    id: a.id, kind: a.kind === 'share' ? 'share' as const : 'promote' as const, status: a.status, created_at: a.created_at, expires_at: a.expires_at, decided_at: a.decided_at,
     target: a.target_vpath, name: a.name, size: a.size, gain: a.gain, can_decide: canDecide, mine, overwrite: !!a.overwrite,
     requester: nameOf(db, a.requester_person_id), via: a.requester_token_id != null ? 'agent' : 'web',
   }
@@ -582,6 +594,8 @@ export function approvalDetail(db: DB, blobs: Blobs, id: number, personId: numbe
   const el = a.status === 'pending' ? approverStatus(db, a, personId) : { eligible: false, via: null, why: null }
   const mine = a.requester_person_id === personId
   if (!el.eligible && !mine && a.decided_by !== personId) throw new PromoteError('not_found', 'not found', 404)
+  if (a.kind === 'share') return { ...summary(db, a, el.eligible, mine), sha256: a.sha256, decided_by: nameOf(db, a.decided_by), decision_reason: a.decision_reason,
+    approvers_exist: a.status === 'pending' ? eligibleApprovers(db, a).length > 0 : null, via_eligibility: el.via, ...shareApprovalDetail(db, a, personId, el.eligible) }
   const src = approvalSources(db, a)
   const access = new Access(db, { personId })
   const base = {
