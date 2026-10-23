@@ -17,6 +17,12 @@ import { ConfirmDialog, errMsg, FolderPicker, Menu, NameDialog, Toast, TrashView
 import { droppedFiles, pickedFiles, uploadInto, uploads } from './files-upload'
 import { connectGdrive, GdrivePanel, gdriveJobs, gdriveOutcome, importFromGdrive, loadGdrive, useGdrive } from './GDrive'
 import { dt } from './drive-i18n'
+import { Icon as LineIcon } from '../drive/Icon'
+import { FileGlyph } from '../drive/FileGlyph'
+import { DRAG_TYPE as TREE_DRAG_TYPE } from '../drive/Tree'
+import { ShareDialog } from '../drive/ShareDialog'
+import { filesChanged, handleNew, setHere, treeStale } from '../drive/store'
+import { t } from '../i18n'
 import './files.css'
 
 // ---------- shapes (src/web/files.ts) ----------
@@ -48,7 +54,7 @@ function parseRoute(route: string) {
   return { path: path.startsWith('/') ? path : '/' + path, q: p.get('q') ?? '', sel: p.get('s'), trash: route === '/trash' }
 }
 /** Dragged items inside the page (a move), as opposed to files from the computer (an upload). */
-const DRAG_TYPE = 'application/x-trina-drive-paths'
+const DRAG_TYPE = TREE_DRAG_TYPE
 const enc = encodeURIComponent
 const parentOf = (p: string) => p.slice(0, p.lastIndexOf('/')) || '/'
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
@@ -79,8 +85,8 @@ function iconOf(it: { kind: string; ext?: string | null; name: string }): { icon
   return { icon: '📄', type: 'other' }
 }
 const Icon = ({ it, big }: { it: { kind: string; ext?: string | null; name: string }; big?: boolean }) => {
-  const { icon, type } = iconOf(it)
-  return <span className={`fv-icon fv-t-${type} ${big ? 'big' : ''}`} aria-hidden="true">{icon}</span>
+  const { type } = iconOf(it)
+  return <span className={`fv-icon fv-t-${type} ${big ? 'big' : ''}`} aria-hidden="true"><FileGlyph type={type} size={big ? 44 : 22} /></span>
 }
 
 /** The query marked inside a text, as React text (never HTML). */
@@ -136,7 +142,7 @@ export function Files({ route }: { route: string }) {
   const [view, setView] = useStored<'list' | 'grid'>(`${NAME}.files.view`, 'list', ['list', 'grid'])
   const [sortKey, setSortKey] = useStored<SortKey>(`${NAME}.files.sort`, 'name', ['name', 'date', 'size'])
   const [order, setOrder] = useStored<'asc' | 'desc'>(`${NAME}.files.order`, 'asc', ['asc', 'desc'])
-  const [treeOpen, setTreeOpen] = useState(false)
+  const [sharing, setSharing] = useState<{ path: string; name: string } | null>(null)
   const [reloadN, setReloadN] = useState(0)
   const [drafts, setDrafts] = useState<number | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: FileItem[] } | null>(null)
@@ -147,7 +153,9 @@ export function Files({ route }: { route: string }) {
   const listRef = useRef<HTMLUListElement>(null)
   const filesInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
-  const reload = useCallback(() => setReloadN((n) => n + 1), [])
+  const reload = useCallback(() => { setReloadN((n) => n + 1); treeStale.send(path) }, [path])
+  // a drop on the sidebar's tree changed a folder: reload when it is this one
+  useEffect(() => filesChanged.on((folder) => { if (folder === path) setReloadN((n) => n + 1) }), [path])
 
   // a finished upload (or Google Drive import) into the folder on screen refreshes it
   useEffect(() => { uploads.onChanged((folder) => { if (folder === path) reload() }) }, [path, reload])
@@ -197,6 +205,10 @@ export function Files({ route }: { route: string }) {
   const writable = !!listing?.writable && !q && !trash
   const chosen = items.filter((x) => sel.has(x.path))
   const selected = chosen.length === 1 && detailOpen ? chosen[0]! : null
+  // the frame's "+ New" works on the folder on screen
+  useEffect(() => { setHere({ path, writable, managed: !!listing?.managed, files: !trash && !q }) }, [path, writable, listing?.managed, trash, q])
+  useEffect(() => { handleNew(writable ? (x, y) => setNewMenu({ x, y }) : null); return () => handleNew(null) }, [writable])
+  useEffect(() => () => setHere({ files: false }), [])
 
   const openItem = useCallback((it: FileItem | Hit) => {
     if (it.kind === 'folder') { go(filesRoute(it.path)); return }
@@ -247,20 +259,19 @@ export function Files({ route }: { route: string }) {
     try { report(await api('POST', '/files/move', { paths, to }), (n) => ft('moved_n', { n })) } catch (e) { setToast({ text: errMsg(e), error: true }) }
     reload()
   }
-  const share = async (p: string) => {
-    try { const r = await api<{ folder_id: number }>('POST', '/files/share', { path: p }); go(`/folders/${r.folder_id}`) } catch (e) { setToast({ text: errMsg(e), error: true }) }
-  }
+  const share = (p: string) => setSharing({ path: p, name: p === '/' ? ft('home') : show(baseName(p)) })
   const actionsFor = (list: FileItem[]): MenuAction[] => {
     const one = list.length === 1 ? list[0]! : null
     return [
-      { label: ft('open'), icon: '↗', onClick: () => one && openItem(one), hidden: !one },
-      { label: ft('download'), icon: '⤓', onClick: () => { if (one) window.location.href = '/api/files/download?path=' + enc(one.path) }, hidden: !one || one.kind !== 'file' },
-      { label: ft('rename'), icon: '✎', kbd: 'F2', onClick: () => one && setDialog({ kind: 'rename', item: one }), hidden: !one || !writable },
-      { label: ft('move_to'), icon: '→', onClick: () => setDialog({ kind: 'move', items: list }), hidden: !writable },
-      { label: ft('copy_to'), icon: '⧉', onClick: () => setDialog({ kind: 'copy', items: list }), hidden: list.some((x) => x.kind !== 'file') || !listing?.managed },
-      { label: ft('versions'), icon: '🕘', onClick: () => { setSel(new Set([one!.path])); setDetailOpen(true) }, hidden: !one || one.kind !== 'file' || !listing?.managed },
-      { label: ft('who_title'), icon: '👥', onClick: () => { setSel(new Set([one!.path])); setDetailOpen(true) }, hidden: !one },
-      { label: ft('delete'), icon: '🗑', kbd: 'Del', danger: true, onClick: () => doDelete(list), hidden: !writable },
+      { label: ft('open'), icon: <LineIcon name="external" size={18} />, onClick: () => one && openItem(one), hidden: !one },
+      { label: ft('download'), icon: <LineIcon name="download" size={18} />, onClick: () => { if (one) window.location.href = '/api/files/download?path=' + enc(one.path) }, hidden: !one || one.kind !== 'file' },
+      { label: ft('rename'), icon: <LineIcon name="edit" size={18} />, kbd: 'F2', onClick: () => one && setDialog({ kind: 'rename', item: one }), hidden: !one || !writable },
+      { label: ft('move_to'), icon: <LineIcon name="move" size={18} />, onClick: () => setDialog({ kind: 'move', items: list }), hidden: !writable },
+      { label: ft('copy_to'), icon: <LineIcon name="copy" size={18} />, onClick: () => setDialog({ kind: 'copy', items: list }), hidden: list.some((x) => x.kind !== 'file') || !listing?.managed },
+      { label: ft('versions'), icon: <LineIcon name="recent" size={18} />, onClick: () => { setSel(new Set([one!.path])); setDetailOpen(true) }, hidden: !one || one.kind !== 'file' || !listing?.managed },
+      { label: t('share_action'), icon: <LineIcon name="shared" size={18} />, onClick: () => one && share(one.path), hidden: !one || one.kind !== 'folder' || !listing?.managed },
+      { label: ft('who_title'), icon: <LineIcon name="info" size={18} />, onClick: () => { setSel(new Set([one!.path])); setDetailOpen(true) }, hidden: !one },
+      { label: ft('delete'), icon: <LineIcon name="trash" size={18} />, kbd: 'Del', danger: true, onClick: () => doDelete(list), hidden: !writable },
     ]
   }
   const openMenu = (x: number, y: number, it: FileItem, i: number) => {
@@ -338,10 +349,10 @@ export function Files({ route }: { route: string }) {
   const crumbs = path === '/' ? [] : path.slice(1).split('/')
   const where = path === '/' ? ft('home') : show(path)
   const newMenuActions: MenuAction[] = [
-    { label: ft('new_folder'), icon: '📁', onClick: () => setDialog({ kind: 'newfolder' }) },
-    { label: ft('upload_files'), icon: '⤒', onClick: () => filesInput.current?.click() },
-    { label: ft('upload_folder'), icon: '🗂', onClick: () => folderInput.current?.click() },
-    ...(gd?.enabled ? [{ label: dt('gd_import'), icon: '⇩', onClick: () => {
+    { label: ft('new_folder'), icon: <LineIcon name="folderPlus" size={18} />, onClick: () => setDialog({ kind: 'newfolder' }) },
+    { label: ft('upload_files'), icon: <LineIcon name="upload" size={18} />, onClick: () => filesInput.current?.click() },
+    { label: ft('upload_folder'), icon: <LineIcon name="folderUp" size={18} />, onClick: () => folderInput.current?.click() },
+    ...(gd?.enabled ? [{ label: dt('gd_import'), icon: <LineIcon name="drive" size={18} />, onClick: () => {
       const run = gd.connected ? importFromGdrive(path) : connectGdrive(filesRoute(path))
       run.catch((x) => setToast({ text: x instanceof Error && !(x instanceof ApiError) ? x.message : errMsg(x), error: true }))
     } }] : []),
@@ -349,16 +360,11 @@ export function Files({ route }: { route: string }) {
 
   return (
     <div className={`fv ${selected && !trash ? 'with-detail' : ''}`}>
-      <aside className={`fv-side ${treeOpen ? 'open' : ''}`} aria-label={ft('folders')}>
-        <Tree current={trash ? '' : path} drafts={drafts} trash={trash} onPick={() => setTreeOpen(false)} reloadN={reloadN} dropAt={dropAt} over={over} drop={drop} />
-      </aside>
-      {treeOpen && <div className="fv-scrim" onClick={() => setTreeOpen(false)} />}
 
       <section className={`fv-main ${dropAt === path && !trash ? 'drop-on' : ''}`}
         onDragOver={!trash && !q ? over(path, writable) : undefined} onDragLeave={(e) => { if (e.currentTarget === e.target) setDropAt(null) }}
         onDrop={!trash && !q ? drop(path, writable) : undefined}>
         <div className="fv-bar">
-          <button type="button" className="btn small fv-tree-toggle" aria-expanded={treeOpen} onClick={() => setTreeOpen(!treeOpen)}>☰ {ft('show_folders')}</button>
           {trash ? <nav className="fv-crumbs"><span className="here">{ft('trash')}</span></nav> : (
             <nav className="fv-crumbs" aria-label="breadcrumb">
               <a href={'#' + filesRoute('/')} className={crumbs.length ? '' : 'here'}>{ft('home')}</a>
@@ -368,14 +374,14 @@ export function Files({ route }: { route: string }) {
               })}
             </nav>
           )}
-          {writable && <button type="button" className="btn primary small fv-new" aria-haspopup="menu" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setNewMenu({ x: r.left, y: r.bottom + 4 }) }}>＋ {ft('new')}</button>}
+          {!trash && !q && path !== '/' && listing?.managed && <button type="button" className="btn small fv-share" onClick={() => share(path)}><LineIcon name="shared" size={16} />{t('share_action')}</button>}
           <input ref={filesInput} type="file" multiple hidden onChange={async (e) => { const f = e.target.files; if (f?.length) { try { await uploadInto(path, pickedFiles(f)) } catch (x) { setToast({ text: errMsg(x), error: true }) } } e.target.value = '' }} />
           <input ref={folderInput} type="file" multiple hidden {...{ webkitdirectory: '', directory: '' }} onChange={async (e) => { const f = e.target.files; if (f?.length) { try { await uploadInto(path, pickedFiles(f)); reload() } catch (x) { setToast({ text: errMsg(x), error: true }) } } e.target.value = '' }} />
         </div>
 
         {trash ? <TrashView /> : <>
         <div className="fv-tools">
-          <SearchBox key={path + '|' + q} path={path} q={q} />
+          {q && <button type="button" className="btn small ghost" onClick={() => go(filesRoute(path))}><LineIcon name="close" size={14} />{ft('clear')}</button>}
           {!q && <div className="fv-view">
             <label className="fv-sort"><span className="sr">{ft('sort_by')}</span>
               <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} aria-label={ft('sort_by')}>
@@ -384,8 +390,8 @@ export function Files({ route }: { route: string }) {
             </label>
             <button type="button" className="btn small" onClick={() => setOrder(order === 'asc' ? 'desc' : 'asc')} title={order === 'asc' ? ft('sort_asc') : ft('sort_desc')} aria-label={order === 'asc' ? ft('sort_asc') : ft('sort_desc')}>{order === 'asc' ? '↑' : '↓'}</button>
             <div className="seg-btns" role="group">
-              <button type="button" className={`btn small ${view === 'list' ? 'on' : ''}`} aria-pressed={view === 'list'} onClick={() => setView('list')} title={ft('view_list')}>☰<span className="sr">{ft('view_list')}</span></button>
-              <button type="button" className={`btn small ${view === 'grid' ? 'on' : ''}`} aria-pressed={view === 'grid'} onClick={() => setView('grid')} title={ft('view_grid')}>▦<span className="sr">{ft('view_grid')}</span></button>
+              <button type="button" className={`btn small ${view === 'list' ? 'on' : ''}`} aria-pressed={view === 'list'} onClick={() => setView('list')} title={ft('view_list')}><LineIcon name="list" size={16} /><span className="sr">{ft('view_list')}</span></button>
+              <button type="button" className={`btn small ${view === 'grid' ? 'on' : ''}`} aria-pressed={view === 'grid'} onClick={() => setView('grid')} title={ft('view_grid')}><LineIcon name="grid" size={16} /><span className="sr">{ft('view_grid')}</span></button>
             </div>
           </div>}
         </div>
@@ -427,7 +433,7 @@ export function Files({ route }: { route: string }) {
         ) : !listing && !error ? <p className="muted">…</p> : listing && <>
           {path === '/' && (
             <a className="fv-drafts" href="#/drafts" title={ft('my_drafts_help')}>
-              <span className="fv-icon" aria-hidden="true">🗂️</span>
+              <span className="fv-icon" aria-hidden="true"><LineIcon name="drafts" /></span>
               <span><span className="fv-name">{drafts ? ft('my_drafts_n', { n: drafts }) : ft('my_drafts')}</span><span className="muted small"> · {ft('my_drafts_help')}</span></span>
             </a>
           )}
@@ -466,7 +472,7 @@ export function Files({ route }: { route: string }) {
         </>}
       </section>
 
-      {selected && !trash && <Detail key={selected.path + reloadN} item={selected} managed={!!listing?.managed} writable={writable} onShare={share} onChanged={reload}
+      {selected && !trash && <Detail key={selected.path + reloadN} item={selected} managed={!!listing?.managed} writable={writable} onShare={share} onChanged={(note) => { if (note) setToast({ text: note }); reload() }}
         onAction={(a) => a === 'rename' ? setDialog({ kind: 'rename', item: selected }) : a === 'move' ? setDialog({ kind: 'move', items: [selected] }) : doDelete([selected])}
         onClose={() => { setDetailOpen(false); listRef.current?.focus() }} />}
 
@@ -485,6 +491,7 @@ export function Files({ route }: { route: string }) {
           reload()
         }} />}
       {dialog?.kind === 'delete' && <ConfirmDialog title={ft('delete')} text={ft('confirm_delete', { n: dialog.items.length })} action={ft('delete')} danger onClose={() => setDialog(null)} onConfirm={() => doDelete(dialog.items)} />}
+      {sharing && <ShareDialog path={sharing.path} name={sharing.name} onClose={() => { setSharing(null); reload() }} />}
       {toast && <Toast msg={toast} onClose={() => setToast(null)} />}
       <UploadPanel />
       <GdrivePanel />
@@ -492,82 +499,9 @@ export function Files({ route }: { route: string }) {
   )
 }
 
-// ---------- search box ----------
-function SearchBox({ path, q }: { path: string; q: string }) {
-  const [v, setV] = useState(q)
-  return (
-    <form className="fv-search" role="search" onSubmit={(e) => { e.preventDefault(); const s = v.trim(); go(filesRoute(path, s ? { q: s } : {})) }}>
-      <input type="search" value={v} onChange={(e) => setV(e.target.value)} placeholder={path === '/' ? ft('search_placeholder') : ft('search_in', { folder: show(baseName(path)) })}
-        aria-label={ft('search_placeholder')} maxLength={200} />
-      <button type="submit" className="btn small primary">{ft('search')}</button>
-      {q && <button type="button" className="btn small ghost" onClick={() => go(filesRoute(path))}>{ft('clear')}</button>}
-    </form>
-  )
-}
-
-// ---------- folder tree (lazy: a folder's children load when it opens; folders you may change take drops) ----------
-type DropHandler = (target: string, ok: boolean) => (e: DragEvent) => void
-function Tree({ current, drafts, trash, onPick, reloadN, dropAt, over, drop }: {
-  current: string; drafts: number | null; trash: boolean; onPick: () => void; reloadN: number; dropAt: string | null; over: DropHandler; drop: DropHandler
-}) {
-  const [kids, setKids] = useState<Record<string, FileItem[] | 'error'>>({})
-  const [open, setOpen] = useState<Set<string>>(() => new Set(['/']))
-  const loading = useRef(new Set<string>())
-  const load = useCallback((p: string, again = false) => {
-    if (loading.current.has(p) && !again) return
-    loading.current.add(p)
-    get<Listing>('/files?path=' + enc(p)).then(
-      (l) => setKids((k) => ({ ...k, [p]: sorted(l.entries.filter((x) => x.kind === 'folder'), 'name', false) })),
-      () => setKids((k) => ({ ...k, [p]: 'error' })))
-  }, [])
-  // open the way down to the current folder
-  useEffect(() => {
-    if (!current) { load('/'); return } // the trash page: the top level still shows
-    const chain = ['/']
-    if (current !== '/') current.slice(1).split('/').forEach((_, i, a) => chain.push('/' + a.slice(0, i + 1).join('/')))
-    setOpen((o) => { const n = new Set(o); chain.forEach((c) => n.add(c)); return n })
-    chain.forEach((c) => load(c))
-  }, [current, load])
-  // after a change (new folder, move, rename) the open branches load again
-  const openRef = useRef(open)
-  openRef.current = open
-  useEffect(() => { if (reloadN) openRef.current.forEach((p) => load(p, true)) }, [reloadN, load])
-  const toggle = (p: string) => setOpen((o) => { const n = new Set(o); if (n.has(p)) n.delete(p); else { n.add(p); load(p) } return n })
-
-  const render = (p: string, depth: number): ReactNode => {
-    const k = kids[p]
-    if (!open.has(p)) return null
-    if (k === undefined) return <li className="muted small" style={{ paddingLeft: `${depth * 0.9 + 1.6}rem` }}>…</li>
-    if (k === 'error') return null
-    return k.map((f) => (
-      <li key={f.path}>
-        <div className={`fv-tree-row ${f.path === current ? 'here' : ''} ${dropAt === f.path ? 'drop-on' : ''}`} style={{ paddingLeft: `${depth * 0.9 + 0.2}rem` }}
-          onDragOver={over(f.path, !!f.writable)} onDrop={drop(f.path, !!f.writable)}>
-          <button type="button" className="fv-caret" aria-label={open.has(f.path) ? '−' : '+'} aria-expanded={open.has(f.path)} onClick={() => toggle(f.path)}>{open.has(f.path) ? '▾' : '▸'}</button>
-          <a href={'#' + filesRoute(f.path)} onClick={onPick} aria-current={f.path === current ? 'page' : undefined}>
-            <span aria-hidden="true">📁</span> {show(f.name)}
-          </a>
-        </div>
-        {open.has(f.path) && <ul>{render(f.path, depth + 1)}</ul>}
-      </li>
-    ))
-  }
-  return (
-    <nav className="fv-tree">
-      <ul>
-        <li><div className={`fv-tree-row ${current === '/' ? 'here' : ''}`}><a href={'#' + filesRoute('/')} onClick={onPick}><span aria-hidden="true">🏠</span> {ft('home')}</a></div>
-          <ul>{render('/', 1)}</ul>
-        </li>
-        <li className="fv-tree-drafts"><div className="fv-tree-row"><a href="#/drafts" onClick={onPick}><span aria-hidden="true">🗂️</span> {drafts ? ft('my_drafts_n', { n: drafts }) : ft('my_drafts')}</a></div></li>
-        <li><div className={`fv-tree-row ${trash ? 'here' : ''}`}><a href="#/trash" onClick={onPick} aria-current={trash ? 'page' : undefined}><span aria-hidden="true">🗑️</span> {ft('trash')}</a></div></li>
-      </ul>
-    </nav>
-  )
-}
-
 // ---------- detail panel ----------
 function Detail({ item, onClose, managed, writable, onShare, onChanged, onAction }: {
-  item: FileItem; onClose: () => void; managed: boolean; writable: boolean; onShare: (path: string) => void; onChanged: () => void
+  item: FileItem; onClose: () => void; managed: boolean; writable: boolean; onShare: (path: string) => void; onChanged: (note?: string) => void
   onAction: (a: 'rename' | 'move' | 'delete') => void
 }) {
   const [who, setWho] = useState<Who | null>(null)
@@ -608,7 +542,7 @@ function Detail({ item, onClose, managed, writable, onShare, onChanged, onAction
       <section className="fv-who">
         <h3>{ft('who_title')}</h3>
         {whoErr ? <p className="muted small">{whoErr}</p> : !who ? <p className="muted small">…</p> : <WhoView who={who} />}
-        {who?.can_share && <button type="button" className="btn small" onClick={() => onShare(item.kind === 'folder' ? item.path : parentOf(item.path))}>👥 {ft('share_settings')}</button>}
+        {who?.can_share && item.kind === 'folder' && <button type="button" className="btn small" onClick={() => onShare(item.path)}><LineIcon name="shared" size={16} />{t('share_action')}</button>}
       </section>
       {managed && item.kind === 'file' && <Versions path={item.path} name={item.name} onChanged={onChanged} />}
       {textOpen && <TextViewer item={item} onClose={() => setTextOpen(false)} />}

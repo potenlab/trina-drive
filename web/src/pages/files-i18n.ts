@@ -3,7 +3,7 @@
 import { getLocale } from '../i18n'
 
 const en = {
-  nav_files: 'Files', files_title: 'Files', home: 'All files', folders: 'Folders', show_folders: 'Folders', hide_folders: 'Hide folders',
+  nav_files: 'Files', files_title: 'Files', home: 'Team folders', folders: 'Folders', show_folders: 'Folders', hide_folders: 'Hide folders',
   my_drafts: 'My drafts', my_drafts_n: 'My drafts ({n})', my_drafts_help: 'What your agents wrote. Opens the drafts page.',
   search_placeholder: 'Search names and text', search_in: 'Search in {folder}', search: 'Search', clear: 'Clear',
   results_for: 'Results for “{q}” in {folder}', results_none: 'Nothing found.', results_more: 'Showing the first {n}. Narrow the search to see the rest.',
@@ -49,7 +49,7 @@ const en = {
 type Key = keyof typeof en
 
 const ko: Record<Key, string> = {
-  nav_files: '파일', files_title: '파일', home: '전체 파일', folders: '폴더', show_folders: '폴더', hide_folders: '폴더 닫기',
+  nav_files: '파일', files_title: '파일', home: '팀 폴더', folders: '폴더', show_folders: '폴더', hide_folders: '폴더 닫기',
   my_drafts: '내 초안', my_drafts_n: '내 초안 ({n})', my_drafts_help: '에이전트가 쓴 초안입니다. 초안함으로 갑니다.',
   search_placeholder: '이름과 본문 검색', search_in: '{folder}에서 검색', search: '검색', clear: '지우기',
   results_for: '{folder}에서 “{q}” 검색 결과', results_none: '찾은 것이 없습니다.', results_more: '앞의 {n}개만 보입니다. 검색 범위를 좁혀 보세요.',
