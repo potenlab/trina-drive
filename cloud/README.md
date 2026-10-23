@@ -307,19 +307,18 @@ natural next step; not built). The container, limits and keys stay the same.
 
 Needs a change in the product (`src/`, `web/`, owned by the product engineers; not touched here):
 
-1. **Client addresses behind Caddy (launch blocker).** The team server's main listener sees Caddy's address on every
-   request, so its per-address limits become per-team: 30 bad tokens a minute from anyone would lock the whole team
-   out of `/mcp`, and 50 failed sign-ins in 15 minutes out of the web. Caddy's per-client limits narrow it but do not
-   remove it. Fix: a `serve --trusted-proxy <addr>` that believes `X-Forwarded-For` from that peer on the main
-   listener (the public listener already does this for the tunnel, `src/web/public.ts clientAddress`); the driver
-   would pass Caddy's address on the team network.
-2. **Mail from inside a team instance** (invites, password resets, approval notices) goes to the instance's outbox
-   file: the product needs an SMTP/SES mailer configured from the environment (the per-team env file is ready to
-   carry it).
-3. **Admin second factor on the internet.** In cloud every team address is public; the product's public gate
-   requires admin 2FA only for the separate public listener. Cloud should require it on the main listener too.
-4. The setup page does not read the token from `#/setup/<token>` yet (the mail includes the token to paste);
-   a few lines in `web/src/pages/Auth.tsx`.
+1. **Client addresses behind Caddy** — the product side is done: `serve --trusted-proxy <ip|cidr,…>` (or
+   `TDRIVE_TRUSTED_PROXY`) believes `X-Forwarded-For` from those peers on the main listener (read from the right;
+   `CF-Connecting-IP` only with `--client-ip-header cf-connecting-ip`). Still to do here: the driver passes the team
+   network's subnet (or Caddy's address on it) in the team's env file; until then per-address limits are per team.
+2. **Mail from inside a team instance** — the product side is done: `TDRIVE_MAILER=ses`, `TDRIVE_MAIL_FROM`,
+   `TDRIVE_SES_REGION` (credentials from the host's instance role or `AWS_*`), or `TDRIVE_MAILER=smtp` with
+   `TDRIVE_SMTP_*` (docs/CONFIG.md). Still to do here: put them in the per-team env file.
+3. **Admin second factor on the internet** — the product side is done: `serve --hosted` / `TDRIVE_HOSTED=1` makes
+   every admin enrol a passkey or authenticator app before anything else (server-enforced). Still to do here: set
+   `TDRIVE_HOSTED=1` in the per-team env file (cloud/dev/e2e.ts then needs to enrol TOTP before creating a token).
+4. Setup link: done. The mail links `<team>/#token=<token>`; the setup page pre-fills it and removes it from the
+   address bar (the fragment is never sent to a server).
 5. `serve` logs "public listener NOT started (gate)" on every team start: expected (the team is served through the
    main listener behind Caddy), but noisy.
 
