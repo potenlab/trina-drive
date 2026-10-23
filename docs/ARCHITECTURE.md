@@ -69,8 +69,25 @@ sim/provenance-day.ts   plan ★8 replay                      test/           bu
 ## MCP endpoint
 
 `POST /mcp`, Streamable HTTP in its stateless JSON form (one JSON-RPC message per POST, `application/json` reply, no
-SSE, no session). Protocol versions `2026-07-28` and `2025-11-25`. `Authorization: Bearer tdrive_pat_…` only (cookies
-are never read); foreign `Origin` headers are refused (DNS-rebinding guard); listens on 127.0.0.1 by default.
+SSE, no session). `Authorization: Bearer tdrive_pat_…` only (cookies are never read); foreign `Origin` headers are
+refused (DNS-rebinding guard); listens on 127.0.0.1 by default.
+
+Protocol versions `2026-07-28` and `2025-11-25`, served side by side ("dual-era", spec 2026-07-28 basic/versioning):
+
+- **2026-07-28** (a request whose `_meta` or `MCP-Protocol-Version` names a non-legacy version): no handshake.
+  `server/discover` returns `supportedVersions`, capabilities, `instructions` and serverInfo. Every request must carry
+  `_meta["io.modelcontextprotocol/protocolVersion"]` and `…/clientCapabilities` (else `-32602`, HTTP 400) and the
+  headers `MCP-Protocol-Version` (equal to `_meta`), `Mcp-Method`, and for `tools/call` `Mcp-Name` (plain or
+  `=?base64?…?=`); a missing or different header is `HeaderMismatch -32020` (400) and nothing runs. Results carry
+  `resultType: "complete"` and `_meta["io.modelcontextprotocol/serverInfo"]`; `server/discover` and `tools/list` carry
+  `ttlMs: 60000, cacheScope: "private"` (no list-change notifications, so the TTL is the refresh). `initialize`, `ping`,
+  `subscriptions/listen` and anything else not offered: `-32601`, HTTP 404.
+- **2025-11-25** (no version anywhere, or `MCP-Protocol-Version: 2025-11-25`): `initialize` (always answered with
+  `2025-11-25`; the handshake does not exist in 2026-07-28), `ping`, `tools/list`, `tools/call`, results as before.
+- Any other version: `UnsupportedProtocolVersionError -32022` (400) with `data: {supported, requested}`, which a dual-era
+  client reads to retry with a version both sides speak.
+
+`instructions` is the same text on both paths (`InitializeResult` and `DiscoverResult`).
 
 Rate limits (`src/ratelimit.ts`, `MCP_LIMITS`; plan 7.1): per token 120 requests/min and 4 at once, per source address
 600/min and 16 at once, and 30 requests/min with a missing or wrong bearer token per address (after that the address is
@@ -391,5 +408,6 @@ is in [THIRD-PARTY.md](THIRD-PARTY.md).
 | poppler `pdftotext` | GPL-2.0/3.0 | external binary, separate process (not linked) |
 | HWP/HWPX extractor | own code (adapted from Team AX `server/src/files/hwp.ts`, same owner) | the CFB reader replaces SheetJS |
 | @modelcontextprotocol/sdk 1.32 | MIT | tests only (as the HTTP client); the server endpoint is hand-written because 1.32 does not know protocol 2026-07-28 |
+| @modelcontextprotocol/client 2.3 | Apache-2.0 | tests only: a 2026-07-28 client (`server/discover` negotiation) against the endpoint |
 | @simplewebauthn/server 13.3.3 | MIT | runtime (passkeys); its tree: @peculiar/* MIT, @hexagon/base64 MIT, @levischuck/tiny-cbor MIT, asn1js BSD-3-Clause, pvtsutils/pvutils MIT, tslib 0BSD, reflect-metadata Apache-2.0, tsyringe MIT |
 | typescript, @types/bun | Apache-2.0, MIT | dev |

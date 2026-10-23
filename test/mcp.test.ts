@@ -26,6 +26,7 @@ describe('MCP over HTTP', () => {
     const transport = new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { Authorization: `Bearer ${e.secrets.kim}` } } })
     await client.connect(transport)
     expect(client.getServerVersion()?.name).toBe('trina-drive')
+    expect(client.getInstructions()).toContain('/drafts/')
     const tools = await client.listTools()
     expect(tools.tools.map((t) => t.name).sort()).toEqual(['bash', 'edit', 'history', 'promote', 'read', 'write'])
     const r = await client.callTool({ name: 'bash', arguments: { command: 'ls /' } })
@@ -38,13 +39,12 @@ describe('MCP over HTTP', () => {
     await client.close()
   })
 
-  test('protocol versions 2025-11-25 and 2026-07-28 are both accepted; others get the latest', async () => {
+  test('initialize negotiates 2025-11-25 (2026-07-28 has no handshake: see mcp-versions.test.ts)', async () => {
     const auth = { authorization: `Bearer ${e.secrets.kim}` }
-    for (const v of ['2025-11-25', '2026-07-28']) {
+    for (const v of ['2025-11-25', '2026-07-28', '2024-01-01']) {
       const r = await (await rpc(init(1, v), auth)).json() as { result: { protocolVersion: string } }
-      expect(r.result.protocolVersion).toBe(v)
+      expect(r.result.protocolVersion).toBe('2025-11-25')
     }
-    expect(((await (await rpc(init(1, '2024-01-01'), auth)).json()) as { result: { protocolVersion: string } }).result.protocolVersion).toBe('2026-07-28')
     expect((await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, { ...auth, 'mcp-protocol-version': '1999-01-01' })).status).toBe(400)
     expect((await rpc({ jsonrpc: '2.0', method: 'notifications/initialized' }, auth)).status).toBe(202)
   })

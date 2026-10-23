@@ -43,6 +43,10 @@ describe('malformed JSON-RPC never reaches a 500 or a stack trace', () => {
     ['command not a string', call('bash', { command: ['ls'] })],
     ['name not a string', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: { toString: 1 }, arguments: {} } })],
     ['protocolVersion not a string', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: { toString: 1 } } })],
+    ['_meta null', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: null } })],
+    ['_meta protocolVersion an object', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': { toString: 1 } } } })],
+    ['_meta protocolVersion huge', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': 'x'.repeat(100_000) } } })],
+    ['__proto__ _meta', '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"__proto__":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}}'],
     ['__proto__ args', '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bash","arguments":{"__proto__":{"command":"cat /경영/c.md"}}}}'],
     ['constructor method', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'constructor' })],
     ['__proto__ method', JSON.stringify({ jsonrpc: '2.0', id: 1, method: '__proto__' })],
@@ -107,9 +111,9 @@ describe('protocol versions', () => {
     const r = await post(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }), { ...auth(), 'mcp-protocol-version': v })
     expect(v === '' ? 200 : 400).toBe(r.status)
   })
-  test('initialize with an unknown version is answered with the latest supported one', async () => {
+  test('initialize with an unknown version is answered with the latest handshake version', async () => {
     const r = await post(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: { x: 1 }, capabilities: {}, clientInfo: { name: 'x', version: '0' } } }), auth())
-    expect(((await r.json()) as { result: { protocolVersion: string } }).result.protocolVersion).toBe('2026-07-28')
+    expect(((await r.json()) as { result: { protocolVersion: string } }).result.protocolVersion).toBe('2025-11-25')
   })
 })
 
