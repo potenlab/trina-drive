@@ -1,0 +1,36 @@
+# Local development (cloud/dev/up.sh): one Caddy for both the control plane (https://<domain>) and the teams
+# (https://<slug>.<domain>), Caddy's own local CA instead of Let's Encrypt (self-signed root, exported by up.sh for
+# curl --cacert), on-demand issuance still gated by the control plane's `ask`. Same team routes as production.
+{
+	admin localhost:2019
+	order rate_limit before reverse_proxy
+	local_certs
+	skip_install_trust
+	on_demand_tls {
+		ask {$TDCLOUD_ASK_URL}
+	}
+	servers {
+		strict_sni_host on
+	}
+	log {
+		output stdout
+		format json
+		level WARN
+	}
+}
+
+import /etc/caddy/team_routes.caddy 
+
+{$TDCLOUD_DOMAIN} {
+	tls internal
+	respond /internal/* 404
+	# Caddy sets X-Forwarded-For to the client's address (it does not pass on one the client sent)
+	reverse_proxy tdc-control:8790
+}
+
+*.{$TDCLOUD_DOMAIN} {
+	tls internal {
+		on_demand
+	}
+	import team_routes
+}

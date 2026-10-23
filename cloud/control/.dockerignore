@@ -1,0 +1,5 @@
+node_modules
+.tdcloud
+*.db
+*.db-wal
+*.db-shm

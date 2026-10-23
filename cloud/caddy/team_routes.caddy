@@ -1,0 +1,50 @@
+# The routes in front of every team (imported by Caddyfile and Caddyfile.dev).
+(team_routes) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+	request_body {
+		max_size 25MB
+	}
+	# per client address (the team server sees only this proxy's address; these limits are what tells clients apart)
+	rate_limit {
+		zone signin {
+			match {
+				path /api/login /api/login/second /api/setup /api/links/* /api/me/reauth /oauth/token /oauth/register /oauth/authorize
+			}
+			key {remote_host}
+			events 30
+			window 1m
+		}
+		zone mcp {
+			match {
+				path /mcp
+			}
+			key {remote_host}
+			events 300
+			window 1m
+		}
+		zone all {
+			key {remote_host}
+			events 1200
+			window 1m
+		}
+	}
+	# /health is for the host itself (Docker's HEALTHCHECK runs inside the container)
+	respond /health 404
+	reverse_proxy tdc-{labels.{$TDCLOUD_SLUG_LABEL}}:8787 {
+		transport http {
+			dial_timeout 3s
+			response_header_timeout 60s
+		}
+	}
+	handle_errors 502 503 504 {
+		rewrite * /paused.html
+		file_server {
+			root /srv
+		}
+		header Cache-Control no-store
+	}
+}
