@@ -101,8 +101,8 @@ export class Drive {
     if (r.status !== 200) throw new Error(`${this.who}: token ${r.status} ${r.text.slice(0, 200)}`)
     return r.json().token
   }
-  async appPassword(name: string, password: string): Promise<string> {
-    const r = await this.api('POST', '/me/app-passwords', { name, password })
+  async appPassword(name: string, password?: string): Promise<string> {
+    const r = await this.api('POST', '/me/app-passwords', { name, ...(password !== undefined ? { password } : {}) })
     if (r.status !== 200) throw new Error(`${this.who}: app password ${r.status} ${r.text.slice(0, 200)}`)
     return r.json().password
   }

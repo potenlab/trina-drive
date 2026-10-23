@@ -1,17 +1,13 @@
 // The Trina Cloud console as a person uses it: sign-up and confirmation (today's API), sign-in with the authenticator
 // app owners/admins must have (D1), the members API (plan §2.3) and "Open drive" → SSO into a team (docs/SSO-CONTRACT.md).
 //
-// ADAPTER: D1 (feat/d1-console) is being written in parallel. The members API follows plan §2.3 exactly; the TOTP
-// endpoints are not in the plan, so the candidates below are tried in order (first that is not 404 wins). When D1
-// merges, fix the list here — no scenario needs to change.
+// Endpoints as D1 (PR #32) built them: POST /api/login → {totp_required, ticket} → POST /api/login/totp {ticket, code};
+// POST /api/me/totp/setup → {secret, uri} → /api/me/totp/enable {code}; POST /api/stepup {code} (5-minute step-up);
+// members/invites under /api/teams/<team_…>; the session cookie is __Host-tdcloud_session.
 import { Http, Jar, parseFormPost, type Res } from './http'
 import { Drive } from './drive'
 import { freshTotp } from './totp'
 import type { Target } from './target'
-
-const TOTP_SETUP = ['/api/me/totp/setup', '/api/account/totp/setup', '/api/totp/setup']
-const TOTP_CONFIRM = ['/api/me/totp/confirm', '/api/account/totp/confirm', '/api/totp/confirm']
-const LOGIN_SECOND = ['/api/login/second', '/api/login/totp']
 
 export interface ConsoleCreds { email: string; password: string; totp?: string }
 
@@ -34,31 +30,34 @@ export class Console {
     return { signup, verify }
   }
 
-  /** password, then the authenticator code when the console asks for one (D1) */
+  /** password, then the authenticator code when the console asks for one */
   async login(c: ConsoleCreds): Promise<Res> {
     let r = await this.api('POST', '/api/login', { email: c.email, password: c.password })
-    const sf = r.status === 200 ? r.json().second_factor : undefined
-    if (sf) {
+    const j = r.status === 200 ? r.json() : {}
+    if (j.totp_required || j.second_factor) {
       if (!c.totp) return r
-      const code = await freshTotp(c.totp)
-      for (const p of LOGIN_SECOND) {
-        r = await this.api('POST', p, { ticket: sf.ticket ?? sf, code, method: 'totp' })
-        if (r.status !== 404) break
-      }
+      r = await this.api('POST', '/api/login/totp', { ticket: j.ticket ?? j.second_factor?.ticket, code: await freshTotp(c.totp) })
     }
     if (r.status === 200) this.csrf = r.json().csrf ?? this.csrf
+    this.creds = c
     return r
   }
+  creds?: ConsoleCreds
 
-  /** enrol an authenticator app; returns the base32 secret (D1) */
+  /** enrol an authenticator app (right after a password sign-in: no password asked again); returns the base32 secret */
   async enrollTotp(): Promise<{ secret: string; res: Res }> {
-    let r!: Res
-    let i = 0
-    for (; i < TOTP_SETUP.length; i++) { r = await this.api('POST', TOTP_SETUP[i]!, {}); if (r.status !== 404) break }
+    const r = await this.api('POST', '/api/me/totp/setup', { password: this.creds?.password })
     if (r.status !== 200) return { secret: '', res: r }
     const secret = String(r.json().secret ?? '')
-    const conf = await this.api('POST', TOTP_CONFIRM[Math.min(i, TOTP_CONFIRM.length - 1)]!, { code: await freshTotp(secret) })
+    const conf = await this.api('POST', '/api/me/totp/enable', { code: await freshTotp(secret) })
+    if (conf.status === 200 && this.creds) this.creds.totp = secret
     return { secret: conf.status === 200 ? secret : '', res: conf }
+  }
+
+  /** a fresh step-up (owners/admins changing members): a code now counts for 5 minutes */
+  async stepUp(): Promise<Res | null> {
+    if (!this.creds?.totp) return null
+    return this.api('POST', '/api/stepup', { code: await freshTotp(this.creds.totp) })
   }
 
   me() { return this.api('GET', '/api/me') }
@@ -67,9 +66,14 @@ export class Console {
     return (r.json().teams as { id: string; slug: string }[]).find((x) => x.slug === slug)?.id ?? ''
   }
   members(teamId: string) { return this.api('GET', `/api/teams/${teamId}/members`) }
-  invite(teamId: string, emails: string[], role: 'member' | 'admin' = 'member') { return this.api('POST', `/api/teams/${teamId}/invites`, { emails, role }) }
-  setRole(teamId: string, userId: string, role: 'member' | 'admin') { return this.api('PATCH', `/api/teams/${teamId}/members/${userId}`, { role }) }
-  remove(teamId: string, userId: string) { return this.api('DELETE', `/api/teams/${teamId}/members/${userId}`) }
+  async invite(teamId: string, emails: string[], role: 'member' | 'admin' = 'member') { await this.stepUp(); return this.api('POST', `/api/teams/${teamId}/invites`, { emails, role }) }
+  async setRole(teamId: string, userId: string, role: 'member' | 'admin') { await this.stepUp(); return this.api('PATCH', `/api/teams/${teamId}/members/${userId}`, { role }) }
+  async remove(teamId: string, userId: string) { await this.stepUp(); return this.api('DELETE', `/api/teams/${teamId}/members/${userId}`, {}) }
+  /** a member's console id (usr_…) by email */
+  async userId(teamId: string, email: string): Promise<string> {
+    const m = (await this.members(teamId)).json().members as { user: { id: string; email: string } }[]
+    return m.find((x) => x.user.email === email.toLowerCase())?.user.id ?? ''
+  }
   accept(token: string) { return this.api('POST', '/api/invites/accept', { token }) }
   /** the invite token from the newest console invite mail to `email` (local) */
   inviteToken(email: string): string {
@@ -86,20 +90,30 @@ export class Console {
     const start = o.returnPath !== undefined || o.reauth
       ? `${this.t.teamUrl(slug)}/api/sso/start?return=${encodeURIComponent(o.returnPath ?? '/')}${o.reauth ? '&reauth=1' : ''}`
       : `${this.base}/open/${slug}`
-    return ssoFrom(this.http, this.jar, slug, start)
+    return ssoFrom(this.http, this.jar, slug, start, this.creds)
   }
 }
 
-export interface SsoResult { drive: Drive | null; error: string; assertion: string; state: string; hops: string[]; landing: string; secondFactor: string; authorize: Res | null }
+export interface SsoResult { reauthAsked?: boolean; drive: Drive | null; error: string; assertion: string; state: string; hops: string[]; landing: string; secondFactor: string; authorize: Res | null }
 
 /** run an SSO round trip from `startUrl` in this browser jar (no console session → stops at the console's /login) */
-export async function ssoFrom(http: Http, jar: Jar, slug: string, startUrl: string): Promise<SsoResult> {
+export async function ssoFrom(http: Http, jar: Jar, slug: string, startUrl: string, creds?: ConsoleCreds): Promise<SsoResult> {
   const team = new URL(http.t.teamUrl(slug))
   const out: SsoResult = { drive: null, error: '', assertion: '', state: '', hops: [], landing: '', secondFactor: '', authorize: null }
-  const { last, hops } = await http.follow(startUrl, { jar })
+  let { last, hops } = await http.follow(startUrl, { jar })
   out.hops = hops
+  let post = last.status === 200 ? parseFormPost(last.text) : null
+  // max_age=0 (reauth) or an old console sign-in: the console asks for the password (and code) again
+  if (post && !post.fields.assertion && /\/sso\/authorize$/.test(new URL(post.action, last.url).pathname)) {
+    out.reauthAsked = true
+    if (!creds) { out.error = 'reauth_asked'; out.authorize = last; return out }
+    const fields = { ...post.fields, password: creds.password, ...(creds.totp ? { code: await freshTotp(creds.totp) } : {}) }
+    const r = await http.req('POST', new URL(post.action, last.url).toString(), { jar, form: fields })
+    out.hops.push(r.url)
+    last = r.status >= 300 && r.status < 400 ? (await http.follow(r.location, { jar })).last : r
+    post = last.status === 200 ? parseFormPost(last.text) : null
+  }
   out.authorize = last
-  const post = last.status === 200 ? parseFormPost(last.text) : null
   if (!post) { out.error = last.status === 404 ? 'not_found' : `no_form_post (${last.status} ${last.location || last.url})`; return out }
   out.assertion = post.fields.assertion ?? ''
   out.state = post.fields.state ?? ''

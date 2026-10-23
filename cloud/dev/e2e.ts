@@ -4,10 +4,13 @@
 //
 //  1. two buyers sign up, confirm their email (outbox), create teams acme and globex
 //  2. a Paddle subscription.created (signed with the dev webhook secret) for each → provisioned
-//  3. the emailed one-time setup link creates each team's admin; the link works once; the token is not in the control DB
-//  4. hosted mode: the admin enrols an authenticator app (codes computed here, RFC 6238) before anything else, then
-//     makes a personal access token on the web; MCP initialize / tools/list / bash work over HTTPS; an invite mail goes
-//     from the team through the host's mail relay into the dev mail sink, and its link sets dana's password
+//  3. Trina Cloud SSO (docs/SSO-CONTRACT.md): the "ready" mail carries no setup token, only the console's Open drive
+//     link; /api/setup is gone; the owner sets up the console authenticator (owners must), opens the drive (form_post
+//     assertion → a drive admin session)
+//  4. hosted mode: the admin enrols the drive's authenticator app (codes computed here, RFC 6238) before anything else,
+//     the next Open drive asks for it, then makes a personal access token on the web; MCP initialize / tools/list /
+//     bash work over HTTPS; the drive's "someone became an admin" mail goes through the host's mail relay into the dev
+//     mail sink; dana is invited in the console, accepts with her own account and opens the drive as a member
 //  5. kim/boss in each team: kim cannot see 경영, boss can
 //  6. isolation: no token, session or network path from one team reaches the other; the containers' settings
 //  7. client addresses: fixed team network addresses; Caddy overwrites X-Forwarded-For, so the team records (and
@@ -25,6 +28,9 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { paddleHeader } from '../control/src/paddle'
+import { Console } from './e2e/lib/console'
+import { Http } from './e2e/lib/http'
+import { localTarget } from './e2e/lib/target'
 
 const DEV = import.meta.dir
 const STATE = path.join(DEV, '.state')
@@ -37,6 +43,7 @@ const OUTBOX = path.join(STATE, 'outbox.log')
 /** the dev mail sink (relay upstream outbox:<file>): what the host's mail relay would have handed to Resend (cloud/control/src/relay.ts) */
 const TEAM_MAIL = path.join(STATE, 'team-mail.log')
 const RELAY_PORT = 8025
+const HTTP = new Http(localTarget('acme'))
 
 let failed = 0, passed = 0
 const t0 = Date.now()
@@ -116,7 +123,7 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   const token = verify!.text.match(/verify\?token=(\S+)/)![1]
   check('confirm email', (await req('POST', `${CONTROL}/api/verify`, { body: { token } })).status === 200)
   const login = await req('POST', `${CONTROL}/api/login`, { body: { email: buyer, password: pw } })
-  check('sign in', login.status === 200 && cookieOf(login).startsWith('tdcloud_session='))
+  check('sign in', login.status === 200 && /^(__Host-)?tdcloud_session=/.test(cookieOf(login)))
   const cookie = cookieOf(login), csrf = login.json().csrf
   check('cookie is HttpOnly + Secure', /HttpOnly/.test(login.headers.get('set-cookie') ?? '') && /Secure/.test(login.headers.get('set-cookie') ?? ''))
   const mk = await req('POST', `${CONTROL}/api/teams`, { cookie, headers: { 'x-csrf-token': csrf }, body: { name, slug } })
@@ -146,24 +153,29 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   const row = showTeam(slug)
   check(`${slug} runs on a host the scaler launched for it (${row.host})`, /^local-\d+$/.test(row.host ?? '') && hostLine(row.host).includes(' ready '), admin('hosts', 'list').out)
 
-  step(`${slug}: one-time setup link from the mail`)
+  step(`${slug}: the ready mail opens the drive through the console (SSO; no setup token)`)
   const ready = outbox().filter((m) => m.to === buyer && m.subject.startsWith('Your Trina Drive is ready')).at(-1)
-  check('setup mail sent to the buyer', !!ready)
-  const link = ready!.text.match(/(https:\/\/\S+\/#token=(\S+))/)!
-  const setupToken = link[2]!
-  check(`link points at ${teamUrl(slug)}`, link[1]!.startsWith(`${teamUrl(slug)}/#token=`))
-  const db = Buffer.concat(['control.db', 'control.db-wal'].map((f) => path.join(STATE, f)).filter((f) => fs.existsSync(f)).map((f) => fs.readFileSync(f)))
-  check('setup token is not in the control plane database', !db.includes(Buffer.from(setupToken)))
+  check('ready mail sent to the buyer', !!ready)
+  check('no setup token in it (review finding 6)', !!ready && !/#token=/.test(ready.text), ready?.text)
+  check(`it links ${CONTROL}/open/${slug}`, !!ready && ready.text.includes(`${CONTROL}/open/${slug}`), ready?.text)
   check('team serves its web app over HTTPS', (await req('GET', `${teamUrl(slug)}/`)).status === 200)
-  const st = await req('GET', `${teamUrl(slug)}/api/state`)
-  check('setup pending', st.json().setup_pending === true, st.text)
-  const adminPw = `admin-${slug}-password`
-  const setup = await req('POST', `${teamUrl(slug)}/api/setup`, { body: { setup_token: setupToken, name: 'alex', email: buyer, password: adminPw } })
-  check('setup with the mailed token creates the admin', setup.status === 200, setup.text)
-  const adminCookie = cookieOf(setup), adminCsrf = setup.json().csrf
-  check('admin session cookie is Secure (seen as https behind Caddy)', /Secure/.test(setup.headers.get('set-cookie') ?? ''))
-  const reuse = await req('POST', `${teamUrl(slug)}/api/setup`, { body: { setup_token: setupToken, name: 'mallory', email: 'm@x.test', password: 'another-password' } })
-  check('the setup link works only once', reuse.status === 403, reuse.text)
+  const gone = await req('POST', `${teamUrl(slug)}/api/setup`, { body: { setup_token: 'tdrive_setup_wrongwrongwrongwrongwrong1', name: 'mallory', email: 'm@x.test', password: 'another-password' } })
+  check('/api/setup is gone (404) under TDRIVE_SSO_ONLY', gone.status === 404, gone.text)
+  const c = new Console(HTTP)
+  const cl = await c.login({ email: buyer, password: pw })
+  check('the owner signs in to the console', cl.status === 200, cl.text)
+  const before2fa = await c.openDrive(slug)
+  check('Open drive before the owner has a console authenticator: no assertion (set it up first, finding 3)', !before2fa.drive && !before2fa.assertion, before2fa.hops)
+  const ce = await c.enrollTotp()
+  check('console authenticator enrolled (owners must)', !!ce.secret, ce.res.text)
+  const first = await c.openDrive(slug)
+  check('Open drive: form_post → the owner is signed in to the drive', !!first.drive, { error: first.error, hops: first.hops })
+  const adminCsrf = first.drive?.csrf ?? ''
+  const sessCookie = c.jar.seen.filter((x) => /tdrive_session=/.test(x)).at(-1) ?? ''
+  const adminCookie = sessCookie.split(';')[0] ?? ''
+  check('admin session cookie is Secure (seen as https behind Caddy)', /Secure/.test(sessCookie), sessCookie.replace(/=[^;]+/, '=…'))
+  const me = first.drive ? (await first.drive.session()).me : {}
+  check('…as a drive admin (role owner → admin)', me.admin === true, me)
   const asAdmin = { cookie: adminCookie, headers: { 'x-csrf-token': adminCsrf } }
 
   step(`${slug}: hosted mode — the admin enrols an authenticator app before anything else`)
@@ -176,34 +188,36 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   if (secret) fs.writeFileSync(path.join(STATE, `admin-${slug}.otpauth`), `${ts.json().uri}\n`, { mode: 0o600 })
   const conf = await req('POST', `${teamUrl(slug)}/api/me/totp/confirm`, { ...asAdmin, body: { code: totp(secret) } })
   check('enrolled with a code computed by this test (RFC 6238); recovery codes issued', conf.status === 200 && (conf.json().recovery_codes?.length ?? 0) > 0, conf.text)
-  const l1 = await req('POST', `${teamUrl(slug)}/api/login`, { body: { login: 'alex', password: adminPw } })
-  const ticket = l1.status === 200 ? l1.json().second_factor?.ticket : undefined
-  check('signing in again asks for the second factor', !!ticket && l1.json().second_factor.methods.includes('totp') && !cookieOf(l1), l1.text)
-  const l2 = await req('POST', `${teamUrl(slug)}/api/login/second`, { body: { ticket, method: 'totp', code: totp(secret, Date.now() + 30_000) } })
-  check('the next code completes the sign-in', l2.status === 200 && cookieOf(l2).startsWith('tdrive_session='), l2.text)
+  const reopen = await c.openDrive(slug)
+  check('opening the drive again asks for the drive\'s second factor (#/sso-second/<ticket>)', !!reopen.secondFactor && !reopen.drive, reopen.landing)
+  const l2 = await req('POST', `${teamUrl(slug)}/api/login/second`, { body: { ticket: reopen.secondFactor, method: 'totp', code: totp(secret, Date.now() + 30_000) } })
+  check('the next code completes the sign-in', l2.status === 200 && /tdrive_session=/.test(cookieOf(l2)), l2.text)
   const pat = await req('POST', `${teamUrl(slug)}/api/tokens`, { ...asAdmin, body: { name: 'e2e', ttl: '1d' } })
   check('admin creates a personal access token on the web', pat.status === 200, pat.text)
   const adminPat = pat.json().token as string
 
-  step(`${slug}: an invite mail through the host's mail relay`)
-  const before = teamMail().length
-  const dana = `dana@${slug}.test`
-  const inv = await req('POST', `${teamUrl(slug)}/api/people`, { ...asAdmin, body: { name: 'dana', email: dana } })
-  check('admin invites dana (the mail is sent before the answer)', inv.status === 200, inv.text)
-  const mail = teamMail().slice(before).find((m) => m.to === dana)
-  check('the invite arrived in the dev mail sink (team SES mailer → relay on the team gateway)', !!mail && mail.subject === 'You are invited', teamMail().slice(before))
+  step(`${slug}: the drive's mail through the host's mail relay; dana joins through the console`)
+  const mail = teamMail().find((m) => m.to === buyer && /became an admin/.test(m.subject))
+  check('"someone became an admin" arrived in the dev mail sink (team SES mailer → relay on the team gateway)', !!mail, teamMail().slice(-5))
   check('sent with the configured team From', mail?.from === env.TDCLOUD_TEAM_MAIL_FROM, mail?.from)
-  const inviteLink = mail?.text.match(/(https:\/\/\S+)\/#\/invite\/(\S+)/)
-  check(`the invite link points at ${teamUrl(slug)}`, inviteLink?.[1] === teamUrl(slug), mail?.text)
-  const inviteToken = inviteLink?.[2] ?? ''
-  const lc = await req('POST', `${teamUrl(slug)}/api/links/check`, { body: { kind: 'invite', token: inviteToken } })
-  check('the link is valid and names dana', lc.status === 200 && lc.json().name === 'dana', lc.text)
-  const la = await req('POST', `${teamUrl(slug)}/api/links/accept`, { body: { kind: 'invite', token: inviteToken, password: `dana-${slug}-password` } })
-  check('dana sets her password through the link and is signed in', la.status === 200 && cookieOf(la).startsWith('tdrive_session='), la.text)
-  const ds = await req('GET', `${teamUrl(slug)}/api/session`, { cookie: cookieOf(la) })
-  check('…as dana', ds.status === 200 && ds.json().me?.name === 'dana', ds.text)
-  const la2 = await req('POST', `${teamUrl(slug)}/api/links/accept`, { body: { kind: 'invite', token: inviteToken, password: 'another-password-9' } })
-  check('the invite link works only once', la2.status === 404, la2.text)
+  check('it names no one and no file (R11): a link to sign in', !!mail && mail.text.includes(teamUrl(slug)), mail?.text)
+  const teamId = await c.teamId(slug)
+  const dana = `dana@${slug}.test`, danaPw = `dana-${slug}-password`
+  const inv = await c.invite(teamId, [dana])
+  check('the owner invites dana in the console', inv.status === 201, inv.text)
+  const invToken = c.inviteToken(dana)
+  check('the invite mail is in the outbox with its link', !!invToken)
+  const d = new Console(HTTP)
+  await d.signupConfirmed(dana, danaPw)
+  await d.login({ email: dana, password: danaPw })
+  const acc = await d.accept(invToken)
+  check('dana accepts with her own confirmed account', acc.status === 200, acc.text)
+  check('the invite works only once', (await d.accept(invToken)).status >= 400)
+  const dr = await d.openDrive(slug)
+  const dme = dr.drive ? (await dr.drive.session()).me : {}
+  check('dana opens the drive: a member, not an admin', !!dr.drive && dme.admin === false, { error: dr.error, me: dme })
+  const pw2 = await req('POST', `${teamUrl(slug)}/api/login`, { body: { login: dana, password: danaPw } })
+  check('a console person has no drive password (409 use_sso)', pw2.status === 409 && pw2.text.includes('use_sso'), pw2.text)
 
   step(`${slug}: MCP over HTTPS`)
   const init = await mcp(slug, adminPat, 'initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'tdcloud-e2e', version: '1' } })
@@ -375,19 +389,27 @@ async function freePlan() {
   check('free limits: 0.5 vCPU, 768 MiB, 256 processes', i.HostConfig.NanoCpus === 5e8 && i.HostConfig.Memory === 768 * 1024 * 1024 && i.HostConfig.PidsLimit === 256, { cpu: i.HostConfig.NanoCpus, mem: i.HostConfig.Memory, pids: i.HostConfig.PidsLimit })
   check('free env: 1 GB storage quota, at most 3 people', envs.includes('TDRIVE_STORAGE_QUOTA=1GB') && envs.includes('TDRIVE_MAX_PEOPLE=3'))
   const ready = outbox().filter((m) => m.to === owner && m.subject.startsWith('Your Trina Drive is ready')).at(-1)
-  const token = ready?.text.match(/\/#token=(\S+)/)?.[1]
-  check('setup mail with #token= and the free plan explained', !!token && ready!.text.includes('Free plan: 1 GB'))
-  const setup = await req('POST', `${teamUrl('freeco')}/api/setup`, { body: { setup_token: token, name: 'alex', email: owner, password: 'admin-freeco-password' } })
-  check('setup creates the admin', setup.status === 200, setup.text)
-  const adminCookie = cookieOf(setup)
+  check('ready mail without a setup token, the free plan explained', !!ready && !/#token=/.test(ready.text) && ready.text.includes('Free plan: 1 GB'), ready?.text)
+  // the free owner has no password: an email link, the console authenticator (owners must), then Open drive
+  const fc = new Console(HTTP)
+  await fc.api('POST', '/api/login/link', { email: owner })
+  const flt = outbox().filter((m) => m.to === owner && /login\/link\?token=/.test(m.text)).at(-1)?.text.match(/login\/link\?token=(\S+)/)?.[1]
+  const flc = await fc.api('POST', '/api/login/link/confirm', { token: flt })
+  fc.csrf = flc.status === 200 ? flc.json().csrf ?? '' : ''
+  const fce = await fc.enrollTotp()
+  check('the free owner signs in with a link and sets up the console authenticator', flc.status === 200 && !!fce.secret, flc.text + fce.res.text)
+  const fo = await fc.openDrive('freeco')
+  check('Open drive: the free owner is the drive admin', !!fo.drive && (await fo.drive.session()).me.admin === true, { error: fo.error, hops: fo.hops })
+  const adminCookie = (fc.jar.seen.filter((x) => /tdrive_session=/.test(x)).at(-1) ?? '').split(';')[0] ?? ''
+  const ownerName = fo.drive ? (await fo.drive.session()).me.name as string : 'founder'
   sh(['docker', 'exec', 'tdc-freeco', 'sh', '-c', 'mkdir -p /data/keep && echo "freeco keeps this" > /data/keep/note.md'])
   check('two more people fit', tdrive('freeco', 'person', 'add', 'pat').code === 0 && tdrive('freeco', 'person', 'add', 'sam').code === 0)
   const fourth = tdrive('freeco', 'person', 'add', 'kai')
   check('a fourth person is refused (TDRIVE_MAX_PEOPLE=3)', fourth.code !== 0 && /at most 3 people/.test(fourth.err + fourth.out), fourth.err + fourth.out)
   // a personal token for MCP later (made by the operator CLI: not activity)
-  const freePat = tdrive('freeco', 'token', 'create', 'alex', '--name', 'free-e2e').out.trim()
+  const freePat = tdrive('freeco', 'token', 'create', ownerName, '--name', 'free-e2e').out.trim()
   const act = tdrive('freeco', 'activity', '--json')
-  check('the team reports its last activity (the setup session)', act.code === 0 && typeof JSON.parse(act.out).web === 'number', act.out + act.err)
+  check('the team reports its last activity (the owner\'s session)', act.code === 0 && typeof JSON.parse(act.out).web === 'number', act.out + act.err)
 
   step('Free plan: the cap and the waitlist')
   await req('POST', `${CONTROL}/api/free/signup`, { body: { email: 'second@otherco.test', name: 'Other Co' } })
@@ -400,8 +422,10 @@ async function freePlan() {
   step('Free plan: the owner signs in with an email link')
   await req('POST', `${CONTROL}/api/login/link`, { body: { email: owner } })
   const lt = outbox().filter((m) => m.to === owner && /login\/link\?token=/.test(m.text)).at(-1)?.text.match(/login\/link\?token=(\S+)/)?.[1]
-  const lc = await req('POST', `${CONTROL}/api/login/link/confirm`, { body: { token: lt } })
-  check('signed in with the link', lc.status === 200 && cookieOf(lc).startsWith('tdcloud_session='), lc.text)
+  let lc = await req('POST', `${CONTROL}/api/login/link/confirm`, { body: { token: lt } })
+  // the owner has a console authenticator now: the link is the first step, the code the second
+  if (lc.status === 200 && lc.json().totp_required) lc = await req('POST', `${CONTROL}/api/login/totp`, { body: { ticket: lc.json().ticket, code: totp(fc.creds?.totp ?? '', Date.now() + 30_000) } })
+  check('signed in with the link (and the authenticator code)', lc.status === 200 && /^(__Host-)?tdcloud_session=/.test(cookieOf(lc)), lc.text)
   const ownerCookie = cookieOf(lc)
   const mine = (await req('GET', `${CONTROL}/api/teams`, { cookie: ownerCookie })).json().teams as { id: string; slug: string; plan: string; paused?: boolean }[]
   const ft = mine.find((x) => x.slug === 'freeco')

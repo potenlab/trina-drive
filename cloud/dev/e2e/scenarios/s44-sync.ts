@@ -15,10 +15,10 @@ export default {
     const ops = t.target.ops!, td = (...a: string[]) => t.target.tdrive!(fx.slug, ...a)
     t.step('a stale sync job')
     const team = JSON.parse(ops('teams', 'show', fx.slug).out)
-    const stale = Buffer.from(JSON.stringify({ version: 2, team: team.public_id, seq: 0, at: Date.now(), members: [], events: [] })).toString('base64url')
+    const stale = Buffer.from(JSON.stringify({ version: 2, team: team.public_id, seq: 1, at: Date.now(), members: [], events: [] })).toString('base64url')
     const r = td('cloud', 'sync-members', '--json', stale)
     const out = (() => { try { return JSON.parse(r.out.trim().split('\n').at(-1) ?? '{}') } catch { return {} } })()
-    t.check('seq 0 → applied:false, reason stale, exit 0 (nobody removed)', r.code === 0 && out.applied === false && out.reason === 'stale', r.out + r.err)
+    t.check('seq 1 (older than the team\'s) → applied:false, reason stale, exit 0 (nobody removed)', r.code === 0 && out.applied === false && out.reason === 'stale', r.out + r.err)
     t.step('a temporary member')
     const owner = await fx.consoleAs('admin'), teamId = await owner.teamId(fx.slug)
     const email = `s44-${run}@${fx.slug}.test`, pw = `s44-${run}-correct-horse`

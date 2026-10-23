@@ -17,7 +17,7 @@ import { Drive, type PersonCreds } from './drive'
 import type { Features } from './features'
 import { Http, Jar, type Res } from './http'
 import { SoftPasskey } from './passkey'
-import { freshTotp } from './totp'
+import { freshTotp, useTotpStore } from './totp'
 import type { Target } from './target'
 
 export const PEOPLE = ['boss', 'mina', 'sam', 'kim'] as const
@@ -34,6 +34,8 @@ export interface FxState {
   tokens: Record<string, { token: string; at: number }>
   appPasswords: Record<string, { password: string; at: number }>
   passkeys?: Record<string, ReturnType<SoftPasskey['toJSON']>>
+  /** console browser sessions per person (the console allows 30 sign-ins per address per 15 minutes) */
+  consoleSessions?: Record<string, { cookies: Record<string, string>; csrf: string }>
   log: string[]
 }
 
@@ -48,6 +50,7 @@ export class Fixture {
     const cur = path.join(t.stateDir, 'current')
     if (t.kind === 'local' && !process.env.E2E_TEAM && fs.existsSync(cur)) t.team = fs.readFileSync(cur, 'utf8').trim() || t.team
     this.file = path.join(t.stateDir, `${t.team}.json`)
+    useTotpStore(path.join(t.stateDir, 'totp-steps.json'))
   }
   get slug() { return this.t.team }
   get url() { return this.t.teamUrl(this.slug) }
@@ -94,6 +97,12 @@ export class Fixture {
     this.s = { slug, mode: (await this.features.get('sso-console')).ok ? 'sso' : 'password',
       admin: { name: 'alex', email: owner, password: `admin-${slug}-password-1` }, people: {}, sessions: {}, tokens: {}, appPasswords: {}, log: [] }
     for (const p of PEOPLE) this.s.people[p] = { name: p, email: `${p}@${slug}.test`, password: `${p}-${slug}-password-1` }
+    if (this.s.mode === 'sso') {
+      // the owner's console account first (with a password), so `teams create --owner` makes them the owner
+      const c = new Console(this.http)
+      const su = await c.signupConfirmed(owner, this.s.admin.password)
+      if (su.verify?.status !== 200) throw new Error(`fixture: owner sign-up ${su.signup.status} ${su.signup.text} / verify ${su.verify?.status}`)
+    }
 
     this.say(`  (fixture) creating team ${slug} (operator teams create, complimentary Team)`)
     const proc = Bun.spawn(['docker', 'exec', 'tdc-control', 'bun', '/app/src/main.ts', 'teams', 'create', slug, '--owner', owner, '--name', 'H1 E2E', '--plan', 'team'], { stdout: 'pipe', stderr: 'pipe' })
@@ -106,7 +115,8 @@ export class Fixture {
       if (r?.status === 'active') break
       if (!r && exited !== null) throw new Error(`fixture: teams create ${slug} failed: ${(await new Response(proc.stderr).text()).slice(0, 400)}`)
       if (r?.status === 'failed') throw new Error(`fixture: ${slug} failed to provision: ${ops('jobs', 'list').out.slice(-800)}`)
-      if (r?.waiting_since && !roomMade) {
+      // waiting_since is set during any scale-out too (a host booting): only a long wait means the pool is full
+      if (r?.waiting_since && Date.now() - r.waiting_since > 45_000 && !roomMade) {
         // the local stack has 3 one-team hosts (compose.yml); after the legacy suite they are taken. Its free-plan team
         // is disposable once that suite ran: make room with it (never acme/globex: other checks may use them)
         roomMade = true
@@ -148,18 +158,31 @@ export class Fixture {
   }
 
   /** SSO world: the owner's console account (sign-up, confirm, authenticator), then Open drive */
+  /** SSO: the owner signs in to the console, sets up its authenticator (owners must), opens the drive (a drive admin
+   * by SSO), and sets up the drive's own second factor (hosted admins must) */
   private async adminBySso() {
     const c = new Console(this.http)
-    await c.signupConfirmed(this.s.admin.email, this.s.admin.password)
     const l = await c.login({ email: this.s.admin.email, password: this.s.admin.password })
     if (l.status !== 200) throw new Error(`fixture: console sign-in of the owner ${l.status} ${l.text}`)
-    if (!l.json().second_factor) {
+    if (!l.json().totp_required) {
       const e = await c.enrollTotp()
-      if (e.secret) this.s.admin.consoleTotp = e.secret
+      if (!e.secret) throw new Error(`fixture: console TOTP for the owner ${e.res.status} ${e.res.text}`)
+      this.s.admin.consoleTotp = e.secret
     }
     this.save()
-    const d = await this.ssoDrive('admin', c)
-    this.keep('admin', d)
+    const r = await c.openDrive(this.slug)
+    if (!r.drive) throw new Error(`fixture: the owner opens the drive: ${r.error} after ${r.hops.join(' → ')}`)
+    r.drive.who = 'admin'
+    const me = await r.drive.session()
+    this.s.admin.name = me.me?.name ?? this.s.admin.name // under SSO the drive names people from their address
+    if (me.me?.second_factor_required || !me.me?.second_factor) {
+      const ts = await r.drive.api('POST', '/me/totp/setup', {})
+      const secret = String(ts.json().secret ?? '')
+      const conf = secret ? await r.drive.api('POST', '/me/totp/confirm', { code: await freshTotp(secret) }) : ts
+      if (conf.status !== 200) throw new Error(`fixture: the owner's drive authenticator ${conf.status} ${conf.text}`)
+      this.s.admin.totp = secret
+    }
+    this.keep('admin', r.drive)
   }
 
   private async makePeople() {
@@ -185,10 +208,13 @@ export class Fixture {
       if (inv.status !== 201 && inv.status !== 200) throw new Error(`fixture: console invite ${p}: ${inv.status} ${inv.text}`)
       const cc = new Console(this.http)
       await cc.signupConfirmed(c.email, c.password)
-      await cc.login({ email: c.email, password: c.password })
-      const acc = await cc.accept(cc.inviteToken(c.email))
+      const li = await cc.login({ email: c.email, password: c.password })
+      if (li.status !== 200) throw new Error(`fixture: console sign-in of ${p}: ${li.status} ${li.text}`)
+      const acc = await cc.accept(owner.inviteToken(c.email))
       if (acc.status !== 200) throw new Error(`fixture: ${p} accepts the console invite: ${acc.status} ${acc.text}`)
-      this.keep(p, await this.ssoDrive(p, cc))
+      const d = await this.ssoDrive(p, cc)
+      c.name = (await d.session()).me?.name ?? c.name
+      this.keep(p, d)
     }
   }
 
@@ -231,16 +257,30 @@ export class Fixture {
     return this.s.mode === 'sso' ? this.ssoDrive(who, await this.consoleAs(who)) : new Drive(this.http, this.slug, who).login(this.creds(who))
   }
 
-  async consoleAs(who: Who): Promise<Console> {
-    const c = new Console(this.http)
+  /** a console browser signed in as `who` (kept between scenarios and runs; `fresh` = a new sign-in, a new browser) */
+  async consoleAs(who: Who, o: { fresh?: boolean } = {}): Promise<Console> {
     const cr = this.creds(who)
-    const r = await c.login({ email: cr.email, password: cr.password, totp: cr.consoleTotp })
-    if (r.status !== 200 || r.json().second_factor) throw new Error(`console sign-in of ${who}: ${r.status} ${r.text.slice(0, 200)}`)
+    const creds = { email: cr.email, password: cr.password, totp: cr.consoleTotp }
+    const host = new URL(this.t.control).host
+    const kept = !o.fresh ? this.s.consoleSessions?.[who] : undefined
+    if (kept) {
+      const c = new Console(this.http)
+      for (const [name, v] of Object.entries(kept.cookies)) c.jar.set(host, name, v)
+      c.csrf = kept.csrf
+      c.creds = creds
+      if ((await c.me()).status === 200) return c
+    }
+    const c = new Console(this.http)
+    const r = await c.login(creds)
+    if (r.status !== 200 || r.json().totp_required) throw new Error(`console sign-in of ${who}: ${r.status} ${r.text.slice(0, 200)}`)
+    const cookies: Record<string, string> = {}
+    for (const name of ['__Host-tdcloud_session', 'tdcloud_session']) { const v = c.jar.get(host, name); if (v) cookies[name] = v }
+    if (!o.fresh) { this.s.consoleSessions = { ...this.s.consoleSessions, [who]: { cookies, csrf: c.csrf } }; this.save() }
     return c
   }
 
-  private async ssoDrive(who: Who, c: Console): Promise<Drive> {
-    const r = await c.openDrive(this.slug)
+  private async ssoDrive(who: Who, c: Console, o: { reauth?: boolean } = {}): Promise<Drive> {
+    const r = await c.openDrive(this.slug, o.reauth ? { reauth: true, returnPath: '/' } : {})
     if (r.secondFactor) {
       const cr = this.creds(who)
       if (!cr.totp) throw new Error(`${who}: the drive asks for its own second factor after SSO and the fixture has none`)
@@ -250,6 +290,7 @@ export class Fixture {
       await d.session()
       return d
     }
+    if (!r.drive && r.error === 'reauth_asked') throw new Error(`${who}: the console asks for the password again and no credentials were given`)
     if (!r.drive) throw new Error(`${who}: Open drive (SSO) ended with ${r.error} after ${r.hops.join(' → ')}`)
     r.drive.who = who
     return r.drive
@@ -264,12 +305,21 @@ export class Fixture {
     this.save()
   }
 
+  /** a session that counts as a fresh sign-in (made app passwords, second factors): the password again on the drive,
+   * or under SSO a ?reauth=1 round trip through the console (max_age=0: password and code again) */
+  async freshSession(who: Who): Promise<Drive> {
+    if (this.s.mode === 'sso') { const d = await this.ssoDrive(who, await this.consoleAs(who), { reauth: true }); this.keep(who, d); return d }
+    const d = await this.drive(who)
+    await d.api('POST', '/me/reauth', { password: this.creds(who).password })
+    return d
+  }
+
   /** a personal access token for this person (full scope, 1 day), kept between runs while it works */
   async token(who: Who): Promise<string> {
     const k = this.s.tokens[who]
     if (k && Date.now() - k.at < DAY - 3_600_000) return k.token
     const d = await this.drive(who)
-    const token = await d.token(`e2e-${who}-${Date.now().toString(36)}`, { password: this.creds(who).password })
+    const token = await d.token(`e2e-${who}-${Date.now().toString(36)}`, this.s.mode === 'sso' ? {} : { password: this.creds(who).password })
     this.s.tokens[who] = { token, at: Date.now() }
     this.save()
     return token
@@ -280,8 +330,8 @@ export class Fixture {
   async appPassword(who: Who): Promise<string> {
     const k = this.s.appPasswords[who]
     if (k) return k.password
-    const d = await this.drive(who)
-    const password = await d.appPassword(`e2e-${who}`, this.creds(who).password)
+    const d = await this.freshSession(who)
+    const password = await d.appPassword(`e2e-${who}`)
     this.s.appPasswords[who] = { password, at: Date.now() }
     this.save()
     return password
@@ -294,9 +344,8 @@ export class Fixture {
   async ensureTotp(who: Who): Promise<string> {
     const c = this.creds(who)
     if (c.totp) return c.totp
-    const d = await this.drive(who)
-    let ts = await d.api('POST', '/me/totp/setup', {})
-    if (ts.status === 403 && /reauth/.test(ts.text)) { await d.api('POST', '/me/reauth', { password: c.password }); ts = await d.api('POST', '/me/totp/setup', {}) }
+    const d = await this.freshSession(who)
+    const ts = await d.api('POST', '/me/totp/setup', {})
     const secret = String(ts.json().secret ?? '')
     if (!secret) throw new Error(`${who}: TOTP setup ${ts.status} ${ts.text}`)
     const conf = await d.api('POST', '/me/totp/confirm', { code: await freshTotp(secret) })
@@ -310,9 +359,8 @@ export class Fixture {
   async ensurePasskey(who: Who): Promise<SoftPasskey> {
     const kept = this.s.passkeys?.[who]
     if (kept) return SoftPasskey.fromJSON(kept)
-    const d = await this.drive(who)
-    let o = await d.api('POST', '/me/passkeys/options', {})
-    if (o.status === 403 && /reauth/.test(o.text)) { await d.api('POST', '/me/reauth', { password: this.creds(who).password }); o = await d.api('POST', '/me/passkeys/options', {}) }
+    const d = await this.freshSession(who)
+    const o = await d.api('POST', '/me/passkeys/options', {})
     if (o.status !== 200) throw new Error(`${who}: passkey options ${o.status} ${o.text}`)
     const pk = new SoftPasskey(this.url)
     const add = await d.api('POST', '/me/passkeys', { name: 'e2e software passkey', response: pk.register(o.json()) })

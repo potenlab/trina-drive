@@ -9,7 +9,7 @@ export default {
   async run(t) {
     const fx = t.fx
     const run = Date.now().toString(36)
-    const owner = await fx.consoleAs('admin')
+    const owner = await fx.consoleAs('admin', { fresh: true })
     const cookie = owner.jar.seen.find((x) => /session/i.test(x)) ?? ''
     t.check('session cookie is __Host-…; Secure; Path=/; no Domain', /^__Host-/.test(cookie) && /Secure/i.test(cookie) && /Path=\//i.test(cookie) && !/Domain=/i.test(cookie), cookie.replace(/=[^;]+/, '=…'))
     const teamId = await owner.teamId(fx.slug)

@@ -94,8 +94,9 @@ export class Http {
 
 /** the auto-POST form a console answers /sso/authorize with (form_post): action + hidden inputs */
 export function parseFormPost(html: string): { action: string; fields: Record<string, string> } | null {
-  const form = /<form[^>]*action="([^"]+)"[^>]*>([\s\S]*?)<\/form>/i.exec(html)
-  if (!form) return null
+  const forms = [...html.matchAll(/<form[^>]*action="([^"]+)"[^>]*>([\s\S]*?)<\/form>/gi)]
+  if (!forms.length) return null
+  const form = forms.find((f) => /name="assertion"/.test(f[2]!)) ?? forms.find((f) => /name="password"/.test(f[2]!)) ?? forms[0]!
   const fields: Record<string, string> = {}
   for (const m of form[2]!.matchAll(/<input[^>]*>/gi)) {
     const name = /name="([^"]+)"/.exec(m[0])?.[1], value = /value="([^"]*)"/.exec(m[0])?.[1]

@@ -188,8 +188,10 @@ export async function deepLinkSignIn(t: Any) {
     await consoleLogin(t, p, 'mina')
     await p.goto(filesUrl(t, '/공용')); await settle(p)
     const btn = p.getByRole('button', { name: /sign in with trina cloud/i }).or(p.getByRole('link', { name: /sign in with trina cloud/i })).first()
-    if (await btn.count()) { await btn.click(); await p.waitForURL((u: URL) => u.origin === new URL(t.fx.url).origin && u.hash.includes('files'), { timeout: 30_000 }); await settle(p) }
-    const ok = p.url().includes(encodeURIComponent('/공용')) || p.url().includes('/공용') || (await p.locator('body').innerText()).includes('notice.md')
+    const had = await btn.count()
+    if (had) { await btn.click(); await p.waitForURL((u: URL) => u.origin === new URL(t.fx.url).origin && !u.pathname.startsWith('/api/'), { timeout: 30_000 }); await settle(p) }
+    const text = await p.locator('body').innerText()
+    const ok = !!had && (text.includes('notice.md') || /공용/.test(text)) && !/sign in with trina cloud/i.test(text)
     return { ok, url: p.url(), shot: await shot(p, 's04-deep-link') }
   } catch (e) { return { ok: false, error: (e as Error).message } } finally { await b.close() }
 }
