@@ -21,6 +21,7 @@ export type NoticeKind =
   | 'break_glass'           // an emergency sign-in link was made on the server (`people reset-link`): every admin and the person
   | 'shared'                // something was shared with you (src/share; O7: no file or folder names, ever)
   | 'widened'               // AI-draft copies were closed because a change let more people read them (R6, src/share/rejudge.ts)
+  | 'former_member_files'   // My files of people who left moved to Former members (src/tdcloud/my-files.ts): every active admin
 
 const SUBJECT: Record<NoticeKind, string> = {
   self_grant: 'An admin gave themselves access',
@@ -38,6 +39,7 @@ const SUBJECT: Record<NoticeKind, string> = {
   break_glass: 'An emergency sign-in link was made for someone in your team',
   shared: 'Items were shared with you',
   widened: 'AI-draft copies need your review (a change let more people read them)',
+  former_member_files: 'Files of a former member moved to Former members',
 }
 
 export interface NoticeCtx { db: DB; mailer: Mailer; baseUrl: string }

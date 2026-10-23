@@ -341,9 +341,15 @@ export function reconcileMyFiles(db: DB, dataDir: string, opts: { only?: number 
 
 /**
  * After reconcileMyFiles: a person whose folder came back hears of it (the admins had it meanwhile; R9, kind and link
- * only), and source managers hear of AI-draft copies the admin-rule change closed (R6/R11).
+ * only), the active admins hear that My files folders landed in Former members (count and a link to that folder, no
+ * names), and source managers hear of AI-draft copies the admin-rule change closed (R6/R11).
  */
 export async function afterReconcile(n: NoticeCtx, r: Reconciled) {
   if (r.restoredPeople.length) await notify(n, r.restoredPeople, 'personal_folder_changed', '/#/my')
+  const fm = Number(metaGet(n.db, FORMER_META) ?? 0)
+  if (r.transferred && fm) {
+    const admins = n.db.query<{ id: number }, []>('SELECT id FROM people WHERE admin = 1 AND active = 1').all().map((p) => p.id)
+    await notify(n, admins, 'former_member_files', `/#/folders/${fm}`, { count: r.transferred })
+  }
   for (const j of r.judgements) await tellWidened(n, j)
 }

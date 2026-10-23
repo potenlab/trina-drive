@@ -19,6 +19,7 @@ import { announceNewAdmins, cloudUserOf, isManaged } from '../tdcloud/people'
 import { MfaError, passkeyAssertionOptions, passkeyVerify, totpEnabled, totpVerify } from './mfa'
 import { pkConfig } from './approve'
 import { withRejudge } from '../share/rejudge'
+import { dropGrantsForGroup } from '../managed/core'
 import { activeAdmins, checkEmail, checkName, groupRow, isUnique, now, personRow, record, requireAdmin, tell, type Op } from './op-common'
 
 const managedByConsole = () => new ApiError(409, 'managed_by_console', 'people are managed in the Trina Cloud console')
@@ -171,6 +172,7 @@ export function deleteGroup(op: Op, id: unknown) {
   const db = op.w.db
   withRejudge(db, () => {
     db.query(`DELETE FROM rules WHERE subject_type = 'group' AND subject_id = ?`).run(g.id)
+    dropGrantsForGroup(db, g.id) // A2 file shares to the group go too
     db.query('DELETE FROM memberships WHERE group_id = ?').run(g.id)
     db.query('DELETE FROM groups WHERE id = ?').run(g.id)
     if (metaGet(db, 'everyone_group') === String(g.id)) metaSet(db, 'everyone_group', null)

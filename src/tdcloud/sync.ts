@@ -2,12 +2,14 @@
 // whole desired membership of the team with a per-team, strictly increasing `seq`. Applied in one transaction, only
 // when `seq` > meta.cloud_sync_seq (a retried old job can never undo a newer one). Removal cuts every credential:
 // sessions, personal access tokens, OAuth grants, app passwords — so a person let back in later starts clean.
+import { applyShareInvites } from '../share/invites'
 import { tellWidened, withRejudge, type Judgement } from '../share/rejudge'
 import { appendAudit } from '../audit'
 import type { DB } from '../db'
 import { checkPeopleRoom, PeopleLimitError } from '../store'
 import { revokeSessionsOf } from '../web/auth'
 import type { Mailer } from '../web/mail'
+import { notify } from '../web/notices'
 import { ensureWebSchema, metaGet, metaSet } from '../web/schema'
 import type { CloudConfig } from './config'
 import { afterReconcile, reconcileMyFiles } from './my-files'
@@ -87,6 +89,9 @@ export async function applySync(d: SyncDeps, raw: unknown): Promise<SyncResult> 
   const newAdmins: number[] = []
   let stale: number | null = null
   let widened: Judgement | null = null
+  // S16: addresses that are active members after this sync (shares given by mail while they were not one yet)
+  const members = new Map<number, string>()
+  const shared = new Map<number, number>()
   try {
     // the whole sync is one transaction with the R6 re-check of AI-draft copies (src/share/rejudge.ts): a console-side
     // membership change never opens a copy to people who cannot read its sources — such copies close until confirmed
@@ -109,6 +114,7 @@ export async function applySync(d: SyncDeps, raw: unknown): Promise<SyncResult> 
         if (before?.email?.toLowerCase() !== m.email.toLowerCase() && !db.query('SELECT 1 FROM accounts WHERE email = ? COLLATE NOCASE AND person_id != ?').get(m.email, id))
           db.query('UPDATE accounts SET email = ? WHERE person_id = ?').run(m.email, id)
         keep.add(id)
+        if (m.status === 'active') members.set(id, m.email)
       }
       for (const m of p.members) {
         const found = (m.cloud_user ? byCloudUser(db, m.cloud_user) : null) ?? (m.invite ? byInvite(db, m.invite) : null) ?? unboundByEmail(db, m.email)
@@ -119,6 +125,7 @@ export async function applySync(d: SyncDeps, raw: unknown): Promise<SyncResult> 
         counts.created++
         if (admin) newAdmins.push(id)
         keep.add(id)
+        if (m.status === 'active') members.set(id, m.email)
       }
       // removal: every console-managed person not in the list (a member, or an invite that was withdrawn)
       const managed = db.query<{ id: number; active: number }, []>('SELECT p.id, p.active FROM people p JOIN accounts a ON a.person_id = p.id WHERE a.cloud_user IS NOT NULL OR a.cloud_invite IS NOT NULL').all()
@@ -143,6 +150,8 @@ export async function applySync(d: SyncDeps, raw: unknown): Promise<SyncResult> 
           if (x?.active && !keep.has(x.id)) { deactivate(db, x.id, `invite withdrawn (${e.id})`); counts.deactivated++ }
         }
       }
+      // pending shares by mail are given in this transaction, inside the R6 re-check (inactive people get none)
+      for (const [id, email] of members) { const n = applyShareInvites(db, id, email, now()); if (n) shared.set(id, n) }
       syncEveryone(db)
       closeSetupIfCloudAdmin(db)
       metaSet(db, 'cloud_sync_seq', String(p.seq))
@@ -159,6 +168,8 @@ export async function applySync(d: SyncDeps, raw: unknown): Promise<SyncResult> 
   await followMyFiles(d)
   await announceNewAdmins({ db, mailer: d.mailer, baseUrl: d.baseUrl }, newAdmins, `member sync ${p.seq}`)
   if (widened) await tellWidened({ db, mailer: d.mailer, baseUrl: d.baseUrl }, widened)
+  // one "Items were shared with you" each: kind, count and a link (O7: no file or folder names)
+  for (const [id, n] of shared) await notify({ db, mailer: d.mailer, baseUrl: d.baseUrl }, [id], 'shared', '/#/shared', { count: n })
   const people = db.query<{ n: number }, []>('SELECT count(*) AS n FROM people p JOIN accounts a ON a.person_id = p.id WHERE p.active = 1 AND (a.cloud_user IS NOT NULL OR a.cloud_invite IS NOT NULL)').get()!.n
   return { ok: true, applied: true, seq: p.seq, ...counts, people, unmanaged: unmanaged(db) }
 }
