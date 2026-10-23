@@ -10,14 +10,17 @@ cloud/
   caddy/     Caddy with rate limiting: *.cloud.<domain> → the team's container, on-demand TLS, paused page
   dev/       local Trina Cloud on Docker (up.sh / down.sh) and the end-to-end test (e2e.ts)
   host/      EC2 bootstrap and the host agent the control plane drives over SSM
-  infra/     Terraform for AWS (validated, never applied)
+  infra/     Terraform for AWS (applied once, 2026-10-23: test deploy, now on hold)
 ```
 
 Status: **runs end to end locally** (two teams, 149 checks), with every team in hosted mode (admins enrol a
 second factor), behind Caddy as its one trusted proxy, on managed storage with the plan's quota, and sending its own
 mail through the host's mail relay. The AWS path (driver, host agent, mail relay → SES, Terraform) is written and
-unit-tested against fake AWS endpoints, `terraform validate`d, and **has not been run against an AWS account**: no
-resource was created. See [Known gaps](#known-gaps-and-follow-ups) before launch.
+unit-tested against fake AWS endpoints, and was **deployed once to AWS on 2026-10-23** (one control instance, one
+m7g.xlarge host, the dogfood team `trina`): provisioning over SSM, hosted-mode settings, the host firewall, the mail
+relay up to SES, backups to S3 and an export through KMS all worked; DNS delegation, TLS certificates and real mail wait
+on the Gabia NS records and SES. The deployment is now in [hold mode](#hold-mode-no-teams-until-the-first-customer).
+See [Known gaps](#known-gaps-and-follow-ups) before launch.
 
 ## How it works
 
@@ -236,42 +239,70 @@ X-Forwarded-For read from the right in the control plane. They also run in the r
 
 ## Deploy to AWS — the owner's steps
 
-Nothing below has been run. Everything is in Seoul (`ap-northeast-2`) by default; resources are prefixed `tdcloud`.
+First run on 2026-10-23 (the fixes it needed are in this text and in Terraform). Everything is in Seoul
+(`ap-northeast-2`) by default; resources are prefixed `tdcloud`.
 
 **0. Account and tools.** Pick the AWS account (a dedicated account in an AWS Organization is best: billing and
-blast radius stay separate). Sign in with an admin role that has MFA. Install Terraform ≥ 1.6, AWS CLI v2, Docker
-with buildx. `export AWS_PROFILE=<that profile> AWS_REGION=ap-northeast-2`.
+blast radius stay separate). Install Terraform ≥ 1.6, AWS CLI v2, Docker with buildx. `export AWS_PROFILE=<that
+profile> AWS_REGION=ap-northeast-2`. The deploy identity needs EC2 (incl. Auto Scaling), S3, SSM, Route 53, ECR, SES,
+KMS, CloudWatch Logs and IAM on `tdcloud*` roles/instance profiles/policies. Two things a least-privilege identity
+(like `tdcloud-deploy`) runs into:
 
-**1. Registries, key, buckets, DNS zone, SES identity** (first, partial apply):
+- **No `kms:PutKeyPolicy` in IAM**: KMS refuses a key policy that would lock its creator out. Put the identity in
+  `kms_admin_arns` (it becomes a key administrator in the key policy).
+- **No `iam:TagRole`**: creating `AWSServiceRoleForAutoScaling` works but tagging it (provider default tags) fails.
+  Create it once (`aws iam create-service-linked-role --aws-service-name autoscaling.amazonaws.com`, or let the
+  first apply do it), then set `create_autoscaling_service_linked_role = false`.
+
+**1. Registries, key, buckets, DNS zone, SES identity** (first, partial apply). Keep state and variables outside the
+repository:
 
 ```sh
+S=~/.config/trina-drive/tdcloud-tf; mkdir -p $S && chmod 700 $S
+cp cloud/infra/terraform/terraform.tfvars.example $S/terraform.tfvars     # domain, host count, image tags, …
 cd cloud/infra/terraform
-cp terraform.tfvars.example terraform.tfvars        # domain, mail domain, contact, host count
-terraform init
-terraform apply -target=aws_ecr_repository.repo -target=aws_kms_alias.main -target=aws_s3_object.artifacts \
-  -target=aws_route53_zone.cloud -target=aws_sesv2_email_identity.mail
-terraform output name_servers ses_dkim_records
+export TF_DATA_DIR=$S/.terraform
+terraform init -backend-config="path=$S/terraform.tfstate"
+terraform apply -var-file=$S/terraform.tfvars -target=aws_ecr_repository.repo -target=aws_ecr_lifecycle_policy.keep \
+  -target=aws_kms_alias.main -target=aws_s3_object.artifacts -target=aws_route53_zone.cloud \
+  -target=aws_sesv2_email_identity.mail -target=aws_route53_record.dkim -target=aws_route53_record.dmarc
+terraform output name_servers
 ```
 
+Mail goes out from the cloud domain itself (`mail_domain` empty = `domain`): `cloud@cloud.trina.app` (control plane)
+and `Trina Drive <drive@cloud.trina.app>` (teams). Its three DKIM CNAMEs and a DMARC record go into the Route 53 zone,
+so nothing but the delegation is added at Gabia. (With `mail_domain = "trina.app"`, add the CNAMEs from
+`ses_dkim_records` at Gabia instead.)
+
 **2. Gabia (trina.app DNS), once.** In 가비아 → DNS 관리 → trina.app → 레코드 수정, add **four NS records** with host
-`cloud`, one per value of `name_servers` (e.g. `cloud  NS  ns-123.awsdns-15.com.`). Check:
-`dig NS cloud.trina.app +short` shows the four Route 53 servers. Add the three **DKIM CNAMEs** from
-`ses_dkim_records` (host `<token>._domainkey`), and if trina.app has an SPF TXT record, add `include:amazonses.com`.
+`cloud`, one per value of `name_servers` (e.g. `cloud  NS  ns-123.awsdns-15.com.`). Nothing else changes at Gabia
+(not the apex, not `drive`). Check: `dig NS cloud.trina.app +short` shows the four Route 53 servers. The SES identity
+`cloud.trina.app` then verifies itself within the hour (`aws sesv2 get-email-identity --email-identity cloud.trina.app`).
 
-**3. SES.** In the SES console (Seoul): wait for the identity to show *Verified*, then **request production access**
-(transactional mail to customers who signed up, and the teams' invites and password resets from
-`drive@trina.app`; without it SES only sends to verified addresses). Both senders are in the one domain identity;
-`team_mail_address` in `terraform.tfvars` changes the teams' address (the hosts' IAM allows only that one).
+**3. SES.** Request **production access** (until then SES sends only to verified addresses; the setup link to a new
+team's owner fails and is reported to ops — `teams resend-setup` later):
 
-**4. Images** (arm64, tags immutable):
+```sh
+aws sesv2 put-account-details --production-access-enabled --mail-type TRANSACTIONAL --website-url https://drive.trina.app \
+  --contact-language EN --use-case-description "<transactional only: confirmations, setup links, invites, resets>"
+aws sesv2 put-account-suppression-attributes --suppressed-reasons BOUNCE COMPLAINT
+```
+
+Both senders are in the one domain identity; `team_mail_address` changes the teams' address (the roles may send only
+from their own address: `ses:FromAddress`, which SES compares with the address part of `Name <address>`).
+
+**4. Images** (arm64; tags are immutable, so give every build a new tag, e.g. version + commit):
 
 ```sh
 REG=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.ap-northeast-2.amazonaws.com
 aws ecr get-login-password | docker login --username AWS --password-stdin $REG
-docker buildx build --platform linux/arm64 -t $REG/trina-drive:0.2.0 --push .
-docker buildx build --platform linux/arm64 -t $REG/tdcloud-control:0.1.0 --push cloud/control
+V=$(git rev-parse --short HEAD)
+docker buildx build --platform linux/arm64 -t $REG/trina-drive:0.2.0-$V --push .
+docker buildx build --platform linux/arm64 -t $REG/tdcloud-control:0.1.0-$V --push cloud/control
 docker buildx build --platform linux/arm64 -t $REG/tdcloud-caddy:2.10.2-1 --push cloud/caddy
 ```
+
+and set `trina_image_tag` / `control_image_tag` / `caddy_image_tag` in `terraform.tfvars`.
 
 **5. Paddle** (sandbox first, then live). Developer tools → Notifications → **New destination**
 `https://cloud.trina.app/paddle/webhook`, events: `subscription.created`, `.activated`, `.trialing`, `.updated`,
@@ -287,22 +318,40 @@ to ops as "unlinked"; `teams link` fixes one by hand).
 aws ssm put-parameter --type SecureString --key-id alias/tdcloud --name /tdcloud/caddy-ask-key \
   --value "$(openssl rand -hex 32)"
 terraform output -raw control_env_template > control.env    # fill in the <…> lines (ask key, Paddle values)
+# Paddle not ready yet? A random PADDLE_WEBHOOK_SECRET placeholder and no price ids: the control plane starts, nothing
+# can be bought, operator-made teams (`teams create`) work
 aws ssm put-parameter --type SecureString --key-id alias/tdcloud --name /tdcloud/control/env --value file://control.env
 rm -P control.env
 ```
 
-**7. Everything else:** `terraform apply` (control instance + Elastic IP + `cloud.trina.app` A record, the host
-ASG and its Elastic IPs). First boot takes ~5 minutes (`/var/log/tdcloud-bootstrap.log` on the instance).
+**7. Everything else:** `terraform apply -var-file=$S/terraform.tfvars` (control instance + Elastic IP +
+`cloud.trina.app` A record, the host ASG and its Elastic IPs). First boot takes ~3 minutes
+(`/var/log/tdcloud-bootstrap.log` on the instance; it ends with `tdcloud bootstrap done (host|control)`). On a host,
+`iptables -S TDCLOUD-INPUT` must list the relay rule (the bootstrap stops if the isolation rules are missing).
 
 **8. Check.** `curl https://cloud.trina.app/healthz` → `{"ok":true}`. Operator shell (no SSH anywhere):
 `aws ssm start-session --target <control instance id>`, then
-`sudo docker exec tdc-control bun /app/src/main.ts teams list`. Buy the Team plan in **sandbox** with a test card:
+`sudo docker exec tdc-control bun /app/src/main.ts teams list`. Our own team, without payment:
+`sudo docker exec tdc-control bun /app/src/main.ts teams create trina --owner contact@trina.app --name Trina
+--allow-reserved` (the running control plane provisions it in about a minute; the setup link goes to the owner). Buy the Team plan in **sandbox** with a test card:
 the setup mail arrives, `https://<slug>.cloud.trina.app` has a certificate, Claude.ai → Settings → Connectors → Add
 custom connector → `https://<slug>.cloud.trina.app/mcp` connects. Then put the live Paddle values in
 `/tdcloud/control/env` and rerun `sudo /usr/local/sbin/tdcloud-bootstrap` on the control instance.
 
-**Operations.** After a new control-plane image, rerun the host bootstrap too (it restarts the mail relay
-`tdc-mail` from that image). More capacity: raise `host_count`, `terraform apply` (new teams go to the least-loaded host;
+**Operations.** Image tags live in each instance's `/etc/tdcloud/host.conf` (written once from user data; Terraform
+ignores later user-data changes on the control instance, and a new launch template version only reaches new hosts).
+To roll a new control-plane image to running instances: push it, set `TDCLOUD_HELPER_IMAGE` in `/tdcloud/control/env`,
+then on the control instance and on every host (SSM Run Command or a session, as root):
+
+```sh
+sed -i 's#tdcloud-control:[^ ]*#tdcloud-control:<new tag>#' /etc/tdcloud/host.conf
+. /etc/tdcloud/host.conf
+aws s3 cp s3://$ARTIFACTS_BUCKET/host/bootstrap.sh /usr/local/sbin/tdcloud-bootstrap   # s3 cp drops the x bit
+chmod 0755 /usr/local/sbin/tdcloud-bootstrap && /usr/local/sbin/tdcloud-bootstrap
+```
+
+(the control container and the hosts' mail relay `tdc-mail` restart from the new image; team containers keep
+running). Changed host scripts reach the artifacts bucket with `terraform apply -target=aws_s3_object.artifacts`. More capacity: raise `host_count`, `terraform apply` (new teams go to the least-loaded host;
 `TDCLOUD_MAX_TEAMS_PER_HOST` slots each). Product upgrade: push a new `trina-drive` tag, set `TDCLOUD_IMAGE` in
 `/tdcloud/control/env`, rerun the control bootstrap, then `teams upgrade --all` (each team: backup, new container on
 the same data). Backups of the control database: nightly to `s3://<backup bucket>/control/`.
@@ -328,6 +377,56 @@ from `teams export`; see [docs/DOCKER.md §5](../docs/DOCKER.md).
 
 Either way the DNS zone is the delegated `cloud.trina.app` on Route 53; trina.app itself stays at Gabia.
 
+### Hold mode (no teams until the first customer)
+
+Everything that is slow to recreate or that DNS points at stays; everything that costs per hour goes. Since 2026-10-23
+the deployment is in this state:
+
+| Kept | Gone |
+|---|---|
+| Route 53 zone `cloud.trina.app` (+ `cloud.trina.app` A, DKIM, DMARC, CAA), SES identity, KMS key, ECR images, S3 buckets (team backups, control DB copy), VPC, IAM roles, launch template, SSM parameters `/tdcloud/control/env` and `/tdcloud/caddy-ask-key` | team hosts (ASG at 0, their Elastic IPs released, data volumes deleted), the test team's container, network, data and env parameter, its DNS record |
+| control instance **stopped** (its root volume and Elastic IP kept, so `cloud.trina.app` stays put) | |
+
+Going on hold:
+
+```sh
+# 1. each team: a last backup, stopped (kept in the control DB as suspended), host-side removed, DNS record removed
+docker exec tdc-control bun /app/src/main.ts teams backup <slug>; … teams suspend <slug>
+#    on its host: docker rm -f tdc-<slug>; docker network rm tdc-net-<slug>; tdcloud-host cleanup <slug>
+aws ssm delete-parameter --name /tdcloud/teams/<slug>/env
+aws route53 change-resource-record-sets … DELETE <slug>.cloud.trina.app A <host EIP>
+# 2. a copy of the control DB in S3 (the nightly cron does not run while it is stopped)
+# 3. hosts: scale-in protection off, then host_count = 0
+aws autoscaling set-instance-protection --auto-scaling-group-name tdcloud-hosts --no-protected-from-scale-in --instance-ids <ids>
+terraform apply -var-file=$S/terraform.tfvars        # host_count = 0: ASG 0/0/0, host EIPs released
+aws ec2 delete-volume --volume-id <the host's /dev/sdf volume>   # kept on termination by design; the data is in S3
+# 4. the control instance (nothing can sign up or pay yet: Paddle is not wired, SES is in the sandbox)
+aws ec2 stop-instances --instance-ids <control instance id>
+```
+
+Coming back: `aws ec2 start-instances --instance-ids <control>` (its containers restart by themselves; Caddy gets
+the `cloud.trina.app` certificate once Gabia delegates the zone), `host_count = 1` and `terraform apply` (a new host
+boots in ~3 minutes with its own Elastic IP from the pool), then `teams create` for new teams. A team kept from before
+the hold (the dogfood `trina`) is restored by hand onto the new host: `teams export` gives the archive and keys; there
+is no `teams restore` yet, and its row still names the terminated host.
+
+What automatic scale-out from 0 and scale-in of empty hosts would need (not built):
+
+- **Out**: `pickHost` throws "no online host with room"; the provision job retries for ~7 minutes, then fails and
+  alerts. Instead, on that error the control plane should raise the ASG's desired capacity (IAM:
+  `autoscaling:SetDesiredCapacity` / `UpdateAutoScalingGroup` on `tdcloud-hosts`, max raised with it), keep the
+  team in `provisioning` with a longer retry window (a host needs ~3 minutes to boot and register with SSM), and only
+  pick a host whose bootstrap finished (SSM online is earlier than that: e.g. a `tdcloud:ready` tag the bootstrap sets,
+  or `tdcloud-host info` answering). Each host also needs a free Elastic IP in the pool before it boots (the
+  bootstrap takes one; with none it keeps its ephemeral address and team DNS records would point at that).
+- **In**: a host is empty when no team row names it (`teams` with `host = <id>` and status not deleted).
+  Remove its scale-in protection (`autoscaling:SetInstanceProtection`) and terminate it through the ASG
+  (`TerminateInstanceInAutoScalingGroup --should-decrement-desired-capacity`), then delete its data volume
+  (`delete_on_termination = false` on purpose) and release or keep its Elastic IP. Keep one host warm if sign-ups
+  should not wait 3+ minutes.
+- Both: `host_count` in Terraform must stop owning the ASG size (`ignore_changes = [desired_capacity]`, min 0,
+  max = a cap), or the next apply undoes the control plane's choice.
+
 ## Cost estimate (AWS, Seoul, on-demand, USD per month)
 
 Prices from the AWS Price List API on 2026-10-23: m7g.xlarge $0.2006/h ($146.44/month), t4g.small $0.0208/h, gp3
@@ -348,6 +447,10 @@ data volume.
 | Route 53, KMS, ECR, SES, logs | ~$4 | ~$6 | ~$15 |
 | **Total** | **~$241** | **~$749** | **~$2,977** |
 | per team | ~$24 | ~$15 | ~$15 |
+
+The first deploy (one m7g.xlarge host with a 50 GB data volume, the control instance, three public IPv4 addresses)
+runs at about **$6/day** (~$180/month). **On hold** (control stopped, no hosts): control root volume 30 GB $2.74,
+its Elastic IP $3.65, KMS key $1, Route 53 zone $0.50, ECR/S3 a few cents — **about $8/month**.
 
 Against $99/month (Team) the infrastructure is 15–25% of revenue. The two big levers: a 1-year Compute Savings Plan
 takes roughly a quarter off EC2, and **incremental backups** (instead of 7 full copies) would cut S3 by ~80% —
@@ -401,13 +504,24 @@ managed storage with the plan's quota (100 GB / 1 TB), the setup link with `#tok
 
 Before a real AWS launch:
 
-1. **Never run on AWS.** The AWS driver, host agent, bootstrap (firewall chain, relay container, Caddy re-join at
-   fixed addresses) and Terraform are unit-tested against fake endpoints and `terraform validate`d only. First run:
-   a sandbox account, one host, one team; check `iptables -S TDCLOUD-INPUT`, that a team container reaches
-   `<gateway>:8025` and nothing else on the host, and that an invite arrives.
-2. **SES**: production access must be granted. The `ses:FromAddress` condition is expected to match the address part
-   of `Trina Drive <drive@trina.app>` — confirm with the first real send (if SES compares the whole header, send with
-   the bare address). Bounces and complaints are not handled: add a configuration set with an SNS/EventBridge
+1. **First AWS run (2026-10-23), what it covered.** Provisioning over SSM (sealed setup token and backup key),
+   the team's uid, read-only root, seccomp/AppArmor, limits, no ports, its fixed /28 with Caddy at .2, the hosted-mode
+   env (hosted, trusted proxy, managed storage 100 GB, SES through the relay), the XFS project quota (220 GB);
+   from inside the team: DNS and HTTPS to the internet work, the metadata service, the VPC (control plane) and the
+   host's other ports do not, the relay does; the relay refuses another From and passes the team From to SES (IAM
+   allowed it; SES refused only because the identity is not verified yet); Caddy's `ask` (200 for the team, 404
+   unknown, 403 without the key); manual backup to S3 (SSE-KMS) and `teams export` (KMS unwrap, decrypts); suspend;
+   the audit chain. **Not yet covered** (needs the Gabia NS records and SES production access): certificates,
+   `https://` end to end, Claude.ai connecting, real mail (setup link, invites), a Paddle purchase, a host reboot
+   (Caddy re-joining the team networks), two teams on one host. Fixed on the way: the firewall script was not
+   executable (teams would have run unfirewalled; the bootstrap now stops instead), the aws CLI snap writes nothing to
+   a file when run under SSM (the control plane came up with an empty env; team env files would have been empty),
+   S3 object etag vs KMS, an apostrophe EC2 refuses in a rule description, the KMS lockout check, SES checking the
+   address identity before the domain verifies, ECR logins expiring after 12 h (credential helper now), backups
+   uploaded with `--sse aws:kms` landing under the AWS-managed `aws/s3` key instead of the Trina Cloud key.
+2. **SES**: production access was requested on 2026-10-23 (pending); the account-level suppression list (bounces,
+   complaints) is on. The `ses:FromAddress` condition matches the address part of `Trina Drive <drive@…>` (the first
+   run got past IAM with it). Bounces and complaints are not handled: add a configuration set with an SNS/EventBridge
    destination and suppress bad recipients (`TDCLOUD_SES_CONFIGURATION_SET` is passed through; the host IAM then also
    needs the configuration set's ARN).
 3. **Host disk vs. plan size**: a Business team may hold 1 TB (XFS cap 2 TB) while hosts start with a 300 GB data
@@ -426,3 +540,8 @@ Before a real AWS launch:
 10. Local driver: no hard disk quota (named volumes have none); the product's storage quota still applies, and the
     metrics loop flags `/data` beyond it plus 20 GB.
 11. A plan change recreates the container (a few seconds of downtime) because the storage quota is an env value.
+12. Admin CLI through `docker exec` records the actor as `admin:unknown` (no `USER` in the container): pass
+    `-e USER=<you>` to `docker exec`.
+13. A team container can also reach the relay port on the host's VPC address (not only its gateway); the relay still
+    accepts only a team container's address and the team From.
+14. No `teams restore`: bringing a team back after hold mode or a lost host is the manual procedure above.
