@@ -17,9 +17,9 @@ variable "domain" {
 }
 
 variable "mail_domain" {
-  description = "Domain the control plane sends mail from (SES identity; DKIM CNAMEs go into its DNS at Gabia)."
+  description = "Domain the control plane and the teams send mail from (SES identity). Empty = var.domain: the identity's DKIM CNAMEs then go into the Route 53 zone and nothing is added at Gabia. Another domain (e.g. trina.app): add the three CNAMEs from outputs.ses_dkim_records in its DNS by hand."
   type        = string
-  default     = "trina.app"
+  default     = ""
 }
 
 variable "acme_email" {
@@ -40,9 +40,13 @@ variable "azs" {
 }
 
 variable "host_count" {
-  description = "Team hosts in the pool (the ASG's fixed size). Add one when the control plane says no host has room."
+  description = "Team hosts in the pool (the ASG's fixed size). Add one when the control plane says no host has room. 0 = hold mode (no teams running; README, \"Hold mode\")."
   type        = number
   default     = 1
+  validation {
+    condition     = var.host_count >= 0 && floor(var.host_count) == var.host_count
+    error_message = "host_count is a whole number, 0 or more."
+  }
 }
 
 variable "host_instance_type" {
@@ -110,6 +114,12 @@ variable "team_subnets" {
 
 variable "front_proxies" {
   description = "CIDR ranges of a load balancer or CDN in front of the hosts' Caddy, if one is ever added (none today: DNS points at the hosts' Elastic IPs). Caddy then takes the client's address from X-Forwarded-For only from these (README, Client addresses)."
+  type        = list(string)
+  default     = []
+}
+
+variable "kms_admin_arns" {
+  description = "IAM users/roles that administer the KMS key through its key policy. Needed when the identity running Terraform has no kms:PutKeyPolicy in IAM (KMS refuses a policy that would lock its creator out); e.g. [\"arn:aws:iam::<account>:user/tdcloud-deploy\"]."
   type        = list(string)
   default     = []
 }

@@ -15,6 +15,20 @@ data "aws_iam_policy_document" "kms" {
       identifiers = ["arn:${local.partition}:iam::${local.account}:root"]
     }
   }
+  # principals that administer the key through the key policy itself (KMS refuses a key policy its creator could not
+  # change later: a deploy identity without kms:PutKeyPolicy in IAM must be listed here)
+  dynamic "statement" {
+    for_each = length(var.kms_admin_arns) > 0 ? [1] : []
+    content {
+      sid       = "KeyAdmins"
+      actions   = ["kms:*"]
+      resources = ["*"]
+      principals {
+        type        = "AWS"
+        identifiers = var.kms_admin_arns
+      }
+    }
+  }
   # the ASG launches instances with volumes encrypted under this key
   statement {
     sid       = "AutoScalingUse"
