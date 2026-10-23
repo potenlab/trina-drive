@@ -4,7 +4,8 @@
 import { describe, expect, test } from 'bun:test'
 import { ApiError, type FolderDetail } from '../web/src/api'
 import { AI_CLIENTS, claudeOAuthCommand, codexOAuthCommands, mcpUrl } from '../web/src/connect'
-import { linkTo, needsStepUp, viewFromFolder, wideningOf } from '../web/src/drive/share-api'
+import type { ShareView as ApiView } from '../src/share/api-types'
+import { fromApi, linkTo, needsStepUp, viewFromFolder, wideningOf } from '../web/src/drive/share-api'
 import * as consoleText from '../web/src/i18n/console'
 import * as core from '../web/src/i18n/core'
 import * as share from '../web/src/i18n/share'
@@ -59,8 +60,28 @@ describe('share adapter on the folder rules API', () => {
     expect(viewFromFolder('/프로젝트/x', detail, { id: 5 }, false).can_manage).toBe(false)
   })
 
+  test('the sharing API’s answer (src/share/api-types.ts) as the dialog’s view', () => {
+    const api: ApiView = {
+      mode: 'managed', item: { path: '/프로젝트/비밀', kind: 'folder', name: '비밀', id: 9 }, my_role: 'editor',
+      can_share: true, can_manage: false, can_grant_manager: false, can_ai_off: false, can_restrict_here: false, can_toggle_editors: false, can_invite: false, full_list: true,
+      general: { effective: { role: 'viewer', from_path: '/프로젝트' }, own: null, restricted_here: false, editor_step_up: true },
+      editors_can_share: { effective: true, own: null, off_above: false },
+      entries: [{ subject: { type: 'person', id: 5, name: 'lee' }, role: 'manager', source: 'inherited', from_path: '/프로젝트', note: 'cannot_open', editable: false }],
+      ai: { no_ai: false }, path_names_visible: true, warnings: [{ code: 'draft_copies', count: 2 }],
+    }
+    const v = fromApi(api)
+    expect(v.folder_id).toBe(9)
+    expect(v.general).toEqual({ effective: { level: 'viewer', from_path: '/프로젝트' }, own: null, restricted_here: false, editor_step_up: true })
+    expect(v.editors_can_share).toEqual({ value: true, off_above: false, inherited_from: null, can_change: false })
+    expect(v.entries[0]).toMatchObject({ role: 'manager', source: 'inherited', from_path: '/프로젝트', cannot_open: true, editable: false })
+    expect(v.warnings).toEqual([{ code: 'draft_copies', count: 2 }])
+    // set on the folder itself: not "inherited from"
+    expect(fromApi({ ...api, general: { ...api.general, own: 'editor', effective: { role: 'editor', from_path: '/프로젝트/비밀' } } }).general.effective).toEqual({ level: 'editor', from_path: null })
+    expect(fromApi({ mode: 'inplace', item: { path: '/nas', kind: 'folder', name: 'nas', id: 3 } })).toMatchObject({ mode: 'inplace', folder_id: 3 })
+  })
+
   test('widening and step-up answers', () => {
-    expect(wideningOf(new ApiError(409, 'widening', 'x', { count: 3, sources_hidden: 1, can_confirm: false }))).toEqual({ count: 3, sourcesHidden: 1, canConfirm: false })
+    expect(wideningOf(new ApiError(409, 'widening', 'x', { count: 1, people: 3, sources_hidden: 1, can_confirm: false, needs_approval: true }))).toEqual({ count: 3, sourcesHidden: 1, canConfirm: false })
     expect(wideningOf(new ApiError(409, 'widening', 'x', { count: 2 }))?.canConfirm).toBe(true)
     expect(wideningOf(new ApiError(409, 'exists', 'x'))).toBeNull()
     expect(wideningOf(new Error('x'))).toBeNull()

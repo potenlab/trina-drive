@@ -74,23 +74,25 @@ export function ShareDialog({ path, name, onClose }: { path: string; name: strin
     return () => { window.removeEventListener('keydown', key); prev?.focus?.() }
   }, [])
 
+  const askStepUp = async (change: ShareChange) => {
+    try { const o = await backend!.stepUpOptions(path, change.general); setPending({ kind: 'stepup', change, method: o.method, options: o.options }) } catch (x) { setError(errText(x)) }
+  }
   const apply = async (change: ShareChange, okText = t('share_saved')) => {
     if (!backend) return false
     setBusy(true); setError(null); setNote(null)
+    // an Editor opening the folder to the whole team confirms with a passkey first (the server would say so too)
+    if (change.general?.mode === 'team' && view?.general.editor_step_up && !change.step_up) { await askStepUp(change); setBusy(false); return false }
     try {
       const r = await backend.change(path, change)
       setView(r); setPending(null); setDone((n) => n + 1)
       if (r.approval_id) setNote(t('share_approval_requested'))
-      else if (r.invited?.length) setNote(t('share_invited_n', { n: r.invited.length }))
+      else if (r.invited?.length) setNote(t('share_invited_n', { n: r.invited.filter((x) => x.status === 'invited').length || r.invited.length }))
       else setNote(okText)
       return true
     } catch (e) {
       const w = wideningOf(e)
       if (w) { setPending({ kind: 'widening', change, ...w }); return false }
-      if (needsStepUp(e)) {
-        try { const o = await backend.stepUpOptions(path); setPending({ kind: 'stepup', change, method: o.method, options: o.options }) } catch (x) { setError(errText(x)) }
-        return false
-      }
+      if (needsStepUp(e)) { await askStepUp(change); return false }
       setError(e instanceof ApiError && e.code === 'not_manager' ? t('share_only_managers') : errText(e))
       return false
     } finally { setBusy(false) }
@@ -135,7 +137,8 @@ export function ShareDialog({ path, name, onClose }: { path: string; name: strin
                 <input type="checkbox" role="switch" checked={view.editors_can_share.value} disabled={busy || !view.editors_can_share.can_change}
                   onChange={(e) => apply({ editors_can_share: e.target.checked })} />
                 <span><span>{t('share_editors_can_share')}</span>
-                  <span className="muted small">{view.editors_can_share.inherited_from && !view.editors_can_share.value ? t('share_editors_off_above', { folder: view.editors_can_share.inherited_from }) : t('share_editors_can_share_help')}</span></span>
+                  <span className="muted small">{!view.editors_can_share.value && view.editors_can_share.inherited_from ? t('share_editors_off_above', { folder: view.editors_can_share.inherited_from })
+                    : !view.editors_can_share.value && view.editors_can_share.off_above ? t('share_editors_off_above_any') : t('share_editors_can_share_help')}</span></span>
               </label>
             )}
             <label className="sd-toggle">
@@ -147,8 +150,9 @@ export function ShareDialog({ path, name, onClose }: { path: string; name: strin
             </label>
           </section>
 
-          {view.path_names_visible && <p className="sd-warn small"><Icon name="info" size={16} /> {t('share_path_names_visible', { path: view.item.path })}</p>}
-          {(view.warnings ?? []).map((w) => <p key={w.code} className="sd-warn small"><Icon name="info" size={16} /> {w.code === 'draft_copies' ? t('share_warn_draft_copies', { n: w.count ?? 0 }) : w.code}</p>)}
+          {/* only below the top: a top folder's name is no news */}
+          {view.path_names_visible && view.item.path.split('/').length > 2 && <p className="sd-warn small"><Icon name="info" size={16} /> {t('share_path_names_visible', { path: view.item.path })}</p>}
+          {(view.warnings ?? []).map((w) => <p key={w.code} className="sd-warn small"><Icon name="info" size={16} /> {w.code === 'draft_copies' ? t('share_warn_draft_copies', { n: w.count ?? 0 }) : w.code === 'manager_cannot_open' ? t('share_warn_manager_cannot_open', { n: w.count ?? 0 }) : w.code === 'editors_off_above' ? t('share_editors_off_above_any') : w.code}</p>)}
         </div>}
 
         {pending?.kind === 'widening' && (
@@ -159,11 +163,14 @@ export function ShareDialog({ path, name, onClose }: { path: string; name: strin
               <button type="button" className="btn" onClick={() => setPending(null)}>{t('cancel')}</button>
               {pending.canConfirm
                 ? <button type="button" className="btn primary" disabled={busy} onClick={() => apply({ ...pending.change, confirm_widening: true })}>{t('share_anyway')}</button>
-                : <button type="button" className="btn primary" disabled={busy} onClick={() => apply({ ...pending.change, request_approval: true })}>{t('share_request_approval')}</button>}
+                : <button type="button" className="btn primary" disabled={busy} onClick={() => apply({ ...pending.change, confirm_widening: true })}>{t('share_request_approval')}</button>}
             </div>
           </AlertBox>
         )}
-        {pending?.kind === 'stepup' && <StepUp pending={pending} busy={busy} onCancel={() => setPending(null)} onProof={(proof) => apply({ ...pending.change, step_up: proof })} onError={setError} />}
+        {pending?.kind === 'stepup' && <StepUp pending={pending} busy={busy} onCancel={() => setPending(null)} onProof={async (proof) => {
+          setBusy(true)
+          try { const assertion = await backend!.stepUp(path, pending.change.general, proof); setBusy(false); await apply({ ...pending.change, step_up: assertion }) } catch (x) { setBusy(false); setError(errText(x)) }
+        }} onError={setError} />}
 
         {error && <p className="error sd-pad-x" role="alert">{error}</p>}
         <footer className="sd-foot">
@@ -261,7 +268,7 @@ function Avatar({ name, group }: { name: string; group?: boolean }) {
 // ---------- one row of "People with access" ----------
 function EntryRow({ e, view, me, busy, onRole }: { e: ShareEntry; view: ShareView; me: number; busy: boolean; onRole: (r: Role | 'remove') => void }) {
   // Manager is given and taken only by those who may grant it (admins); Editors who share change Viewers and Editors
-  const editable = e.source === 'direct' && (e.role === 'manager' ? view.can_grant_manager : view.can_manage || !!view.can_share)
+  const editable = e.editable ?? (e.source === 'direct' && (e.role === 'manager' ? view.can_grant_manager : view.can_manage || !!view.can_share))
   const roles: Role[] = view.can_grant_manager && e.subject.type === 'person' ? ['viewer', 'editor', 'manager'] : ['viewer', 'editor']
   if (e.role === 'manager' && !roles.includes('manager')) roles.push('manager')
   const you = e.subject.type === 'person' && e.subject.id === me

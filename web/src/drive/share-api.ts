@@ -6,8 +6,9 @@
 //     only the new API knows (Editors can share, widening checks, the Editor step-up, Shared with me): those fields are
 //     left out and the dialog hides what they drive.
 // Which one: GET /api/directory exists only with the sharing API (a route that is missing answers 404; the directory
-// is never hidden from a signed-in person). The shapes below are the contract; keep them in step with
-// src/share/api-types.ts (A1) once it lands.
+// is never hidden from a signed-in person). The screens use the view below; `fromApi` maps the sharing API's answer
+// (src/share/api-types.ts, docs/SHARING-API.md) onto it.
+import type * as A from '../../../src/share/api-types'
 import { api, ApiError, get, type FolderDetail, type FolderSummary, type Person } from '../api'
 
 export type Role = 'viewer' | 'editor' | 'manager'
@@ -18,6 +19,8 @@ export interface ShareEntry {
   subject: Subject; role: Role; source: 'direct' | 'inherited'; from_path?: string | null
   /** an old "manage without edit" grant (plan 3.8): shown as "Manager (can't open files)" */
   cannot_open?: boolean
+  /** may the caller change or remove it (the sharing API says; else worked out from the role) */
+  editable?: boolean
 }
 export interface ShareView {
   item: { path: string; kind: 'folder' | 'file'; name: string }
@@ -31,12 +34,14 @@ export interface ShareView {
   can_grant_manager: boolean
   can_ai_off: boolean
   can_restrict_here?: boolean
-  my_role?: Role | null
-  /** O1 toggle; absent on a server without it */
-  editors_can_share?: { value: boolean; inherited_from?: string | null; can_change: boolean }
+  my_role?: Role | 'admin' | null
+  /** O1 toggle; absent on a server without it. off_above: a folder above turned it off */
+  editors_can_share?: { value: boolean; off_above?: boolean; inherited_from?: string | null; can_change: boolean }
   /** "Anyone in <team>" */
   team_name?: string
-  general: { effective: { level: Level; from_path: string | null } | null; own: Level | null; restricted_here: boolean }
+  general: { effective: { level: Level; from_path: string | null } | null; own: Level | null; restricted_here: boolean
+    /** an Editor confirms with a passkey (step-up) before opening the folder to the whole team */
+    editor_step_up?: boolean }
   entries: ShareEntry[]
   ai: { no_ai: boolean; inherited_no_ai_from?: string | null }
   path_names_visible?: boolean
@@ -50,11 +55,12 @@ export interface ShareChange {
   ai_access?: boolean
   editors_can_share?: boolean
   notify?: boolean
+  /** managers: go ahead; Editors: ask a source manager (202 approval_pending) */
   confirm_widening?: boolean
-  request_approval?: boolean
-  step_up?: { response: unknown } | { code: string }
+  /** the assertion from POST /api/share/step-up */
+  step_up?: string
 }
-export interface ShareResult extends ShareView { widens?: number; invited?: string[]; approval_id?: number }
+export interface ShareResult extends ShareView { widens?: number; invited?: { email: string; status: string; granted: boolean }[]; approval_id?: number }
 export interface Directory { people: { id: number; name: string; display_name?: string | null; email?: string | null }[]; groups: { id: number; name: string; size: number; everyone?: boolean }[] }
 export interface SharedItem { path: string; kind: 'folder' | 'file'; name: string; role: Role | null; shared_by: { id: number; name: string } | null; shared_at: number | null }
 
@@ -62,7 +68,9 @@ export interface ShareBackend {
   kind: 'remote' | 'legacy'
   get(path: string): Promise<ShareView>
   change(path: string, c: ShareChange): Promise<ShareResult>
-  stepUpOptions(path: string): Promise<{ method: 'passkey' | 'totp'; options?: unknown }>
+  stepUpOptions(path: string, general: ShareChange['general']): Promise<{ method: 'passkey' | 'totp'; options?: unknown }>
+  /** proves the step-up; answers the assertion to send as `step_up` */
+  stepUp(path: string, general: ShareChange['general'], proof: { response: unknown } | { code: string }): Promise<string>
   directory(): Promise<Directory>
   sharedWithMe(): Promise<SharedItem[] | null>
 }
@@ -70,11 +78,39 @@ export interface ShareBackend {
 const enc = encodeURIComponent
 
 // ---------- the sharing API ----------
+/** The sharing API's answer as the screens' view. */
+export function fromApi(v: A.ShareView | A.InplaceView): ShareView {
+  if (v.mode === 'inplace') return { mode: 'inplace', folder_id: v.item.id, item: v.item, can_manage: false, can_grant_manager: false, can_ai_off: false, general: { effective: null, own: null, restricted_here: false }, entries: [], ai: { no_ai: false } }
+  const g = v.general
+  return {
+    item: { path: v.item.path, kind: v.item.kind, name: v.item.name }, folder_id: v.item.id,
+    can_manage: v.can_manage, can_share: v.can_share, can_grant_manager: v.can_grant_manager, can_ai_off: v.can_ai_off, can_restrict_here: v.can_restrict_here,
+    my_role: v.my_role,
+    editors_can_share: { value: v.editors_can_share.effective, off_above: v.editors_can_share.off_above, inherited_from: null, can_change: v.can_toggle_editors },
+    general: {
+      // set here, or the folder it comes from (null = here)
+      effective: g.effective ? { level: g.effective.role, from_path: g.own || g.effective.from_path === v.item.path ? null : g.effective.from_path } : null,
+      own: g.own, restricted_here: g.restricted_here, editor_step_up: g.editor_step_up,
+    },
+    entries: v.entries.map((e) => ({ subject: e.subject, role: e.role, source: e.source, from_path: e.from_path ?? null, cannot_open: e.note === 'cannot_open', editable: e.editable })),
+    ai: { no_ai: v.ai.no_ai, inherited_no_ai_from: v.ai.inherited_no_ai_from ?? null },
+    path_names_visible: v.path_names_visible,
+    warnings: v.warnings.map((w) => ({ code: w.code, count: 'count' in w ? w.count : undefined })),
+  }
+}
+
 export const remote: ShareBackend = {
   kind: 'remote',
-  get: (path) => get<ShareView>('/share?path=' + enc(path)),
-  change: (path, c) => api<ShareResult>('POST', '/share', { path, ...c }),
-  stepUpOptions: (path) => api('POST', '/share/step-up/options', { path }),
+  get: (path) => get<A.ShareView | A.InplaceView>('/share?path=' + enc(path)).then(fromApi),
+  async change(path, c) {
+    const r = await api<A.ShareResult | A.ApprovalPending>('POST', '/share', { path, ...c })
+    // an Editor's widening change waits for a source manager: the folder is as it was
+    if ('status' in r && r.status === 'approval_pending') return { ...(await remote.get(path)), approval_id: r.approval_id, widens: r.widens }
+    const v = r as A.ShareResult
+    return { ...fromApi(v), widens: v.widens, invited: v.invited }
+  },
+  stepUpOptions: (path, general) => api('POST', '/share/step-up/options', { path, general }),
+  stepUp: (path, general, proof) => api<{ assertion: string }>('POST', '/share/step-up', { path, general, ...proof }).then((r) => r.assertion),
   directory: () => get<Directory>('/directory'),
   sharedWithMe: () => get<{ items: SharedItem[] }>('/shared-with-me').then((r) => r.items),
 }
@@ -191,6 +227,7 @@ export function legacy(me: () => { id: number }): ShareBackend {
       return (await load(path)).view
     },
     stepUpOptions: () => Promise.reject(new ApiError(404, 'not_found', 'not found')),
+    stepUp: () => Promise.reject(new ApiError(404, 'not_found', 'not found')),
     async directory() {
       const r = await get<{ people: Person[]; groups: { id: number; name: string; members: number[] }[] }>('/people')
       return {
@@ -220,6 +257,7 @@ export function linkTo(origin: string, path: string) {
 export function wideningOf(e: unknown): { count: number; sourcesHidden: number; canConfirm: boolean } | null {
   if (!(e instanceof ApiError) || e.status !== 409 || e.code !== 'widening') return null
   const d = e.data ?? {}
-  return { count: Number(d.count ?? 0), sourcesHidden: Number(d.sources_hidden ?? 0), canConfirm: d.can_confirm !== false }
+  // needs_approval: an Editor sends it again with confirm_widening, which asks a source manager (202)
+  return { count: Number(d.people ?? d.count ?? 0), sourcesHidden: Number(d.sources_hidden ?? 0), canConfirm: d.can_confirm !== false && d.needs_approval !== true }
 }
 export const needsStepUp = (e: unknown) => e instanceof ApiError && (e.code === 'step_up_required' || e.code === 'reauth_required')

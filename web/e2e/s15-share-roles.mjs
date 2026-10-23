@@ -1,11 +1,11 @@
 // S15 (plan 5, O1 version of 10.1/10.2-8): who may do what in the share dialog.
-//  A. On today's server (folder rules API): lee, a Manager who is not an admin, shares /프로젝트 with mina as Editor,
-//     is not offered Manager (and the server refuses it), may turn "No AI" on but not off; kim (Editor, no sharing
-//     on this server) gets the dialog read-only.
-//  B. With the sharing API (mocked to the plan 3.7 contract until A1 lands — web/e2e/mock-share.mjs): kim as Editor
-//     while "Editors can change permissions and share" is on: adds people (no Manager), a widening answer leads to
-//     "Request approval", opening to the whole team asks for the step-up code; lee as Manager confirms a widening and
-//     turns the toggle off, after which kim's dialog is read-only. The dialog works from the keyboard.
+//  A. On the real server (A1's sharing API): kim (Editor) may share by default (O1) but is not offered Manager; lee, a
+//     Manager who is not an admin, shares /프로젝트 with mina as Editor, is not offered Manager (the server refuses it),
+//     turns "No AI" on but cannot turn it off, and turns "Editors can change permissions and share" off — after which
+//     kim's dialog is read-only.
+//  B. States that are slow to set up for real, through a stand-in of the same API (web/e2e/mock-share.mjs): an
+//     Editor's widening → "Request approval" (202 approval_pending), opening to the whole team → step-up code →
+//     assertion; a Manager confirms a widening and turns the toggle off; keyboard use of the dialog.
 import { check, shot, signedIn } from './lib.mjs'
 import { shareMock } from './mock-share.mjs'
 
@@ -19,7 +19,15 @@ async function openShare(page, fx) {
 
 export async function s15(browser, fx) {
   console.log('S15 share roles: Manager (not admin), Editor; O1 toggle, widening, step-up, keyboard')
-  // ---- A: today's server ----
+  // ---- A: the real server ----
+  const kim0 = await signedIn(browser, fx, 'kim')
+  await openShare(kim0, fx)
+  check(await kim0.locator('.sd-combo').count() === 1, 'A: an Editor may share by default (O1)')
+  await kim0.fill('.sd-combo input', 'sam')
+  await kim0.locator('.sd-options li', { hasText: 'sam' }).click()
+  check(!(await kim0.locator('.sd-add-row .sd-role option').allTextContents()).includes('Manager'), 'A: an Editor is not offered Manager')
+  await kim0.context().close()
+
   const lee = await signedIn(browser, fx, 'lee')
   await openShare(lee, fx)
   await lee.fill('.sd-combo input', 'mina')
@@ -42,7 +50,12 @@ export async function s15(browser, fx) {
   const ai = lee.locator('.sd-toggle', { hasText: 'AI read this' })
   check(!(await ai.locator('input').isChecked()) && await ai.locator('input').isDisabled(), 'A: lee turned "No AI" on and cannot turn it off')
   check((await ai.textContent()).includes('Only an admin can turn it off'), 'A: the dialog says only an admin turns it off')
-  await shot(lee, 's15-manager-legacy')
+  const tog0 = lee.locator('.sd-toggle', { hasText: 'Editors can change' }).locator('input')
+  check(await tog0.isChecked() && await tog0.isEnabled(), 'A: lee sees "Editors can change permissions and share" on, and may change it')
+  await tog0.click()
+  await lee.locator('.sd-note', { hasText: 'Access updated.' }).waitFor()
+  check(!(await tog0.isChecked()), 'A: lee turned it off')
+  await shot(lee, 's15-manager')
   // the Approvals inbox lists the team-skill change lee may decide, and opens its review
   await lee.goto(fx.base + '/#/approvals')
   await lee.locator('.ap-skills li', { hasText: 'team/proposal' }).waitFor()
@@ -53,7 +66,7 @@ export async function s15(browser, fx) {
 
   const kim = await signedIn(browser, fx, 'kim')
   await openShare(kim, fx)
-  check(await kim.locator('.sd-ro', { hasText: 'Only managers can change access' }).count() === 1 && await kim.locator('.sd-combo').count() === 0, 'A: kim (Editor) sees the dialog read-only on this server')
+  check(await kim.locator('.sd-ro', { hasText: 'Only managers can change access' }).count() === 1 && await kim.locator('.sd-combo').count() === 0, 'A: with the toggle off, kim (Editor) gets the dialog read-only')
   check(await kim.locator('.sd-entry').count() >= 2, 'A: …and still sees who has access')
   await kim.context().close()
 
@@ -73,7 +86,7 @@ export async function s15(browser, fx) {
   check(await ed.locator('.sd-alert button', { hasText: 'Share anyway' }).count() === 0, 'B: widening → an Editor cannot confirm it')
   await ed.locator('.sd-alert button', { hasText: 'Request approval' }).click()
   await ed.locator('.sd-note', { hasText: 'Approval requested' }).waitFor()
-  check(m.state.posts.at(-1)?.request_approval === true, 'B: Request approval sends request_approval')
+  check(m.state.posts.at(-1)?.confirm_widening === true, 'B: Request approval sends the change again with confirm_widening (202 approval_pending)')
   await ed.selectOption('.sd-general select.sd-plain', 'team')
   await ed.locator('.sd-alert', { hasText: 'Confirm it’s you' }).waitFor()
   await shot(ed, 's15-editor-stepup')
@@ -81,7 +94,7 @@ export async function s15(browser, fx) {
   await ed.locator('.sd-alert button', { hasText: 'Confirm' }).click()
   await ed.locator('.sd-alert').waitFor({ state: 'detached' })
   check(await ed.locator('.sd-general select.sd-plain').inputValue() === 'team', 'B: General access now says Anyone in Trina')
-  check(m.state.general === 'viewer' && m.state.posts.at(-1)?.step_up?.code === '123456', 'B: opening to the team went through with the step-up code')
+  check(m.state.general === 'viewer' && m.state.posts.at(-1)?.step_up === 'stepup-ok', 'B: opening to the team went through with the step-up assertion')
   await ed.context().close()
 
   const mg = shareMock({ path: P, as: 'manager' })
