@@ -1,9 +1,0 @@
-{
-  "name": "trina-drive-e2e-ui",
-  "private": true,
-  "type": "module",
-  "description": "Headless browser flows for the Trina Cloud end-to-end harness (cloud/dev/e2e). Own package so the main install and PR CI stay as they are: bun install --cwd e2e/ui",
-  "devDependencies": {
-    "playwright-core": "1.64.1"
-  }
-}

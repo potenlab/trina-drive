@@ -7,12 +7,14 @@
 //   E2E_DOMAIN=cloud.trina.app   team addresses are https://<team>.<E2E_DOMAIN>
 //   E2E_CONTROL=https://cloud.trina.app
 //   E2E_TEAM=<slug>              the test team (never trina); its people come from E2E_PEOPLE
-//   E2E_PEOPLE=/path/people.json { "admin": {email,password,totp}, "boss": {...}, "mina": {...}, "sam": {...}, "kim": {...} }
-//                                console accounts that are already members of the test team (admin = owner/admin);
-//                                totp = base32 secret of the console authenticator (owners/admins)
+//   people: console accounts that are already members of the test team (shape: cloud/dev/e2e/aws-people.example.json;
+//                                admin = owner/admin with its console authenticator secret). Like cloud/scripts/aws-smoke.ts,
+//                                never from argv or plain env values: E2E_PEOPLE=<file, 0600>, else
+//                                ~/.config/trina-drive/e2e/people.json (0600), else the SSM SecureString /tdcloud/e2e/people
 //   E2E_OTHER_TEAM=<slug>        a second running team for isolation checks (default: none → those checks skip)
-//   E2E_OPS="<command prefix>"   runs the control-plane CLI (e.g. a G1 wrapper over SSM): `$E2E_OPS teams show <slug>`;
-//                                unset → operator steps skip
+//   E2E_OPS=ssm                  operator steps over SSM Run Command on the control instance (tag tdcloud:role=control,
+//                                profile E2E_AWS_PROFILE=tdcloud), as aws-smoke.ts does (cloud/dev/e2e/ops-ssm.ts);
+//                                or "<command prefix>"; unset → operator steps skip
 //   E2E_STATE_DIR                where run state goes (default: $TMPDIR/trina-e2e-<team>)
 import fs from 'node:fs'
 import os from 'node:os'
@@ -87,7 +89,7 @@ export function awsTarget(): Target {
   const control = process.env.E2E_CONTROL || `https://${domain}`
   const stateDir = process.env.E2E_STATE_DIR || path.join(os.tmpdir(), `trina-e2e-${team}`)
   fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 })
-  const opsPrefix = process.env.E2E_OPS?.trim()
+  const opsPrefix = process.env.E2E_OPS?.trim() === 'ssm' ? `bun ${path.join(import.meta.dir, '../ops-ssm.ts')}` : process.env.E2E_OPS?.trim()
   return {
     kind: 'aws', domain, control, teamUrl: (slug) => `https://${slug}.${domain}`, tls: {}, stateDir,
     outbox: null, teamMail: null,

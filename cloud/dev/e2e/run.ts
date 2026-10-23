@@ -8,9 +8,10 @@
 //   options: --quiet (table only), --json FILE (results), --seed (make/seed the fixture team and stop),
 //            --strict (exit 1 on PENDING/PARTIAL too: the release gate), --skip S05,S32
 //
-// Local: cloud/dev/up.sh --no-teams (fast) or cloud/dev/up.sh (also the 229 legacy checks of cloud/dev/e2e.ts), then
-// this. The browser flows need `bun install --cwd e2e/ui` once (playwright-core 1.64.1 + its Chromium/WebKit:
-// `bunx playwright@1.64.1 install chromium webkit` if they are not on this machine).
+// Local: cloud/dev/up.sh --no-teams (fast) or cloud/dev/up.sh (also the legacy checks of cloud/dev/e2e.ts), then this.
+// The browser flows use playwright-core (root devDependency) and its Chromium/WebKit (`bunx playwright@1.64.1 install
+// chromium webkit` if they are not on this machine). UI1 runs C1's drive UI suite (web/e2e/run.mjs, its own fixture
+// servers); H4 runs G1's smoke check (cloud/scripts/aws-smoke.ts).
 //
 // Verdicts: PASS (all checks ok) · PARTIAL (ran what exists; some parts wait for another workstream's merge) ·
 // PENDING (nothing could run yet) · SKIP (not on this target) · FAIL · ERROR (the scenario threw).

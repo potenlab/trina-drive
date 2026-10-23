@@ -34,11 +34,7 @@ export default {
       t.check('mina (Editor) cannot grant Manager: 403', m.status === 403, m.text)
       await share(kim, { path: '/프로젝트', set: [{ subject: { type: 'group', id: sd.groups.재무 }, role: 'remove' }] })
     }
-    if (await t.has('browser', 'the share dialog as Manager and as Editor (UI)')) {
-      const r = await (await (await import('../lib/ui')).ui()).managerDialog(t)
-      if (r.pending) t.pending('the share dialog as Manager and as Editor (UI)', r.pending)
-      else for (const [k, v] of Object.entries(r.checks as Record<string, boolean>)) t.check(`browser: ${k}`, v, r)
-    }
+    t.skipPart('the share dialog as Manager and as Editor in a browser', 'runs in UI1 (C1 web/e2e s15)')
     const back = await setRole(t, kim, '/프로젝트', sd.folders.프로젝트!, mina, 'remove')
     t.check('cleanup: mina back to what everyone has', back.res.status === 200, back.res.text)
   },

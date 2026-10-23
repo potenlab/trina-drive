@@ -43,10 +43,8 @@ jobs:
         with:
           bun-version: 1.3.12
       - run: bun install --frozen-lockfile
-      - name: Browsers (playwright-core 1.64.1 in e2e/ui, Chromium + WebKit)
-        run: |
-          bun install --cwd e2e/ui --frozen-lockfile
-          bunx playwright@1.64.1 install --with-deps chromium webkit
+      - name: Browsers for playwright-core 1.64.1 (Chromium + WebKit)
+        run: bunx playwright@1.64.1 install --with-deps chromium webkit
       - name: Local stack
         if: inputs.target == 'local'
         run: |
@@ -55,6 +53,8 @@ jobs:
         if: inputs.target == 'aws'
         env:
           E2E_PEOPLE_JSON: ${{ secrets.E2E_PEOPLE_JSON }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.E2E_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.E2E_AWS_SECRET_ACCESS_KEY }}
         run: |
           umask 077
           printf '%s' "$E2E_PEOPLE_JSON" > "$RUNNER_TEMP/people.json"

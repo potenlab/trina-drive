@@ -38,7 +38,7 @@ const WHO: Record<Feature, string> = {
   directory: 'needs A1 (feat/a1-share): GET /api/directory is not served yet',
   'drive-ui': 'needs C1 (feat/c1-drive-ui): the drive web app has no new shell (Shared with me) yet',
   'free-closed': 'needs D1 (feat/d1-console): TDCLOUD_MAX_FREE_TEAMS still defaults above 0',
-  browser: 'playwright-core is not installed for the browser flows: bun install --cwd e2e/ui',
+  browser: 'no playwright-core / Chromium for the browser flows: bun install, then bunx playwright@1.64.1 install chromium webkit',
   webkit: 'no WebKit for playwright-core 1.64.1 here (bunx playwright@1.64.1 install webkit)',
   ops: 'no operator CLI on this target (AWS: set E2E_OPS)',
   mail: 'mail cannot be read on this target (AWS mail is checked by H4 through Gmail)',
@@ -102,8 +102,8 @@ export class Features {
         return r.code === 0 && r.out.trim() === '0'
       }
       case 'browser': {
-        if (!fs.existsSync(path.join(UI_DIR, 'node_modules/playwright-core/package.json'))) return false
-        const { chromiumPath } = await import(path.join(UI_DIR, 'browser.ts'))
+        const { chromiumPath, playwrightCore } = await import(path.join(UI_DIR, 'browser.ts'))
+        if (!fs.existsSync(playwrightCore())) return false
         return !!(await chromiumPath())
       }
       case 'webkit': {

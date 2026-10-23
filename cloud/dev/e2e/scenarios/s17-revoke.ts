@@ -24,10 +24,6 @@ export default {
     await expectSight(t, 'mina', '/프로젝트/plan.md', CANARY.프로젝트, { human: true, ai: true }, 'untouched')
     await expectSight(t, 'sam', '/재무/결산.md', CANARY.재무, { human: true, ai: true }, 'others untouched', ['web', 'mcp'])
     if (r.via === 'rules') t.pending('the same through the share dialog (Remove in "People with access")', 'needs A1 (feat/a1-share): POST /api/share not served yet')
-    if (await t.has('browser', 'the UI flow (share dialog → second user sees it → revoke)')) {
-      const r2 = await (await (await import('../lib/ui')).ui()).shareAndRevoke(t)
-      if (r2.pending) t.pending('the UI flow (share dialog → second user sees it → revoke)', r2.pending)
-      else for (const [k, v] of Object.entries(r2.checks as Record<string, boolean>)) t.check(`browser: ${k}`, v, r2)
-    }
+    t.skipPart('the share dialog in a browser (share → the other person sees it → remove)', 'runs in UI1 (C1 web/e2e s12)')
   },
 } satisfies Scenario

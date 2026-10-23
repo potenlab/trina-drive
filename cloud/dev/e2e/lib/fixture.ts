@@ -10,6 +10,7 @@
 //             in the console, each accepts and opens the drive once (JIT) — the Trina Cloud way
 // AWS never makes a team: E2E_TEAM and E2E_PEOPLE describe an existing test team (lib/target.ts).
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { seedTeam, type Seeded } from '../../seed-team'
 import { Console } from './console'
@@ -220,9 +221,7 @@ export class Fixture {
 
   // ---------- AWS: an existing test team ----------
   private async readyAws(): Promise<this> {
-    const file = process.env.E2E_PEOPLE
-    if (!file || !fs.existsSync(file)) throw new Error('AWS target: E2E_PEOPLE must name a JSON file with admin/boss/mina/sam/kim console accounts of the test team')
-    const p = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, { email: string; password: string; totp?: string; name?: string }> // shape: cloud/dev/e2e/aws-people.example.json
+    const p = JSON.parse(awsPeople()) as Record<string, { email: string; password: string; totp?: string; name?: string }> // shape: cloud/dev/e2e/aws-people.example.json
     if (!this.s) {
       this.s = { slug: this.slug, mode: 'sso', admin: { name: p.admin?.name ?? 'admin', email: p.admin!.email, password: p.admin!.password, consoleTotp: p.admin!.totp },
         people: {}, sessions: {}, tokens: {}, appPasswords: {}, log: [] }
@@ -395,6 +394,20 @@ export class Fixture {
     const ppl = (await (await this.drive('admin')).get('/people')).json().people as { id: number; name: string }[]
     return ppl.find((p) => p.name === this.creds(who).name)?.id ?? 0
   }
+}
+
+/** the AWS test team's people (secrets: a 0600 file or SSM, never argv/env values — cloud/scripts/aws-smoke.ts) */
+function awsPeople(): string {
+  const file = process.env.E2E_PEOPLE || path.join(os.homedir(), '.config/trina-drive/e2e/people.json')
+  if (fs.existsSync(file)) {
+    const mode = fs.statSync(file).mode & 0o777
+    if (mode & 0o077) throw new Error(`${file} must be 0600 (it is ${mode.toString(8)})`)
+    return fs.readFileSync(file, 'utf8')
+  }
+  const profile = process.env.E2E_AWS_PROFILE || 'tdcloud', region = process.env.E2E_AWS_REGION || 'ap-northeast-2'
+  const r = Bun.spawnSync(['aws', 'ssm', 'get-parameter', '--with-decryption', '--name', '/tdcloud/e2e/people', '--query', 'Parameter.Value', '--output', 'text', '--profile', profile, '--region', region], { stdout: 'pipe', stderr: 'pipe' })
+  if (r.exitCode === 0 && r.stdout.toString().trim()) return r.stdout.toString()
+  throw new Error(`AWS target: no people for the test team: ${file} (0600) or the SSM SecureString /tdcloud/e2e/people (shape: cloud/dev/e2e/aws-people.example.json)`)
 }
 
 function show2(ops: NonNullable<Target['ops']>, slug: string) { const r = ops('teams', 'show', slug); return r.code === 0 && !/"status":"deleted"/.test(r.out) }

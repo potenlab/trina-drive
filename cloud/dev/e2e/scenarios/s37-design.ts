@@ -39,10 +39,8 @@ export default {
       t.check(`${d.shots.length} screenshots in e2e/ui/.out`, d.shots.length >= 16, d.errors)
       t.check('no page errors while taking them', d.errors.length === 0, d.errors)
       t.check('nothing wider than 390 px on a phone', d.overflow.length === 0, d.overflow)
-      if (await t.has('drive-ui', 'the new drive shell in the screenshots (sidebar: Shared with me)')) t.check('the drive shell is the new one', true)
-      const k = await (await ui()).keyboardDialog(t)
-      if (k.pending) t.pending('the share dialog by keyboard', k.pending)
-      else t.check('the share dialog opens with Enter and closes with Escape (keyboard only)', k.ok, k)
+      if (await t.has('drive-ui', 'the new drive shell in the screenshots (sidebar: Shared with me)')) t.check('the drive shell is the new one (Shared with me)', true)
+      t.skipPart('the share dialog by keyboard; drive screens of the new shell', 'runs in UI1 (C1 web/e2e s37)')
     }
   },
 } satisfies Scenario

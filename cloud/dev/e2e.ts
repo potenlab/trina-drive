@@ -143,8 +143,8 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   const again = await req('POST', `${CONTROL}/paddle/webhook`, { raw, origin: false, headers: { 'content-type': 'application/json', 'paddle-signature': paddleHeader(env.PADDLE_WEBHOOK_SECRET!, raw) } })
   check('replayed event is a no-op', again.text === 'duplicate')
   let status = ''
-  const until = Date.now() + 240_000
-  while (Date.now() < until) {
+  const deadline = Date.now() + 240_000
+  while (Date.now() < deadline) {
     const r = await req('GET', `${CONTROL}/api/teams`, { cookie })
     status = (r.json().teams as { slug: string; status: string }[]).find((x) => x.slug === slug)?.status ?? ''
     if (status === 'active' || status === 'failed') break

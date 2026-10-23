@@ -1,6 +1,6 @@
-// Headless browsers for the end-to-end flows (H2): playwright-core 1.64.1 from this folder's own package (bun install
-// --cwd e2e/ui) and the Chromium / WebKit builds it expects (bunx playwright@1.64.1 install chromium webkit). Never the
-// Playwright MCP. Runs under bun (cloud/dev/e2e/run.ts imports it) and under node ≥ 23 (type stripping).
+// Headless browsers for the end-to-end flows (H2): playwright-core 1.64.1 (a root devDependency; PLAYWRIGHT_CORE=… to
+// use another copy) and the Chromium / WebKit builds it expects (bunx playwright@1.64.1 install chromium webkit). Never
+// the Playwright MCP. Runs under bun (cloud/dev/e2e/run.ts imports it) and under node ≥ 23 (type stripping).
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,8 +12,14 @@ export const OUT = path.join(here, '.out')
 type PW = any
 let pw: PW | null = null
 async function load(): Promise<PW> {
-  if (!pw) pw = await import(path.join(here, 'node_modules/playwright-core/index.mjs'))
+  if (!pw) pw = await import(playwrightCore())
   return pw
+}
+
+/** where playwright-core is: PLAYWRIGHT_CORE, else the repo's node_modules (root devDependency) */
+export function playwrightCore(): string {
+  if (process.env.PLAYWRIGHT_CORE) return process.env.PLAYWRIGHT_CORE
+  return path.resolve(here, '../../node_modules/playwright-core/index.mjs')
 }
 
 export async function chromiumPath(): Promise<string | null> {

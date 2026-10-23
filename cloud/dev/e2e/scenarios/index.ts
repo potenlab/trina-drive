@@ -1,5 +1,6 @@
 // Every scenario, in run order (plan §10.5). Phase 1 = the release gate; each file runs alone (run.ts --only Sxx).
 import type { Scenario } from '../lib/ctx'
+import h4 from './h4-smoke'
 import m01 from './m01-matrix'
 import s01 from './s01-signup'
 import s02 from './s02-team'
@@ -34,5 +35,6 @@ import s45 from './s45-reauth'
 import s46 from './s46-console-security'
 import s47 from './s47-noai-webdav'
 import s48 from './s48-mobile-webkit'
+import ui1 from './ui1-web-e2e'
 
-export const SCENARIOS: Scenario[] = [s01, s02, s03, s04, s05, s06, s08, s10, s12, s14, s15, s17, s18, s19, s24, s25, s26, s28, s29, s32, s33, s34, s35, s37, s40, s41, s42, s43, s44, s45, s46, s47, s48, m01]
+export const SCENARIOS: Scenario[] = [s01, s02, s03, s04, s05, s06, s08, s10, s12, s14, s15, s17, s18, s19, s24, s25, s26, s28, s29, s32, s33, s34, s35, s37, s40, s41, s42, s43, s44, s45, s46, s47, s48, m01, ui1, h4]
