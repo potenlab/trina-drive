@@ -52,3 +52,22 @@ export function manualConfig(c: ConnectCtx, client: Client, token: string): { fi
   }
   return { file: '~/.cursor/mcp.json', text: JSON.stringify({ mcpServers: { [c.entry]: { url, headers: { Authorization: bearer } } } }, null, 2) }
 }
+
+// ---------- "Connect your AI" without the tdrive command: the clients' own remote-MCP setup (OAuth in the browser) ----
+/** Every client the Connect page has a tab for: the three with a CLI, and the two chat apps with custom connectors. */
+export const AI_CLIENTS = ['claude', 'codex', 'claude_ai', 'chatgpt', 'cursor'] as const
+export type AiClient = (typeof AI_CLIENTS)[number]
+export const AI_CLIENT_LABEL: Record<AiClient, string> = { claude: 'Claude Code', codex: 'Codex', claude_ai: 'Claude.ai', chatgpt: 'ChatGPT', cursor: 'Cursor' }
+
+/** The server's MCP address (what a connector or a client's remote-MCP entry points at). */
+export const mcpUrl = (origin: string) => `${origin.replace(/\/+$/, '')}/mcp`
+
+/** Claude Code: a user-scope remote MCP entry; Claude Code then signs in through the browser (OAuth), no token. */
+export function claudeOAuthCommand(c: Pick<ConnectCtx, 'entry' | 'origin'>): string {
+  return `claude mcp add --transport http --scope user ${shq(c.entry)} ${shq(mcpUrl(c.origin))}`
+}
+
+/** Codex: a streamable-HTTP MCP entry, then its OAuth sign-in. */
+export function codexOAuthCommands(c: Pick<ConnectCtx, 'entry' | 'origin'>): string[] {
+  return [`codex mcp add ${shq(c.entry)} --url ${shq(mcpUrl(c.origin))}`, `codex mcp login ${shq(c.entry)}`]
+}

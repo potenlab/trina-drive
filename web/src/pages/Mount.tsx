@@ -12,7 +12,8 @@ interface MountInfo { enabled: boolean; url: string; https: boolean; username: s
 
 const localHost = (u: string) => { try { return /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(new URL(u).hostname) } catch { return false } }
 
-export function MountSettings() {
+/** `bare`: on its own page (drive/MountPage.tsx), which already shows the title and the introduction. */
+export function MountSettings({ bare = false }: { bare?: boolean } = {}) {
   const info = useLoad(() => get<MountInfo>('/me/app-passwords'))
   const a = useAction()
   const [name, setName] = useState('')
@@ -24,8 +25,7 @@ export function MountSettings() {
   const steps = (s: string) => <ol className="small">{s.split('|').map((x) => <li key={x}>{x}</li>)}</ol>
   return (
     <section className="card mount" id="mount">
-      <h2>{dt('mt_title')}</h2>
-      <p className="muted small">{dt('mt_help')}</p>
+      {!bare && <><h2>{dt('mt_title')}</h2><p className="muted small">{dt('mt_help')}</p></>}
       <dl className="mount-facts">
         <dt>{dt('mt_address')}</dt><dd><code>{d.url}</code> <CopyButton text={d.url} /></dd>
         <dt>{dt('mt_user')}</dt><dd><code>{d.username}</code></dd>

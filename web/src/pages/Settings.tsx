@@ -7,7 +7,7 @@ import { fmtDate, LOCALES, setLocale, t, useLocale, type Key } from '../i18n'
 import { ErrorLine, Loading, Page, useAction, useLoad } from '../ui'
 import { SecondFactorSettings } from './SecondFactor'
 import { GdriveSettings } from './GDrive'
-import { MountSettings } from './Mount'
+import { dt } from './drive-i18n'
 
 interface Notice { id: number; kind: string; count: number; link: string; created_at: number; read_at: number | null }
 
@@ -36,7 +36,7 @@ export function Settings() {
         </>}
       </section>
       <SecondFactorSettings />
-      {me?.storage === 'managed' && <MountSettings />}
+      {me?.storage === 'managed' && <section className="card"><h2>{dt('mt_title')}</h2><p className="muted small">{dt('mt_help')}</p><a className="btn" href="#/mount">{t('open')}</a></section>}
       <GdriveSettings route={route} />
       <section className="card">
         <h2>{t('language')}</h2>
