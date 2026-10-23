@@ -31,6 +31,8 @@ import { diskWalk } from '../managed/core'
 import { Access, readersSource, readersTarget, type Node } from '../policy'
 import { ensureFolder } from '../store'
 import type { DriveEvent } from '../notify/events'
+import { manageHolders } from '../notify/recipients'
+import { notify, type NoticeCtx } from '../web/notices'
 
 export type RejudgeMode = 'rules' | 'membership'
 
@@ -215,6 +217,24 @@ export function notifyWidened(emit: ((e: DriveEvent) => void) | undefined, j: Ju
   for (const [target, t] of byTarget) {
     try { emit({ kind: 'widened_draft', count: t.n, sourceFolderIds: [...t.sources], targetFolderId: target }) } catch (e) { console.error('[notify] widened_draft emit failed:', e) }
   }
+}
+
+/**
+ * Where there is no notify bus (the member sync, the SSO callback, the CLI): the source managers of every copy closed
+ * by this change hear "AI-draft copies need your review" (inbox + mail; kind, count, link only — R11); a source
+ * without a manager → the admins.
+ */
+export async function tellWidened(n: NoticeCtx, j: Judgement) {
+  if (!j.pending.length) return
+  const to = new Map<number, number>()
+  const admins = n.db.query<{ id: number }, []>('SELECT id FROM people WHERE admin = 1 AND active = 1').all().map((x) => x.id)
+  for (const c of j.copies) {
+    if (!j.pending.includes(c.id)) continue
+    const heard = new Set<number>()
+    for (const s of c.sources) { const m = manageHolders(n.db, s); (m.length ? m : admins).forEach((id) => heard.add(id)) }
+    for (const id of heard) to.set(id, (to.get(id) ?? 0) + 1)
+  }
+  for (const [id, count] of to) await notify(n, [id], 'widened', '/#/folders', { count })
 }
 
 /** Live copies at or below a folder (the share dialog's warning: how many AI-draft copies sit here). */

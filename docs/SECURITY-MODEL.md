@@ -98,8 +98,9 @@ manage grants and flags (`src/share/`, API in [SHARING-API.md](SHARING-API.md)).
   (can't open files)" and is never raised silently — not by an upgrade, not by restrict-here). Team admins (console
   owner/admin) change sharing everywhere but do not read files by that alone (giving themselves access tells the
   folder's managers and themselves, R9).
-- **General access** "Anyone in Trina" = a rule for the Everyone group (`meta.everyone_group`; in cloud mode every
-  active, non-invited person is in it, and the member sync keeps it — the product does not let people edit it there).
+- **General access** "Anyone in Trina" = a rule for the Everyone group (`meta.everyone_group`; in cloud mode a system
+  group: exactly the active console members — not invites — kept by the member sync; the People page cannot delete it
+  or edit its members).
   Restricted = no Everyone rule here and none from above. Rules only add downward (R0); **Restrict access here** =
   `inherit_break` on a subfolder: the entries the manager ticks are written here at their *current* level first, and
   every manager above keeps their *current* level (copied, never raised; 0 stays 0), all in one transaction.
@@ -117,7 +118,7 @@ manage grants and flags (`src/share/`, API in [SHARING-API.md](SHARING-API.md)).
 - **R6 on every change of readers (review finding 1).** Before: rules changed on the web never re-judged AI-draft
   copies, and copies in managed storage were never located, so an Editor could narrow a folder, let their AI promote
   a draft there (not widening: written at once), then open it to the team. Now every sharing, rule, flag, people and
-  membership change runs, in its own transaction: locate every live copy (NAS: the index; managed: the copy's file row
+  membership change (the People page, the console's member sync, an SSO sign-in that creates or reactivates someone) runs, in its own transaction: locate every live copy (NAS: the index; managed: the copy's file row
   and its last path checked by identity, else a walk of the managed folders), compute its *excess readers* (target
   readers who cannot read some source) before and after, and treat growth as widening (people and membership changes:
   only a tracked copy that had none before — someone joining an audience a source manager confirmed, or a copy a

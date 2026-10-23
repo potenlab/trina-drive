@@ -212,7 +212,7 @@ function buildView(db: DB, a: Actor, it: Item, item: ShareView['item']): ShareVi
     mode: 'managed', item, my_role: myRole,
     can_share: kind !== 'none', can_manage: kind === 'admin' || kind === 'manager', can_grant_manager: kind === 'admin',
     can_ai_off: kind !== 'none' && r.canSetNoAi(a, f, false), can_restrict_here: (kind === 'admin' || kind === 'manager') && !f.registered,
-    can_toggle_editors: kind === 'admin' || kind === 'manager', can_invite: kind === 'admin' && !!inviteHandler(), full_list: full,
+    can_toggle_editors: kind === 'admin' || kind === 'manager', can_invite: kind === 'admin' && !!inviteHandler(db), full_list: full,
     general: {
       effective: roleOf(eff.level) ? { role: roleOf(eff.level)!, from_path: fromVp(eff.from) } : null,
       own: roleOf(own), restricted_here: !!f.inherit_break && !f.registered, editor_step_up: kind === 'editor',
@@ -321,7 +321,7 @@ export function planChange(db: DB, r: Rights, f: FolderRow, a: Actor, kind: Kind
         const known = db.query<{ person_id: number; active: number }, [string]>('SELECT a.person_id, p.active FROM accounts a JOIN people p ON p.id = a.person_id WHERE lower(a.email) = lower(?)').get(email)
         if (known?.active) { roleStep(subjectOf(db, { type: 'person', id: known.person_id }), role); continue }
         if (role === 'manager') throw bad('invite_role', 'someone new joins as a viewer or an editor; make them a manager after they join')
-        if (!inviteHandler()) throw err(409, 'invites_unavailable', 'this server cannot invite people by mail; add them as people first')
+        if (!inviteHandler(db)) throw err(409, 'invites_unavailable', 'this server cannot invite people by mail; add them as people first')
         invites.push({ email, role: role as 'viewer' | 'editor' })
         continue
       }
@@ -595,7 +595,7 @@ async function afterChange(op: Op, r: Rights, f: FolderRow, steps: Step[], reade
 
 async function runInvites(op: Op, f: FolderRow, vpath: string, invites: Planned['invites'], confirm: boolean, notifyOn: boolean) {
   const out: { email: string; status: 'invited' | 'member'; granted: boolean }[] = []
-  const h = inviteHandler()
+  const h = inviteHandler(op.w.db)
   if (!h || !invites.length) return out
   const db = op.w.db
   for (const inv of invites) {

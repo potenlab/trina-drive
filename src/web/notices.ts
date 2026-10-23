@@ -20,6 +20,7 @@ export type NoticeKind =
   | 'admin_added'           // someone became an admin (Trina Cloud sync or sign-in, or the People page): every admin and they hear of it
   | 'break_glass'           // an emergency sign-in link was made on the server (`people reset-link`): every admin and the person
   | 'shared'                // something was shared with you (src/share; O7: no file or folder names, ever)
+  | 'widened'               // AI-draft copies were closed because a change let more people read them (R6, src/share/rejudge.ts)
 
 const SUBJECT: Record<NoticeKind, string> = {
   self_grant: 'An admin gave themselves access',
@@ -36,6 +37,7 @@ const SUBJECT: Record<NoticeKind, string> = {
   admin_added: 'Someone became an admin of your team',
   break_glass: 'An emergency sign-in link was made for someone in your team',
   shared: 'Items were shared with you',
+  widened: 'AI-draft copies need your review (a change let more people read them)',
 }
 
 export interface NoticeCtx { db: DB; mailer: Mailer; baseUrl: string }

@@ -13,6 +13,7 @@ import { accountOf, checkPasswordRules, createLink, FRESH_LOGIN_MS, markReauth, 
 import { ApiError, bad, rateLimited } from './http'
 import { ensureWebSchema, metaGet, metaSet } from './schema'
 import { everyoneGroup } from '../share/rules'
+import { everyoneId } from '../share/service'
 import { cloudConfig } from '../tdcloud/config'
 import { announceNewAdmins, cloudUserOf, isManaged } from '../tdcloud/people'
 import { MfaError, passkeyAssertionOptions, passkeyVerify, totpEnabled, totpVerify } from './mfa'
@@ -27,7 +28,8 @@ function consoleOnly(op: Op, personId?: number) {
 }
 /** Cloud mode: Everyone is a system group (= the active members, kept by the sync); nobody edits it here (review finding 13). */
 function systemGroup(op: Op, groupId: number) {
-  if (cloudConfig(op.w.db) && metaGet(op.w.db, 'everyone_group') === String(groupId)) throw managedByConsole()
+  // everyoneId: the recorded Everyone group, or the one adopted by name (everyone / 전체 / 전원) before it was recorded
+  if (cloudConfig(op.w.db) && everyoneId(op.w.db) === groupId) throw managedByConsole()
 }
 
 async function sendInvite(op: Op, personId: number, email: string) {

@@ -4,5 +4,5 @@ import type { MeExtra } from '../web/me-extras'
 import { inviteHandler } from './invite'
 
 export const shareMeExtras: MeExtra[] = [
-  (_w, a) => ({ share: { api: 1, can_invite: a.admin && !!inviteHandler() } }),
+  (w, a) => ({ share: { api: 1, can_invite: a.admin && !!inviteHandler(w.db) } }),
 ]

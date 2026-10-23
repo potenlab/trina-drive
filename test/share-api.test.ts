@@ -179,16 +179,3 @@ describe('Shared with me and the directory', () => {
     expect(e.db.query<{ granted_by: number }, [number, number]>("SELECT granted_by FROM rules WHERE folder_id = ? AND subject_type = 'person' AND subject_id = ?").get(e.proj.id, e.pid('park'))!.granted_by).toBe(e.pid('boss'))
   })
 })
-
-describe('the Everyone group in cloud mode (finding 13)', () => {
-  test('fillEveryone puts every active person in it, never an invited-only one', async () => {
-    const { fillEveryone } = await import('../src/share/schema')
-    e.db.exec('ALTER TABLE accounts ADD COLUMN cloud_invite TEXT'); e.db.exec('ALTER TABLE accounts ADD COLUMN cloud_user TEXT')
-    e.db.query("INSERT INTO people (name, admin, active, created_at) VALUES ('newbie', 0, 1, 0)").run()
-    e.db.query("INSERT INTO people (name, admin, active, created_at) VALUES ('invitee', 0, 1, 0)").run()
-    e.db.query("INSERT INTO accounts (person_id, email, created_at, cloud_invite) VALUES (?, 'i@example.com', 0, 'inv_1')").run(e.pid('invitee'))
-    fillEveryone(e.db)
-    const members = e.db.query<{ name: string }, [number]>('SELECT p.name FROM memberships m JOIN people p ON p.id = m.person_id WHERE m.group_id = ? ORDER BY p.name').all(e.gid('전체')).map((x) => x.name)
-    expect(members).toEqual(['boss', 'dion', 'kim', 'lee', 'newbie', 'park'])
-  })
-})

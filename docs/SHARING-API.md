@@ -100,10 +100,14 @@ every member; `email` for the admin only. The Everyone group is named "Anyone in
 
 ## Hooks for other workstreams
 
-- **Inviting non-members** (B1/D1): `setInviteHandler(async (w, { email, role: 'member', by }) => ({ status, personId? }))`
-  in `src/share/invite.ts`. The share API calls it (admin only) after its change committed; when it returns the invited
-  person's id the share is given to them at once.
-- **R6 re-check** (B1's member sync, any other change of readers): wrap the change in
-  `withRejudge(db, () => { …change… }, { mode: 'membership' })` (`src/share/rejudge.ts`) — one transaction with the
-  re-check; `notifyWidened(emit, judgement)` after the commit tells the source managers.
-- **Everyone in cloud mode**: `fillEveryone(db)` (`src/share/schema.ts`) runs at start when `TDRIVE_CLOUD_TEAM` is set.
+- **Inviting non-members**: in Trina Cloud mode the share API (admin only) asks the console to invite the address
+  (`src/tdcloud/invite.ts`, member role); the person arrives with the next member sync, so `invited[].granted` is
+  `false` and the share is given once they are a member. Another flow can be plugged in with `setInviteHandler(…)` in
+  `src/share/invite.ts` (returning `personId` grants at once). Self-hosted installs answer `409 invites_unavailable`.
+- **R6 re-check** (any change of readers): wrap the change in `withRejudge(db, () => { …change… }, { mode:
+  'membership' })` (`src/share/rejudge.ts`) — one transaction with the re-check. The People page, the member sync
+  (`cloud sync-members`: members, invites as rows, removals, Everyone) and the SSO sign-in (JIT person, reactivation,
+  Everyone) all do. After the commit, `notifyWidened(emit, j)` (notify bus) or `tellWidened(ctx, j)` (inbox + mail)
+  tells the source managers.
+- **Everyone in cloud mode** is a system group: kept by the member sync (`syncEveryone`), never deleted or edited on
+  the People page (`409 managed_by_console`).
