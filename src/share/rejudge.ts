@@ -12,8 +12,10 @@
 //      last path checked by identity, else a walk of the managed folders) and its "excess readers" are computed:
 //      people who read the copy's folder (R5 target readers) but cannot read some source (R5 source readers);
 //   2. the change is made;
-//   3. after: the excess readers are computed again. A copy whose excess readers grew WIDENS:
-//        mode 'rules'      (rules, General access, restrict-here, No AI, NAS readers): any growth;
+//   3. after: the excess readers are computed again. A copy WIDENS when it reaches someone new who cannot read a
+//      source (an excess reader who did not read the copy's folder before). Taking access away never widens: someone
+//      who already read the copy and now loses a source (removed from 재무) reads nothing new.
+//        mode 'rules'      (rules, General access, restrict-here, No AI, NAS readers): any such new reader;
 //        mode 'membership' (people and group membership): only a tracked copy that had no excess reader before —
 //                           a copy people already placed wide on purpose, or one a source manager confirmed for its
 //                           folder's audience, is not reopened because someone joined that audience;
@@ -36,7 +38,7 @@ import { notify, type NoticeCtx } from '../web/notices'
 
 export type RejudgeMode = 'rules' | 'membership'
 
-interface Located { w: WidenedRow; real: string; folderId: number; src: number[]; excess: Set<number> }
+interface Located { w: WidenedRow; real: string; folderId: number; src: number[]; excess: Set<number>; readers: Set<number> }
 export type Snapshot = Map<number, Located>
 
 export interface Judgement {
@@ -139,7 +141,7 @@ export function snapshotCopies(db: DB): Snapshot {
   for (const [id, l] of at) {
     const src = sourcesOf(db, l.w.draft_id)
     if (!src.length) continue
-    snap.set(id, { ...l, src, excess: excessOf(cache, src, l.folderId) })
+    snap.set(id, { ...l, src, excess: excessOf(cache, src, l.folderId), readers: new Set(cache.target(l.folderId)) })
   }
   return snap
 }
@@ -151,8 +153,9 @@ export function judge(db: DB, before: Snapshot, mode: RejudgeMode): Judgement {
   const cache = readerCache(db)
   for (const [id, b] of before) {
     const after = excessOf(cache, b.src, b.folderId)
-    const gained = [...after].filter((u) => !b.excess.has(u))
-    const widens = mode === 'rules' ? gained.length > 0 : b.w.status === 'tracked' && b.excess.size === 0 && after.size > 0
+    // new readers of the copy only (excess ⊆ readers): losing a source while keeping the copy is no widening
+    const gained = [...after].filter((u) => !b.readers.has(u))
+    const widens = mode === 'rules' ? gained.length > 0 : b.w.status === 'tracked' && b.excess.size === 0 && gained.length > 0
     if (!widens) continue
     j.copies.push({ id, folderId: b.folderId, sources: b.src, gained })
     gained.forEach((u) => j.people.add(u))
