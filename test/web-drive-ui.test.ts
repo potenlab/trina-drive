@@ -4,8 +4,8 @@
 import { describe, expect, test } from 'bun:test'
 import { ApiError, type FolderDetail } from '../web/src/api'
 import { AI_CLIENTS, claudeOAuthCommand, codexOAuthCommands, mcpUrl } from '../web/src/connect'
-import type { ShareView as ApiView } from '../src/share/api-types'
-import { fromApi, linkTo, needsStepUp, viewFromFolder, wideningOf } from '../web/src/drive/share-api'
+import type { FileShareView as FileView, ShareView as ApiView } from '../src/share/api-types'
+import { fromApi, inMyFiles, isPersonal, linkTo, needsStepUp, recentBucket, shareChangeLines, shownPath, viewFromFolder, wideningOf } from '../web/src/drive/share-api'
 import * as consoleText from '../web/src/i18n/console'
 import * as core from '../web/src/i18n/core'
 import * as share from '../web/src/i18n/share'
@@ -81,13 +81,91 @@ describe('share adapter on the folder rules API', () => {
   })
 
   test('widening and step-up answers', () => {
-    expect(wideningOf(new ApiError(409, 'widening', 'x', { count: 1, people: 3, sources_hidden: 1, can_confirm: false, needs_approval: true }))).toEqual({ count: 3, sourcesHidden: 1, canConfirm: false })
+    expect(wideningOf(new ApiError(409, 'widening', 'x', { count: 1, people: 3, sources: ['/경영'], sources_hidden: 1, can_confirm: false, needs_approval: true })))
+      .toEqual({ count: 3, sourcesHidden: 1, sources: ['/경영'], canConfirm: false, canRequest: true })
+    // a file's widening: an Editor cannot ask for approval (a manager of its folder confirms it)
+    expect(wideningOf(new ApiError(409, 'widening', 'x', { code: 'widening', count: 1, people: 2, sources: [], sources_hidden: 0, can_confirm: false, needs_approval: true }), 'file'))
+      .toMatchObject({ canConfirm: false, canRequest: false, count: 2 })
     expect(wideningOf(new ApiError(409, 'widening', 'x', { count: 2 }))?.canConfirm).toBe(true)
     expect(wideningOf(new ApiError(409, 'exists', 'x'))).toBeNull()
     expect(wideningOf(new Error('x'))).toBeNull()
     expect(needsStepUp(new ApiError(403, 'step_up_required', 'x'))).toBe(true)
     expect(needsStepUp(new ApiError(403, 'not_manager', 'x'))).toBe(false)
     expect(linkTo('https://trina.cloud.trina.app', '/재무 2026')).toBe('https://trina.cloud.trina.app/#/files?p=%2F%EC%9E%AC%EB%AC%B4%202026')
+    expect(linkTo('https://x.test', '/a b/c.md', 'file')).toBe('https://x.test/#/files?p=%2Fa%20b&s=%2Fa%20b%2Fc.md')
+    expect(isPersonal(new ApiError(409, 'personal', 'x'))).toBe(true)
+    expect(isPersonal(new ApiError(403, 'not_manager', 'x'))).toBe(false)
+  })
+
+  test('a file’s answer (A2) as the dialog’s view', () => {
+    const file: FileView = {
+      mode: 'managed', item: { path: '/경영/결산/Q3.xlsx', kind: 'file', name: 'Q3.xlsx' }, my_role: 'editor', can_manage: true, manage_as: 'editor',
+      can_grant_manager: false, can_invite: false, can_confirm_widening: false, can_ai_off: false,
+      editors_can_share: { effective: true, from_path: null },
+      general: { effective: { role: 'viewer', from_path: '/경영' }, own: null, can_restrict: false, editor_step_up: true },
+      entries: [
+        { subject: { type: 'person', id: 12, name: 'mina', email: null }, role: 'viewer', source: 'direct', granted_by: { id: 3, name: 'dion' }, granted_at: 1, editable: true, inherited_role: 'viewer' },
+        { subject: { type: 'group', id: 4, name: 'finance', members: 5 }, role: 'editor', source: 'inherited', from_path: '/경영/결산', editable: false },
+      ],
+      inherited: 'shown', ai: { no_ai: true, inherited_no_ai_from: '/경영' }, path_names_visible: '/경영/결산', warnings: [{ code: 'draft_copy' }],
+    }
+    const v = fromApi(file)
+    expect(v.item.kind).toBe('file')
+    // an Editor shares the file (can_share) but is not a manager (no folder-only powers)
+    expect([v.can_manage, v.can_share, v.can_grant_manager]).toEqual([false, true, false])
+    expect(v.general).toEqual({ effective: { level: 'viewer', from_path: '/경영' }, own: null, restricted_here: false, editor_step_up: true, can_restrict: false })
+    expect(v.entries.map((e) => [e.subject.name, e.role, e.source, e.inherited_role ?? null])).toEqual([['mina', 'viewer', 'direct', 'viewer'], ['finance', 'editor', 'inherited', null]])
+    expect(v.path_names_visible).toBe('/경영/결산')
+    expect(v.ai).toEqual({ no_ai: true, inherited_no_ai_from: '/경영' })
+    expect(v.warnings).toEqual([{ code: 'draft_copy' }])
+    expect(v.editors_can_share).toBeUndefined()
+    // turned off above: said, so a read-only dialog can explain itself
+    expect(fromApi({ ...file, can_manage: false, editors_can_share: { effective: false, from_path: '/경영' } }).editors_can_share).toEqual({ value: false, off_above: true, inherited_from: '/경영', can_change: false })
+    // a manager of the folder, or an admin: can_manage
+    expect(fromApi({ ...file, manage_as: 'manager' }).can_manage).toBe(true)
+    // the file itself carries General access: not "from the folder"
+    expect(fromApi({ ...file, general: { ...file.general!, own: 'editor', effective: { role: 'editor', from_path: file.item.path } } }).general.effective).toEqual({ level: 'editor', from_path: null })
+    // My files / NAS: nothing to change
+    expect(fromApi({ mode: 'personal', item: file.item, my_role: 'editor', can_manage: false, entries: [], general: null })).toMatchObject({ mode: 'personal', can_manage: false, can_share: false, entries: [] })
+    expect(fromApi({ mode: 'inplace', item: file.item, entries: [] }).mode).toBe('inplace')
+    // a non-sharer: entries [] and general null
+    expect(fromApi({ mode: 'managed', item: file.item, my_role: 'viewer', can_manage: false, entries: [], general: null })).toMatchObject({ can_manage: false, can_share: false, general: { effective: null } })
+  })
+
+  test('My files paths', () => {
+    expect(inMyFiles('/mina (personal)', '/mina (personal)')).toBe(true)
+    expect(inMyFiles('/mina (personal)/a/b.md', '/mina (personal)')).toBe(true)
+    expect(inMyFiles('/mina (personal) 2', '/mina (personal)')).toBe(false)
+    expect(inMyFiles('/공용', null)).toBe(false)
+    expect(inMyFiles('/공용', undefined)).toBe(false)
+    expect(shownPath('/mina (personal)/a', '/mina (personal)', 'My files')).toBe('My files/a')
+    expect(shownPath('/공용/a', '/mina (personal)', 'My files')).toBe('/공용/a')
+  })
+})
+
+describe('Recent and the approval inbox', () => {
+  test('Recent groups by the viewer’s day', () => {
+    const now = new Date(2026, 9, 23, 15, 0).getTime() // a Friday afternoon, local time
+    const at = (d: number, h = 9) => new Date(2026, 9, d, h, 0).getTime()
+    expect(recentBucket(at(23, 0), now)).toBe('rc_today')
+    expect(recentBucket(at(22, 23), now)).toBe('rc_yesterday')
+    expect(recentBucket(at(22, 0), now)).toBe('rc_yesterday')
+    expect(recentBucket(at(17), now)).toBe('rc_week')
+    expect(recentBucket(at(16, 23), now)).toBe('rc_older')
+  })
+
+  test('a share request in counts and roles, never names', () => {
+    expect(shareChangeLines({
+      path: '/프로젝트', notify: true, confirm_widening: true,
+      add: [{ subject: { type: 'person', id: 2 }, role: 'editor' }, { subject: { type: 'group', id: 6 }, role: 'editor' }, { subject: { type: 'person', id: 3 }, role: 'viewer' }, { subject: { email: 'x@y.test' }, role: 'viewer' }],
+      set: [{ subject: { type: 'person', id: 4 }, role: 'viewer' }, { subject: { type: 'person', id: 5 }, role: 'remove' }],
+      general: { mode: 'team', role: 'editor' }, restrict_here: { on: true },
+    })).toEqual([
+      { key: 'ap_share_add', n: 2, role: 'editor' }, { key: 'ap_share_add', n: 1, role: 'viewer' }, { key: 'ap_share_invite', n: 1, role: 'viewer' },
+      { key: 'ap_share_set', n: 1 }, { key: 'ap_share_remove', n: 1 }, { key: 'ap_share_general_team', role: 'editor' }, { key: 'ap_share_restrict' },
+    ])
+    expect(shareChangeLines({ general: { mode: 'restricted' }, editors_can_share: false })).toEqual([{ key: 'ap_share_general_restricted' }, { key: 'ap_share_other' }])
+    expect(shareChangeLines(undefined)).toEqual([])
   })
 })
 
