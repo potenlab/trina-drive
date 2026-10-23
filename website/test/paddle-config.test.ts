@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { canSellOnline, checkoutItems, extraSeatsFor, readPaddleConfig } from '../src/paddle'
-import { checkoutMailto } from '../src/checkout'
+import { checkoutMailto, usesPaddle } from '../src/checkout'
+import { CLOUD_LIVE, earlyAccessMailto } from '../src/site'
 
 const full = {
   PUBLIC_PADDLE_CLIENT_TOKEN: 'test_abc123',
@@ -75,14 +76,34 @@ describe('checkoutMailto', () => {
   test('KRW fallback (Paddle not configured) is a plain request, no bank transfer', () => {
     const url = checkoutMailto('team', { currency: 'KRW', lang: 'ko', billing: 'yearly', people: 12 })
     expect(url.startsWith('mailto:contact@trina.app?')).toBe(true)
-    expect(subject(url)).toBe('Trina Drive 팀 (관리형) 신청')
+    expect(subject(url)).toBe('Trina Drive 클라우드 팀 신청')
     expect(body(url)).not.toContain('계좌이체')
     expect(body(url)).toContain('결제 주기: 연 결제')
     expect(body(url)).toContain('인원(AI를 연결할 사람 수): 12')
   })
-  test('setup stays a plain request', () => {
+  test('on-site install stays a plain request and asks about the office hardware', () => {
     const url = checkoutMailto('setup', { currency: 'USD', lang: 'en' })
-    expect(subject(url)).toBe('Trina Drive Setup & migration')
+    expect(subject(url)).toBe('Trina Drive On-site install')
     expect(body(url)).not.toContain('Billing:')
+    expect(body(url)).toContain('NAS or Mac mini in the office:')
+  })
+  test('cloud plans do not ask about a NAS or Mac mini', () => {
+    expect(body(checkoutMailto('team', { currency: 'USD', lang: 'en' }))).not.toContain('NAS or Mac mini')
+  })
+})
+
+describe('Trina Cloud early access (CLOUD_LIVE)', () => {
+  test('while the cloud is not live, no plan opens the Paddle checkout', () => {
+    if (CLOUD_LIVE) return
+    for (const id of ['team', 'business', 'setup', 'community'] as const) {
+      expect(usesPaddle(id, { currency: 'USD', lang: 'en' })).toBe(false)
+    }
+  })
+  test('early-access email names the plan when there is one', () => {
+    const url = earlyAccessMailto('en', 'Cloud Team')
+    expect(url.startsWith('mailto:contact@trina.app?')).toBe(true)
+    expect(decodeURIComponent(url.split('subject=')[1]!.split('&')[0]!)).toBe('Trina Cloud early access')
+    expect(decodeURIComponent(url.split('body=')[1]!)).toContain('Plan: Cloud Team')
+    expect(decodeURIComponent(earlyAccessMailto('en').split('body=')[1]!)).not.toContain('Plan:')
   })
 })

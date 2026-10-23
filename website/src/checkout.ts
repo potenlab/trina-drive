@@ -1,16 +1,17 @@
 // The one entry point for buying a plan. Every pricing button calls startCheckout(planId, options).
 //
 // Routing (decision: research/trina-drive/payments/README.md):
-//   - Team/Business, Paddle configured at build time → Paddle overlay checkout (Paddle.com is Merchant of Record) in
+//   - Cloud Team/Business while CLOUD_LIVE is false (src/site.ts) → early-access email (no checkout before provisioning).
+//   - Cloud Team/Business, Paddle configured at build time → Paddle overlay checkout (Paddle.com is Merchant of Record) in
 //     both currencies: Korean cards are charged in KRW through the prices' KR overrides. Paddle.js is loaded from
 //     cdn.paddle.com only when a price button is clicked.
-//   - Setup & migration                                 → email (a human service, quoted; not sold through a MoR).
+//   - On-site install (planId 'setup')                  → email (a human service, quoted; not sold through a MoR).
 //   - Anything else, or Paddle not configured / blocked → email (the original mailto flow).
 // The CSP in vercel.json and public/_headers allows Paddle's origins.
 
 import { PADDLE } from './paddle-env'
 import { PADDLE_JS_URL, checkoutItems, extraSeatsFor, isPaidPlan, type Billing, type PaddleConfig } from './paddle'
-import { CONTACT_EMAIL } from './site'
+import { CLOUD_LIVE, CONTACT_EMAIL, earlyAccessMailto } from './site'
 
 export type PlanId = 'community' | 'team' | 'business' | 'setup'
 export type Currency = 'USD' | 'KRW'
@@ -30,10 +31,10 @@ export const PLAN_IDS: readonly PlanId[] = ['community', 'team', 'business', 'se
 export const isPlanId = (v: unknown): v is PlanId => typeof v === 'string' && (PLAN_IDS as readonly string[]).includes(v)
 
 const PLAN_NAMES: Record<PlanId, { en: string; ko: string }> = {
-  community: { en: 'Community (self-hosted)', ko: '커뮤니티 (설치형)' },
-  team: { en: 'Team (managed)', ko: '팀 (관리형)' },
-  business: { en: 'Business (managed)', ko: '비즈니스 (관리형)' },
-  setup: { en: 'Setup & migration', ko: '설치·이전' },
+  community: { en: 'Self-hosted', ko: '설치형' },
+  team: { en: 'Cloud Team', ko: '클라우드 팀' },
+  business: { en: 'Cloud Business', ko: '클라우드 비즈니스' },
+  setup: { en: 'On-site install', ko: '사무실 설치' },
 }
 
 export function checkoutMailto(planId: PlanId, { currency, lang, billing = 'monthly', people }: CheckoutOptions): string {
@@ -51,7 +52,7 @@ export function checkoutMailto(planId: PlanId, { currency, lang, billing = 'mont
         `통화: ${currency}`,
         '회사 이름:',
         `인원(AI를 연결할 사람 수): ${n}`,
-        'NAS 또는 맥 미니 유무:',
+        ...(managed ? [] : ['NAS 또는 맥 미니 유무:']),
       ]
     : [
         `Plan: ${plan}`,
@@ -59,7 +60,7 @@ export function checkoutMailto(planId: PlanId, { currency, lang, billing = 'mont
         `Currency: ${currency}`,
         'Company:',
         `AI-connected people: ${n}`,
-        'NAS or Mac mini in the office:',
+        ...(managed ? [] : ['NAS or Mac mini in the office:']),
       ]
   return `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\n') + '\n')}`
 }
@@ -120,12 +121,16 @@ const prefersDark = () =>
 
 /** Whether this click would open the Paddle checkout (vs. email). */
 export function usesPaddle(planId: PlanId, { billing = 'monthly', people }: CheckoutOptions): boolean {
-  if (!isPaidPlan(planId)) return false
+  if (!CLOUD_LIVE || !isPaidPlan(planId)) return false
   return !!checkoutItems(PADDLE, planId, billing, extraSeatsFor(planId, people))
 }
 
 export async function startCheckout(planId: PlanId, options: CheckoutOptions): Promise<void> {
   const { lang, billing = 'monthly', people } = options
+  if (!CLOUD_LIVE && isPaidPlan(planId)) {
+    window.location.href = earlyAccessMailto(lang, PLAN_NAMES[planId][lang])
+    return
+  }
   if (!usesPaddle(planId, options) || !PADDLE || !isPaidPlan(planId)) {
     window.location.href = checkoutMailto(planId, options)
     return
