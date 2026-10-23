@@ -1,5 +1,7 @@
 import type { ServerOptions } from '../mcp'
 import type { OAuthOptions, OAuthRuntime } from '../oauth/config'
+import type { GoogleConfig } from '../gdrive/config'
+import type { Fetch } from '../gdrive/google'
 // Shared bits of the web side: the context the handlers get, errors that map to HTTP statuses, JSON replies.
 import type { Ctx } from '../session'
 import type { DriveEvent } from '../notify/events'
@@ -28,6 +30,13 @@ export interface WebOptions {
   trustedProxy?: TrustedProxies | null
   /** hosted mode (hosted.ts): admins must enrol a second factor before anything else */
   hosted?: boolean
+  /** Google Drive import (src/gdrive): default from GOOGLE_CLIENT_ID / _SECRET / GOOGLE_API_KEY, null = off */
+  google?: GoogleConfig | null
+  /** how the server reaches Google (tests: a mock) and the first retry delay after "slow down" */
+  googleFetch?: Fetch
+  googleRetryMs?: number
+  /** WebDAV mount (src/dav): on in managed storage unless <PREFIX>_WEBDAV=off; false = off */
+  webdav?: boolean
 }
 
 export interface WebCtx extends Ctx {
