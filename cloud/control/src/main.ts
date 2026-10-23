@@ -16,6 +16,7 @@ import type { Driver } from './drivers/types'
 import { KmsKeyWrapper, LocalKeyWrapper, type KeyWrapper } from './keys'
 import { OutboxMailer, SesMailer, type Mailer } from './mailer'
 import { planOf } from './plans'
+import { MAX_BODY_BYTES, relayFromEnv } from './relay'
 import { seal, unseal } from './seal'
 import { iso } from './util'
 import { makeHandler } from './web'
@@ -36,6 +37,7 @@ const HELP = `Trina Cloud control plane
   jobs list | jobs run                    pending jobs | run the due ones once
   db snapshot <file>                      a consistent copy of the control database (the control host ships it to S3 nightly)
   audit verify | audit list [--team slug] [--limit N]
+  mail-relay                              (on each team host) team instances' mail → SES with the host's role (src/relay.ts)
   seal --recipient KEY [--out FILE]       (helper) encrypt stdin to a team backup key
   seal-dir --dir D --recipient KEY --out FILE [--exclude a,b]   (helper) tar a directory and seal it
   unseal --key-file FILE [--in FILE] [--out FILE]
@@ -140,7 +142,7 @@ async function serve(cfg: Config) {
 }
 
 function teamLine(c: Cloud, t: TeamRow) {
-  const gb = t.disk_bytes != null ? `${(t.disk_bytes / 1024 ** 3).toFixed(2)}/${planOf(t.plan).diskGb} GB` : '-'
+  const gb = t.disk_bytes != null ? `${(t.disk_bytes / 1024 ** 3).toFixed(2)}/${planOf(t.plan).storageGb} GB` : '-'
   return `${t.slug.padEnd(20)} ${t.status.padEnd(16)} ${t.plan.padEnd(9)} ${(t.host ?? '-').padEnd(20)} ${gb.padEnd(14)} backup ${iso(t.last_backup_at)}  ${c.url(t)}`
 }
 
@@ -150,6 +152,12 @@ export async function main(argv: string[]): Promise<number> {
   if (!cmd || cmd === 'help' || cmd === '--help') { console.log(HELP); return 0 }
   const h = await helper(cmd, args.slice(1))
   if (h >= 0) return h
+  if (cmd === 'mail-relay') {
+    const r = relayFromEnv()
+    const server = Bun.serve({ hostname: r.host, port: r.port, development: false, maxRequestBodySize: MAX_BODY_BYTES + 1024, fetch: (req, srv) => r.handle(req, srv.requestIP(req)?.address) })
+    console.log(`Trina Cloud mail relay on http://${r.host}:${server.port} → ${r.upstream.name}`)
+    await new Promise(() => {})
+  }
   const cfg = loadConfig()
   if (cmd === 'serve') { await serve(cfg); return 0 }
   const cloud = buildCloud(cfg, { log: (s) => console.error(s) })

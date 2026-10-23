@@ -18,6 +18,10 @@ EIP_POOL=hosts
 CONTROL_PRIVATE_IP=${control_private_ip}
 CONTROL_ENV_PARAM=${control_env_param}
 CADDY_ASK_KEY_PARAM=${ask_key_param}
+TEAM_MAIL_FROM='${team_mail_from}'
+TEAM_SUBNETS=${team_subnets}
+MAIL_RELAY_PORT=8025
+FRONT_PROXIES='${front_proxies}'
 CONF
 chmod 0644 /etc/tdcloud/host.conf
 snap install aws-cli --classic

@@ -1,5 +1,6 @@
-# Local Trina Cloud (cloud/dev/up.sh): the control plane and Caddy. Team containers are not in this file: the control
-# plane creates them (one per team, each on its own network) through the mounted Docker socket — the local driver.
+# Local Trina Cloud (cloud/dev/up.sh): the control plane, Caddy and the mail relay. Team containers are not in this
+# file: the control plane creates them (one per team, each on its own network with a fixed /28) through the mounted
+# Docker socket — the local driver.
 # Variables come from cloud/dev/.state/dev.env (written by up.sh).
 name: tdcloud-dev
 
@@ -23,6 +24,8 @@ services:
       TDCLOUD_TRUSTED_PROXIES: 10.250.250.10
       TDCLOUD_OPS_EMAIL: ops@trina.test
       TDCLOUD_MAIL_FROM: Trina Cloud (dev) <cloud@trina.test>
+      # team instances mail through the relay below (TDRIVE_MAILER=ses → http://<team gateway>:8025), as on AWS
+      TDCLOUD_TEAM_MAIL_FROM: ${TDCLOUD_TEAM_MAIL_FROM}
       PADDLE_ENV: sandbox
       PADDLE_WEBHOOK_SECRET: ${PADDLE_WEBHOOK_SECRET}
       PADDLE_PRICE_TEAM_MONTHLY: pri_dev_team_monthly
@@ -60,6 +63,24 @@ services:
     networks:
       control:
         ipv4_address: 10.250.250.10
+
+  # The mail relay, as on an AWS team host (cloud/host/bootstrap.sh): on the host network of the Docker engine (here the
+  # engine's VM), so every team reaches it at its own network's gateway and nothing else. Instead of SES it appends each
+  # message to .state/team-mail.log — the dev mail sink the end-to-end test reads.
+  mail:
+    image: tdcloud-control:dev
+    container_name: tdc-mail
+    restart: unless-stopped
+    command: ["mail-relay"]
+    network_mode: host
+    environment:
+      TDCLOUD_TEAM_MAIL_FROM: ${TDCLOUD_TEAM_MAIL_FROM}
+      TDCLOUD_MAIL_RELAY_UPSTREAM: outbox:${TDCLOUD_STATE_DIR}/team-mail.log
+      TDCLOUD_MAIL_RELAY_LISTEN: 0.0.0.0:8025
+    volumes:
+      - ${TDCLOUD_STATE_DIR}:${TDCLOUD_STATE_DIR}
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
 
 networks:
   control:

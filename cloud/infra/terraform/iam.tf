@@ -1,6 +1,7 @@
 # Least privilege. Hosts: run what SSM tells them, pull images, read their boot files, read team env parameters, upload
-# backups, take an Elastic IP from the pool. Control: send commands to hosts only, manage team parameters and DNS
-# records, wrap keys, read/prune backups, send mail.
+# backups, take an Elastic IP from the pool, send the teams' mail (the host's mail relay; from the team address only).
+# Control: send commands to hosts only, manage team parameters and DNS records, wrap keys, read/prune backups, send
+# mail (from the control plane's address only).
 data "aws_iam_policy_document" "ec2_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -93,6 +94,18 @@ data "aws_iam_policy_document" "host" {
     actions   = ["ec2:AssociateAddress"]
     resources = ["arn:${local.partition}:ec2:${var.region}:${local.account}:network-interface/*"]
   }
+  # the mail relay (cloud/control/src/relay.ts, run by host/bootstrap.sh): the teams' invites, password resets and
+  # notifications, through the one SES identity, and only with the team From address
+  statement {
+    sid       = "TeamMail"
+    actions   = ["ses:SendEmail"]
+    resources = [local.ses_identity_arn]
+    condition {
+      test     = "StringEquals"
+      variable = "ses:FromAddress"
+      values   = [local.team_mail_address]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "host" {
@@ -170,7 +183,12 @@ data "aws_iam_policy_document" "control" {
   statement {
     sid       = "Mail"
     actions   = ["ses:SendEmail"]
-    resources = ["arn:${local.partition}:ses:${var.region}:${local.account}:identity/${var.mail_domain}"]
+    resources = [local.ses_identity_arn]
+    condition {
+      test     = "StringEquals"
+      variable = "ses:FromAddress"
+      values   = [local.control_mail_address]
+    }
   }
   statement {
     sid       = "EcrLogin"

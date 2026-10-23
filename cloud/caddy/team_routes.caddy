@@ -8,13 +8,13 @@
 	request_body {
 		max_size 25MB
 	}
-	# per client address (the team server sees only this proxy's address; these limits are what tells clients apart)
+	# per client address ({client_ip}: the TCP peer, or what a trusted front proxy says; see the global options)
 	rate_limit {
 		zone signin {
 			match {
 				path /api/login /api/login/second /api/setup /api/links/* /api/me/reauth /oauth/token /oauth/register /oauth/authorize
 			}
-			key {remote_host}
+			key {client_ip}
 			events 30
 			window 1m
 		}
@@ -22,12 +22,12 @@
 			match {
 				path /mcp
 			}
-			key {remote_host}
+			key {client_ip}
 			events 300
 			window 1m
 		}
 		zone all {
-			key {remote_host}
+			key {client_ip}
 			events 1200
 			window 1m
 		}
@@ -35,6 +35,9 @@
 	# /health is for the host itself (Docker's HEALTHCHECK runs inside the container)
 	respond /health 404
 	reverse_proxy tdc-{labels.{$TDCLOUD_SLUG_LABEL}}:8787 {
+		# exactly one address, the client's, whatever the client sent: the team believes this header from Caddy's fixed
+		# address only (TDRIVE_TRUSTED_PROXY), so its sign-in / MCP limits and audit addresses are per client
+		header_up X-Forwarded-For {client_ip}
 		transport http {
 			dial_timeout 3s
 			response_header_timeout 60s

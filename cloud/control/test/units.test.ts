@@ -9,7 +9,8 @@ import { paddleHeader, verifyPaddle } from '../src/paddle'
 import { PLANS } from '../src/plans'
 import { generateTeamKey, seal, unseal } from '../src/seal'
 import { slugProblem, suggestSlug } from '../src/slug'
-import { loadConfig, ConfigError } from '../src/config'
+import { DEFAULT_TEAM_SUBNETS, loadConfig, ConfigError } from '../src/config'
+import { teamNet } from '../src/teamnet'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -108,7 +109,7 @@ describe('docker commands for a team', () => {
   test('the container gets its own uid, network, limits and the bwrap settings; no ports, no docker socket', async () => {
     const rec = new Rec()
     const d = new DockerDriver({ name: 't', runner: rec, layout, caddyContainer: 'tdc-caddy', helperImage: 'h', pickHost: async () => 'x' })
-    const spec = { slug: 'acme', number: 3, uid: 20003, url: 'https://acme.cloud.example.com', plan: PLANS.team, image: 'trina-drive:1', env: {} }
+    const spec = { slug: 'acme', number: 3, uid: 20003, url: 'https://acme.cloud.example.com', plan: PLANS.team, net: teamNet(DEFAULT_TEAM_SUBNETS, 3), image: 'trina-drive:1', env: {} }
     const r = await d.create('x', spec)
     expect(r.setupToken).toBe('tdrive_setup_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345')
     expect(r.productBackupSecret).toBe('tdrive_bksec1_xyz')
@@ -116,13 +117,14 @@ describe('docker commands for a team', () => {
     const a = create.join(' ')
     for (const want of ['--user 20003:20003', '--network tdc-net-acme', '--read-only', '--cap-drop ALL', 'no-new-privileges:true', 'seccomp=/etc/s.json',
       'apparmor=trina-drive-bwrap', 'systempaths=unconfined', '--cpus 1', '--memory 2048m', '--memory-swap 2048m', '--pids-limit 512', '--env-file /st/acme.env',
-      '--allow-origin https://acme.cloud.example.com', '--public-url https://acme.cloud.example.com']) expect(a).toContain(want)
+      '--allow-origin https://acme.cloud.example.com', '--public-url https://acme.cloud.example.com', '--ip 10.128.0.51']) expect(a).toContain(want)
     for (const never of ['-p', '--publish', 'docker.sock', '--privileged', '--cap-add']) expect(create).not.toContain(never)
     expect(a).not.toContain('docker.sock')
     // every one-shot runs without a network
     for (const c of rec.calls.filter((c) => c[1] === 'run')) expect(c.slice(0, 5)).toContain('none')
-    expect(rec.calls.some((c) => c.join(' ') === 'docker network create --driver bridge --opt com.docker.network.bridge.name=tdcb3 --label tdcloud.team=acme --label tdcloud.number=3 tdc-net-acme')).toBe(true)
-    expect(rec.calls.some((c) => c.join(' ') === 'docker network connect tdc-net-acme tdc-caddy')).toBe(true)
+    // a fixed /28 per team: gateway .1 (the host's mail relay), Caddy .2 (the one trusted proxy), the team .3
+    expect(rec.calls.some((c) => c.join(' ') === 'docker network create --driver bridge --opt com.docker.network.bridge.name=tdcb3 --subnet 10.128.0.48/28 --gateway 10.128.0.49 --ip-range 10.128.0.56/29 --label tdcloud.team=acme --label tdcloud.number=3 --label tdcloud.caddy-ip=10.128.0.50 tdc-net-acme')).toBe(true)
+    expect(rec.calls.some((c) => c.join(' ') === 'docker network connect --ip 10.128.0.50 tdc-net-acme tdc-caddy')).toBe(true)
     expect(r.publicIp).toBe('198.51.100.7')
   })
   test('names and security args', () => {

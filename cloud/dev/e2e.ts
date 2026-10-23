@@ -5,10 +5,15 @@
 //  1. two buyers sign up, confirm their email (outbox), create teams acme and globex
 //  2. a Paddle subscription.created (signed with the dev webhook secret) for each → provisioned
 //  3. the emailed one-time setup link creates each team's admin; the link works once; the token is not in the control DB
-//  4. each admin makes a personal access token on the web; MCP initialize / tools/list / bash work over HTTPS
+//  4. hosted mode: the admin enrols an authenticator app (codes computed here, RFC 6238) before anything else, then
+//     makes a personal access token on the web; MCP initialize / tools/list / bash work over HTTPS; an invite mail goes
+//     from the team through the host's mail relay into the dev mail sink, and its link sets dana's password
 //  5. kim/boss in each team: kim cannot see 경영, boss can
 //  6. isolation: no token, session or network path from one team reaches the other; the containers' settings
-//  7. Caddy: no certificate for unknown names; suspend → paused page → resume; backup + export decrypt; audit chain
+//  7. client addresses: fixed team network addresses; Caddy overwrites X-Forwarded-For, so the team records (and
+//     rate-limits by) the real client address — not Caddy's, not a spoofed header; the relay refuses non-team senders
+//  8. Caddy: no certificate for unknown names; suspend → paused page → resume; backup + export decrypt; audit chain
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { paddleHeader } from '../control/src/paddle'
@@ -21,6 +26,9 @@ const CONTROL = `https://${DOMAIN}:${PORT}`
 const teamUrl = (slug: string) => `https://${slug}.${DOMAIN}:${PORT}`
 const CA = fs.readFileSync(path.join(STATE, 'caddy-root.crt'), 'utf8')
 const OUTBOX = path.join(STATE, 'outbox.log')
+/** the dev mail sink: what the host's mail relay would have handed to SES (cloud/control/src/relay.ts) */
+const TEAM_MAIL = path.join(STATE, 'team-mail.log')
+const RELAY_PORT = 8025
 
 let failed = 0, passed = 0
 const t0 = Date.now()
@@ -40,6 +48,26 @@ async function req(method: string, url: string, o: { body?: unknown; raw?: strin
   return { status: r.status, headers: r.headers, text, json: () => JSON.parse(text) }
 }
 const cookieOf = (r: Res) => r.headers.get('set-cookie')?.split(';')[0] ?? ''
+const teamMail = () => (fs.existsSync(TEAM_MAIL) ? fs.readFileSync(TEAM_MAIL, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { team: number; from: string; to: string; subject: string; text: string }) : [])
+const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex')
+
+/** RFC 6238 TOTP (HMAC-SHA1, 30 s steps, 6 digits), written here rather than taken from the product. */
+function totp(secretB32: string, ms = Date.now()): string {
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  let bits = ''
+  for (const ch of secretB32.replace(/=+$/, '').toUpperCase()) {
+    const v = A.indexOf(ch)
+    if (v < 0) throw new Error(`not base32: ${ch}`)
+    bits += v.toString(2).padStart(5, '0')
+  }
+  const key = Buffer.from(Array.from({ length: Math.floor(bits.length / 8) }, (_, i) => parseInt(bits.slice(i * 8, i * 8 + 8), 2)))
+  const counter = Buffer.alloc(8)
+  counter.writeBigUInt64BE(BigInt(Math.floor(ms / 30_000)))
+  const h = crypto.createHmac('sha1', key).update(counter).digest()
+  const o = h[19]! & 0xf
+  const bin = ((h[o]! & 0x7f) << 24) | (h[o + 1]! << 16) | (h[o + 2]! << 8) | h[o + 3]!
+  return String(bin % 1_000_000).padStart(6, '0')
+}
 const outbox = () => (fs.existsSync(OUTBOX) ? fs.readFileSync(OUTBOX, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { to: string; subject: string; text: string }) : [])
 
 function sh(argv: string[], input?: string): { code: number; out: string; err: string } {
@@ -117,9 +145,46 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   check('admin session cookie is Secure (seen as https behind Caddy)', /Secure/.test(setup.headers.get('set-cookie') ?? ''))
   const reuse = await req('POST', `${teamUrl(slug)}/api/setup`, { body: { setup_token: setupToken, name: 'mallory', email: 'm@x.test', password: 'another-password' } })
   check('the setup link works only once', reuse.status === 403, reuse.text)
-  const pat = await req('POST', `${teamUrl(slug)}/api/tokens`, { cookie: adminCookie, headers: { 'x-csrf-token': adminCsrf }, body: { name: 'e2e', ttl: '1d' } })
+  const asAdmin = { cookie: adminCookie, headers: { 'x-csrf-token': adminCsrf } }
+
+  step(`${slug}: hosted mode — the admin enrols an authenticator app before anything else`)
+  const early = await req('POST', `${teamUrl(slug)}/api/tokens`, { ...asAdmin, body: { name: 'too-early', ttl: '1d' } })
+  check('no token before a second factor (403 second_factor_required)', early.status === 403 && early.text.includes('second_factor_required'), early.text)
+  const ts = await req('POST', `${teamUrl(slug)}/api/me/totp/setup`, { ...asAdmin, body: {} })
+  const secret = ts.status === 200 ? String(ts.json().secret ?? '') : ''
+  check('authenticator app: secret issued', /^[A-Z2-7]{16,}=*$/.test(secret), ts.text)
+  // for signing in by hand afterwards: add this to an authenticator app (dev only; .state is removed by down.sh)
+  if (secret) fs.writeFileSync(path.join(STATE, `admin-${slug}.otpauth`), `${ts.json().uri}\n`, { mode: 0o600 })
+  const conf = await req('POST', `${teamUrl(slug)}/api/me/totp/confirm`, { ...asAdmin, body: { code: totp(secret) } })
+  check('enrolled with a code computed by this test (RFC 6238); recovery codes issued', conf.status === 200 && (conf.json().recovery_codes?.length ?? 0) > 0, conf.text)
+  const l1 = await req('POST', `${teamUrl(slug)}/api/login`, { body: { login: 'alex', password: adminPw } })
+  const ticket = l1.status === 200 ? l1.json().second_factor?.ticket : undefined
+  check('signing in again asks for the second factor', !!ticket && l1.json().second_factor.methods.includes('totp') && !cookieOf(l1), l1.text)
+  const l2 = await req('POST', `${teamUrl(slug)}/api/login/second`, { body: { ticket, method: 'totp', code: totp(secret, Date.now() + 30_000) } })
+  check('the next code completes the sign-in', l2.status === 200 && cookieOf(l2).startsWith('tdrive_session='), l2.text)
+  const pat = await req('POST', `${teamUrl(slug)}/api/tokens`, { ...asAdmin, body: { name: 'e2e', ttl: '1d' } })
   check('admin creates a personal access token on the web', pat.status === 200, pat.text)
   const adminPat = pat.json().token as string
+
+  step(`${slug}: an invite mail through the host's mail relay`)
+  const before = teamMail().length
+  const dana = `dana@${slug}.test`
+  const inv = await req('POST', `${teamUrl(slug)}/api/people`, { ...asAdmin, body: { name: 'dana', email: dana } })
+  check('admin invites dana (the mail is sent before the answer)', inv.status === 200, inv.text)
+  const mail = teamMail().slice(before).find((m) => m.to === dana)
+  check('the invite arrived in the dev mail sink (team SES mailer → relay on the team gateway)', !!mail && mail.subject === 'You are invited', teamMail().slice(before))
+  check('sent with the configured team From', mail?.from === env.TDCLOUD_TEAM_MAIL_FROM, mail?.from)
+  const inviteLink = mail?.text.match(/(https:\/\/\S+)\/#\/invite\/(\S+)/)
+  check(`the invite link points at ${teamUrl(slug)}`, inviteLink?.[1] === teamUrl(slug), mail?.text)
+  const inviteToken = inviteLink?.[2] ?? ''
+  const lc = await req('POST', `${teamUrl(slug)}/api/links/check`, { body: { kind: 'invite', token: inviteToken } })
+  check('the link is valid and names dana', lc.status === 200 && lc.json().name === 'dana', lc.text)
+  const la = await req('POST', `${teamUrl(slug)}/api/links/accept`, { body: { kind: 'invite', token: inviteToken, password: `dana-${slug}-password` } })
+  check('dana sets her password through the link and is signed in', la.status === 200 && cookieOf(la).startsWith('tdrive_session='), la.text)
+  const ds = await req('GET', `${teamUrl(slug)}/api/session`, { cookie: cookieOf(la) })
+  check('…as dana', ds.status === 200 && ds.json().me?.name === 'dana', ds.text)
+  const la2 = await req('POST', `${teamUrl(slug)}/api/links/accept`, { body: { kind: 'invite', token: inviteToken, password: 'another-password-9' } })
+  check('the invite link works only once', la2.status === 404, la2.text)
 
   step(`${slug}: MCP over HTTPS`)
   const init = await mcp(slug, adminPat, 'initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'tdcloud-e2e', version: '1' } })
@@ -152,6 +217,68 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   const bossCat = await bash(slug, boss, 'cat /경영/board.md')
   check('boss: reads 경영/board.md', bossCat.stdout.includes(`${slug} 매출 1,234`), bossCat.raw)
   return { slug, buyer, id: team.id, adminPat, adminCookie, kim, boss }
+}
+
+/** What the team records as the client's address, and the relay's sender check (acme). */
+async function clientAddresses(a: Team) {
+  step('acme: fixed addresses, client addresses behind Caddy, the mail relay')
+  const netName = 'tdc-net-acme'
+  const inst = JSON.parse(sh(['docker', 'inspect', 'tdc-acme']).out)[0]
+  const net = JSON.parse(sh(['docker', 'network', 'inspect', netName]).out)[0]
+  const { Subnet: subnet, Gateway: gateway } = net.IPAM.Config[0] as { Subnet: string; Gateway: string }
+  const caddyIp = net.Labels['tdcloud.caddy-ip'] as string
+  const caddyNow = JSON.parse(sh(['docker', 'inspect', 'tdc-caddy']).out)[0].NetworkSettings.Networks[netName]?.IPAddress
+  const teamIp = inst.NetworkSettings.Networks[netName]?.IPAddress
+  const base = subnet.split('/')[0]!.split('.').map(Number)
+  const at = (k: number) => [...base.slice(0, 3), base[3]! + k].join('.')
+  check('the team network is a fixed /28: gateway .1, Caddy .2, the team .3', subnet.endsWith('/28') && gateway === at(1) && caddyIp === at(2) && caddyNow === caddyIp && teamIp === at(3), { subnet, gateway, caddyIp, caddyNow, teamIp })
+  const envs = inst.Config.Env as string[]
+  for (const e of ['TDRIVE_HOSTED=1', `TDRIVE_TRUSTED_PROXY=${caddyIp}/32`, 'TDRIVE_STORAGE=managed', 'TDRIVE_STORAGE_QUOTA=100GB', 'TDRIVE_MAILER=ses', `TDRIVE_SES_ENDPOINT=http://${gateway}:${RELAY_PORT}`, `TDRIVE_MAIL_FROM=${env.TDCLOUD_TEAM_MAIL_FROM}`]) {
+    check(`team env: ${e}`, envs.includes(e))
+  }
+  const storage = tdrive('acme', 'storage', 'show')
+  check('the product runs managed storage with the Team plan\'s 100 GB quota', /managed/.test(storage.out) && /quota: (100(\.0)? ?GB|102400(\.0)? MB|107374182400)\b/.test(storage.out), storage.out + storage.err)
+
+  // the same token from outside (two different forged X-Forwarded-For) and from a second real address
+  const xtok = tdrive('acme', 'token', 'create', 'kim', '--name', 'xff-test').out.trim()
+  const spoofs = ['203.0.113.7', '198.51.100.23', '192.0.2.99']
+  const init = (n: string) => ({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: n, version: '1' } } })
+  const badSetup = { setup_token: 'tdrive_setup_wrongwrongwrongwrongwrong1', name: 'x', email: 'x@x.test', password: 'some-password-1' }
+  for (const [i, spoof] of spoofs.slice(0, 2).entries()) {
+    const r = await req('POST', `${teamUrl('acme')}/mcp`, { origin: false, headers: { authorization: `Bearer ${xtok}`, accept: 'application/json, text/event-stream', 'x-forwarded-for': spoof }, body: init(`xff-outside-${i}`) })
+    const s = await req('POST', `${teamUrl('acme')}/api/setup`, { headers: { 'x-forwarded-for': spoof }, body: badSetup })
+    if (r.status !== 200 || s.status !== 403) check(`outside request ${i}`, false, `${r.status} ${s.status} ${s.text}`)
+  }
+  // a second client: a container on the Docker network in front of Caddy, at 10.250.250.50, also forging the header
+  const script = `const https = require('node:https');
+const post = (path, body, headers) => new Promise((res, rej) => { const q = https.request({ host: '10.250.250.10', port: 443, servername: process.env.H, ca: process.env.CA, method: 'POST', path,
+  headers: { host: process.env.H + ':' + process.env.P, origin: 'https://' + process.env.H + ':' + process.env.P, 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-forwarded-for': '${spoofs[2]}', ...headers } },
+  (s) => { let d = ''; s.on('data', (c) => d += c); s.on('end', () => res(s.statusCode)) }); q.on('error', rej); q.end(JSON.stringify(body)) });
+(async () => { console.log(await post('/mcp', ${JSON.stringify(init('xff-inside'))}, { authorization: 'Bearer ' + process.env.T }), await post('/api/setup', ${JSON.stringify(badSetup)}, {})) })().catch((e) => { console.log('error', e.message); process.exit(1) })`
+  const inside = sh(['docker', 'run', '--rm', '--network', 'tdc-control', '--ip', '10.250.250.50', '-e', `CA=${CA}`, '-e', `T=${xtok}`, '-e', `H=acme.${DOMAIN}`, '-e', `P=${PORT}`,
+    '--entrypoint', 'bun', 'tdcloud-control:dev', '-e', script])
+  check('a client at 10.250.250.50 reaches acme through Caddy', inside.out.trim() === '200 403', inside.out + inside.err)
+
+  const conns = tdrive('acme', 'connections', 'list').out.split('\n').map((l) => l.split('\t')).filter((c) => / xff-test$/.test(c[0] ?? ''))
+  const ips = [...new Set(conns.map((c) => c[3]!))]
+  const outsideIp = ips.find((ip) => ip !== '10.250.250.50') ?? ''
+  check('the team records two client addresses for the token: this machine and 10.250.250.50', ips.length === 2 && ips.includes('10.250.250.50') && !!outsideIp, conns)
+  check(`forged X-Forwarded-For is not believed: Caddy replaced it (recorded ${outsideIp})`, !spoofs.includes(outsideIp) && !ips.some((ip) => spoofs.includes(ip)))
+  check(`the recorded address is the client's, not Caddy's (${caddyIp})`, !ips.includes(caddyIp) && !ips.includes(gateway))
+  const rows = JSON.parse(sh(['docker', 'exec', 'tdc-acme', '/usr/local/bin/bun', '-e',
+    `const { Database } = require('bun:sqlite'); console.log(JSON.stringify(new Database('/data/db/store.db').query("SELECT key_hash, n FROM rate_limits WHERE scope = 'link_addr'").all()))`]).out || '[]') as { key_hash: string; n: number }[]
+  const hits = (ip: string) => rows.find((r) => r.key_hash === sha256(`setup:${ip}`))?.n ?? 0
+  check('setup rate-limit keys are client addresses: this machine (all its tries in one bucket) and 10.250.250.50 (one)', hits(outsideIp) >= 4 && hits('10.250.250.50') === 1, { outside: hits(outsideIp), inside: hits('10.250.250.50') })
+  check("…and never a forged address or Caddy's", [...spoofs, caddyIp].every((ip) => hits(ip) === 0), [...spoofs, caddyIp].map(hits))
+
+  // the relay takes mail only from a team container, only with the team From
+  const ses = (from: string) => JSON.stringify({ FromEmailAddress: from, Destination: { ToAddresses: ['x@example.test'] }, Content: { Simple: { Subject: { Data: 'hi' }, Body: { Text: { Data: 'x' } } } } })
+  const relayUrl = `http://${gateway}:${RELAY_PORT}/v2/email/outbound-emails`
+  const fromTeam = (from: string) => sh(['docker', 'exec', 'tdc-acme', '/usr/local/bin/bun', '-e', `fetch(${JSON.stringify(relayUrl)}, { method: 'POST', body: ${JSON.stringify(ses(from))} }).then((r) => console.log(r.status), (e) => console.log(e.message))`]).out.trim()
+  check('relay: another From is refused (400)', fromTeam('Someone <ceo@bank.example>') === '400')
+  const viaCaddy = sh(['docker', 'exec', 'tdc-caddy', 'wget', '-q', '-O-', '--post-data', ses(env.TDCLOUD_TEAM_MAIL_FROM!), relayUrl])
+  check('relay: Caddy (not a team container) is refused (403)', viaCaddy.code !== 0 && /403/.test(viaCaddy.err), viaCaddy.err)
+  void a
 }
 
 async function tlsOk(slug: string): Promise<boolean> {
@@ -188,6 +315,8 @@ async function main() {
   const users = ['acme', 'globex'].map((s) => JSON.parse(sh(['docker', 'inspect', `tdc-${s}`]).out)[0].Config.User)
   check('the two teams run as different uids', users[0] !== users[1], users)
 
+  await clientAddresses(a)
+
   step('Caddy')
   check('no certificate for a name that is not a team', !(await tlsOk('nope')))
   const hostSwap = await fetch(`${teamUrl('acme')}/api/state`, { headers: { host: `globex.${DOMAIN}:${PORT}` }, tls: { ca: CA } } as RequestInit).then((r) => r.status, () => 0)
@@ -217,10 +346,15 @@ async function main() {
   check('control-plane audit chain verifies', audit.code === 0 && audit.out.includes('audit chain ok'), audit.out)
   const log = admin('audit', 'list', '--limit', '200').out
   for (const action of ['user.signup', 'team.create', 'billing.subscription.created', 'team.provisioned', 'team.setup_link_sent', 'team.suspend', 'team.resume', 'team.backup.manual', 'team.exported', 'team.upgrade']) check(`audit has ${action}`, log.includes(action))
+  const afterUpgrade = JSON.parse(sh(['docker', 'inspect', 'tdc-acme']).out)[0]
+  const acmeNet = JSON.parse(sh(['docker', 'network', 'inspect', 'tdc-net-acme']).out)[0].IPAM.Config[0].Subnet as string
+  const [o1, o2, o3, o4] = acmeNet.split('/')[0]!.split('.').map(Number) as [number, number, number, number]
+  check('after the upgrade: the same fixed address and env', afterUpgrade.NetworkSettings.Networks['tdc-net-acme']?.IPAddress === `${o1}.${o2}.${o3}.${o4 + 3}` && (afterUpgrade.Config.Env as string[]).includes('TDRIVE_HOSTED=1'), afterUpgrade.NetworkSettings.Networks)
 
   console.log(`\n${failed ? 'FAILED' : 'PASSED'}: ${passed} checks passed, ${failed} failed (${Math.round((Date.now() - t0) / 1000)}s)`)
   console.log(`\n  acme    ${teamUrl('acme')}    admin alex / admin-acme-password`)
   console.log(`  globex  ${teamUrl('globex')}  admin alex / admin-globex-password`)
+  console.log(`  second factor: add ${path.join(STATE, 'admin-<slug>.otpauth')} to an authenticator app`)
   process.exit(failed ? 1 : 0)
 }
 

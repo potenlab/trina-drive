@@ -6,6 +6,12 @@
 	admin localhost:2019
 	order rate_limit before reverse_proxy
 	servers {
+		# the client's address ({client_ip}: rate-limit keys, X-Forwarded-For to the team). Nothing sits in front of
+		# Caddy today (DNS points at the host's Elastic IP), so TDCLOUD_FRONT_PROXIES is empty and {client_ip} is the TCP
+		# peer. With a load balancer or CDN in front, list its ranges there (README, "Client addresses").
+		trusted_proxies static {$TDCLOUD_FRONT_PROXIES}
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
 		strict_sni_host on
 	}
 	log {
@@ -25,12 +31,14 @@
 	respond /internal/* 404
 	rate_limit {
 		zone all {
-			key {remote_host}
+			key {client_ip}
 			events 300
 			window 1m
 		}
 	}
-	# Caddy sets X-Forwarded-For to the client's address (it does not pass on one the client sent); the control plane
-	# believes it only from this peer (TDCLOUD_TRUSTED_PROXIES=127.0.0.1)
-	reverse_proxy 127.0.0.1:8790
+	# X-Forwarded-For = the client's address only (never one the client sent); the control plane believes it only from
+	# this peer (TDCLOUD_TRUSTED_PROXIES=127.0.0.1)
+	reverse_proxy 127.0.0.1:8790 {
+		header_up X-Forwarded-For {client_ip}
+	}
 }

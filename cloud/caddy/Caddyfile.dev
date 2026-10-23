@@ -10,6 +10,11 @@
 		ask {$TDCLOUD_ASK_URL}
 	}
 	servers {
+		# the client's address ({client_ip}: rate-limit keys, X-Forwarded-For to the team): here the TCP peer (Docker's
+		# port forwarder), as in production where nothing sits in front of Caddy (README, "Client addresses")
+		trusted_proxies static {$TDCLOUD_FRONT_PROXIES}
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
 		strict_sni_host on
 	}
 	log {
@@ -24,8 +29,10 @@ import /etc/caddy/team_routes.caddy
 {$TDCLOUD_DOMAIN} {
 	tls internal
 	respond /internal/* 404
-	# Caddy sets X-Forwarded-For to the client's address (it does not pass on one the client sent)
-	reverse_proxy tdc-control:8790
+	# X-Forwarded-For = the client's address only (never one the client sent)
+	reverse_proxy tdc-control:8790 {
+		header_up X-Forwarded-For {client_ip}
+	}
 }
 
 *.{$TDCLOUD_DOMAIN} {

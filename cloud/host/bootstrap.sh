@@ -4,7 +4,8 @@
 #
 # ROLE=host     a team host: Docker, the AppArmor profile for bwrap, an XFS data volume with project quotas at
 #               /srv/tdcloud, a firewall that keeps team containers off the VPC, the metadata service and each other,
-#               an Elastic IP from the pool, Caddy, and the host agent (tdcloud-host) for the control plane's SSM commands.
+#               an Elastic IP from the pool, Caddy, the mail relay (team mail → SES with this instance's role), and the
+#               host agent (tdcloud-host) for the control plane's SSM commands.
 # ROLE=control  the control host: Docker, the control-plane container on 127.0.0.1:8790 (env from SSM Parameter
 #               Store), Caddy (Caddyfile.control) for https://<domain>, nightly copy of the control database to S3.
 #
@@ -14,6 +15,7 @@ exec > >(tee -a /var/log/tdcloud-bootstrap.log) 2>&1
 # shellcheck source=/dev/null
 . /etc/tdcloud/host.conf
 : "${ROLE:?}" "${REGION:?}" "${ARTIFACTS_BUCKET:?}" "${ECR_REGISTRY:?}" "${DOMAIN:?}"
+[ "$ROLE" = host ] && : "${TEAM_MAIL_FROM:?}" "${TEAM_SUBNETS:?}"
 export DEBIAN_FRONTEND=noninteractive AWS_DEFAULT_REGION=$REGION PATH=$PATH:/snap/bin
 
 # ---- packages (unattended-upgrades is on by default on Ubuntu; security updates apply daily)
@@ -65,8 +67,10 @@ if [ "$ROLE" = host ]; then
 
   # ---- firewall: team bridges are named tdcb<n> (drivers/docker.ts). Team containers reach the internet (OAuth
   # client metadata from claude.ai / chatgpt.com) and nothing private: not the metadata service, not the VPC, not
-  # other Docker networks, not the host. Traffic inside one team bridge (Caddy <-> that team) and Docker's own
-  # isolation between bridges are left to Docker (RETURN). Re-applied after every Docker start.
+  # other Docker networks, not the host — except the mail relay's port on their own gateway. Traffic inside one team
+  # bridge (Caddy <-> that team) and Docker's own isolation between bridges are left to Docker (RETURN). The relay's
+  # port takes nothing from anywhere else (the security group does not open it either). Re-applied after every
+  # Docker start.
   cat > /usr/local/sbin/tdcloud-firewall <<EOF
 #!/bin/sh
 set -e
@@ -79,7 +83,15 @@ iptables -A DOCKER-USER -i tdcb+ -d 10.0.0.0/8 -j DROP
 iptables -A DOCKER-USER -i tdcb+ -d 172.16.0.0/12 -j DROP
 iptables -A DOCKER-USER -i tdcb+ -d 192.168.0.0/16 -j DROP
 iptables -A DOCKER-USER -j RETURN
-iptables -C INPUT -i tdcb+ -j DROP 2>/dev/null || iptables -I INPUT -i tdcb+ -j DROP
+iptables -N TDCLOUD-INPUT 2>/dev/null || true
+iptables -F TDCLOUD-INPUT
+iptables -A TDCLOUD-INPUT -i tdcb+ -p tcp --dport ${MAIL_RELAY_PORT:-8025} -j ACCEPT
+iptables -A TDCLOUD-INPUT -i tdcb+ -j DROP
+iptables -A TDCLOUD-INPUT -i lo -j RETURN
+iptables -A TDCLOUD-INPUT -p tcp --dport ${MAIL_RELAY_PORT:-8025} -j DROP
+iptables -A TDCLOUD-INPUT -j RETURN
+iptables -D INPUT -i tdcb+ -j DROP 2>/dev/null || true
+iptables -C INPUT -j TDCLOUD-INPUT 2>/dev/null || iptables -I INPUT -j TDCLOUD-INPUT
 EOF
   cat > /etc/systemd/system/tdcloud-firewall.service <<'EOF'
 [Unit]
@@ -116,6 +128,7 @@ TDCLOUD_DOMAIN=$DOMAIN
 TDCLOUD_SLUG_LABEL=$(awk -F. '{print NF}' <<<"$DOMAIN")
 TDCLOUD_ASK_URL=http://$CONTROL_PRIVATE_IP:8790/internal/caddy/ask?key=$ask_key
 ACME_EMAIL=$ACME_EMAIL
+TDCLOUD_FRONT_PROXIES=${FRONT_PROXIES:-}
 EOF
   chmod 0600 /etc/tdcloud/caddy.env
   docker network inspect tdc-edge >/dev/null 2>&1 || docker network create tdc-edge
@@ -125,8 +138,22 @@ EOF
     --read-only --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges:true \
     --memory 512m --pids-limit 256 \
     "$CADDY_IMAGE" caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
-  # team networks that already exist (a reboot): Caddy joins them again
-  for n in $(docker network ls --filter label=tdcloud.team --format '{{.Name}}'); do docker network connect "$n" tdc-caddy 2>/dev/null || true; done
+  # team networks that already exist (a reboot): Caddy joins them again at its fixed address on each (the label the
+  # control plane put on the network); the team trusts X-Forwarded-For from that address only
+  for n in $(docker network ls --filter label=tdcloud.team --format '{{.Name}}'); do
+    ip=$(docker network inspect -f '{{index .Labels "tdcloud.caddy-ip"}}' "$n")
+    docker network connect ${ip:+--ip "$ip"} "$n" tdc-caddy 2>/dev/null || true
+  done
+
+  # ---- the mail relay: team instances send mail (SES v2 API) to their network's gateway, port 8025; the relay checks
+  # the sender and the From and signs for SES with this instance's role (cloud/control/src/relay.ts). Host network:
+  # it must reach the metadata service (hop limit 1) and listen on every team gateway.
+  docker rm -f tdc-mail 2>/dev/null || true
+  docker run -d --name tdc-mail --restart unless-stopped --network host \
+    -e AWS_REGION="$REGION" -e TDCLOUD_TEAM_MAIL_FROM="$TEAM_MAIL_FROM" -e TDCLOUD_TEAM_SUBNETS="$TEAM_SUBNETS" \
+    -e TDCLOUD_MAIL_RELAY_LISTEN="0.0.0.0:${MAIL_RELAY_PORT:-8025}" -e TDCLOUD_MAIL_RELAY_UPSTREAM=ses \
+    --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 256m --pids-limit 128 \
+    "$CONTROL_IMAGE" mail-relay
 else
   # ---- control host: the control plane (127.0.0.1:8790) and Caddy in front of it, host network for both
   aws ssm get-parameter --with-decryption --name "$CONTROL_ENV_PARAM" --query Parameter.Value --output text > /etc/tdcloud/control.env
