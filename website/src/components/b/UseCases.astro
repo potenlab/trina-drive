@@ -1,6 +1,7 @@
 ---
 // Variant B: use-case gallery by role. Every card is in the HTML; the role chips (src/scripts/b.ts) only filter what is
 // shown, and without JS all cards stay visible.
+import Lines from '../Lines.astro'
 import type { CopyB } from '../../content/en-b'
 import Icon from '../Icon.astro'
 interface Props { t: CopyB }
@@ -12,7 +13,7 @@ const slug = (r: string) => r.toLowerCase().replace(/[^a-z]+/g, '-')
   <div class="container">
     <div class="section-head" data-reveal>
       <span class="eyebrow">{u.eyebrow}</span>
-      <h2 id="uc-title">{u.title}</h2>
+      <h2 id="uc-title"><Lines text={u.title} /></h2>
       <p>{u.sub}</p>
     </div>
     <div class="uc-filter" role="group" aria-label={u.eyebrow} hidden data-uc-filter>

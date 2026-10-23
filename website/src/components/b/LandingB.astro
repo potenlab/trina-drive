@@ -2,6 +2,7 @@
 // Variant B of the home page (/b): the same product told for non-developer teams. Shared pieces (Nav, Pricing, Footer,
 // Terminal, the security panel's promise) come from variant A unchanged; B-only parts live in components/b/ and are
 // styled by styles/b.css, which only this page loads.
+import Lines from '../Lines.astro'
 import type { CopyB } from '../../content/en-b'
 import Base from '../../layouts/Base.astro'
 import { LINKS, SITE_URL } from '../../site'
@@ -87,7 +88,7 @@ const d = t.devs
       <div class="container">
         <div class="section-head" data-reveal>
           <span class="eyebrow">{w.eyebrow}</span>
-          <h2 id="works-title">{w.title}</h2>
+          <h2 id="works-title"><Lines text={w.title} /></h2>
           <p>{w.sub}</p>
         </div>
         <div class="wk" data-reveal>
@@ -136,7 +137,7 @@ const d = t.devs
       <div class="container">
         <div class="section-head" data-reveal>
           <span class="eyebrow">{st.eyebrow}</span>
-          <h2 id="how-title">{st.title}</h2>
+          <h2 id="how-title"><Lines text={st.title} /></h2>
           <p>{st.sub}</p>
         </div>
         <ol class="steps">
@@ -163,7 +164,7 @@ const d = t.devs
         <div class="dev-copy">
           <div class="section-head" data-reveal>
             <span class="eyebrow">{d.eyebrow}</span>
-            <h2 id="dev-title">{d.title}</h2>
+            <h2 id="dev-title"><Lines text={d.title} /></h2>
             <p>{d.sub}</p>
           </div>
           <ul class="wk-dev dev-tools" aria-label={w.devTitle}>
@@ -186,7 +187,7 @@ const d = t.devs
         <div class="faq-side">
           <div class="section-head">
             <span class="eyebrow">{t.faq.eyebrow}</span>
-            <h2 id="faq-title">{t.faq.title}</h2>
+            <h2 id="faq-title"><Lines text={t.faq.title} /></h2>
           </div>
           <div class="faq-more">
             <p class="faq-more-title">{t.faq.more}</p>
@@ -211,7 +212,7 @@ const d = t.devs
         <div class="cta-box" data-reveal>
           <div class="cta-bg" aria-hidden="true"></div>
           <span class="cta-logo" aria-hidden="true"><Logo /></span>
-          <h2 id="start-title">{t.cta.title}</h2>
+          <h2 id="start-title"><Lines text={t.cta.title} /></h2>
           <p>{t.cta.sub}</p>
           <div class="hero-ctas">
             <a class="btn btn-primary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{t.cta.primary}<Icon name="arrow" /></a>

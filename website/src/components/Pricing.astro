@@ -2,6 +2,7 @@
 // Plans from research/trina-drive/PRICING.md. We sell in USD only (Paddle checkout, Korean customers pay with a card
 // that allows international payments). Both billing periods are in the HTML; the toggle flips data-billing on the
 // section. Buttons with data-plan call startCheckout() (src/checkout.ts) from main.ts.
+import Lines from './Lines.astro'
 import type { Copy } from '../content/en'
 import { canSellOnline } from '../paddle'
 import { PADDLE } from '../paddle-env'
@@ -22,7 +23,7 @@ const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bi
   <div class="container">
     <div class="section-head center">
       <span class="eyebrow">{p.eyebrow}</span>
-      <h2 id="pricing-title">{p.title.split('\n').map((line, i) => <>{i > 0 && <br />}{line}</>)}</h2>
+      <h2 id="pricing-title"><Lines text={p.title} /></h2>
       <p>{p.sub}</p>
     </div>
     <div class="pricing-top">

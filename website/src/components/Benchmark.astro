@@ -2,6 +2,7 @@
 // Benchmark section, driven entirely by t.benchmark (rendered only when t.benchmark.enabled). One horizontal bar per
 // approach on a 0–100 scale: Trina Drive in the accent, the others neutral, every bar labelled with its value (so
 // identity is never colour alone and no legend is needed). The by-type table doubles as the table view of the data.
+import Lines from './Lines.astro'
 import type { Copy } from '../content/en'
 interface Props { t: Copy }
 const { t } = Astro.props
@@ -12,7 +13,7 @@ const pct = (v: number) => `${Math.max(0, Math.min(100, v))}%`
   <div class="container">
     <div class="section-head" data-reveal>
       <span class="eyebrow">{b.eyebrow}</span>
-      <h2 id="bench-title">{b.title}</h2>
+      <h2 id="bench-title"><Lines text={b.title} /></h2>
       <p>{b.sub}</p>
     </div>
     <div class="bench" data-reveal>

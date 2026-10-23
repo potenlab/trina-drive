@@ -336,6 +336,8 @@ html[lang="ko"] .hero h1 { letter-spacing: -0.035em; line-height: 1.16; font-siz
   padding-bottom: 0.06em;
 }
 .hero h1 .accent-text { display: block; }
+/* phones: size the headline so "Your company folders," stays on one line */
+@media (max-width: 480px) { html:not([lang="ko"]) .hero h1 { font-size: 9.2vw; } }
 .hero-sub { margin-top: 24px; font-size: 19px; line-height: 1.6; color: var(--fg-muted); max-width: 640px; }
 html[lang="ko"] .hero-sub { font-size: 18px; max-width: 620px; }
 .hero-ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; justify-content: center; }
@@ -1077,6 +1079,7 @@ html[lang="ko"] .promise-label { font-family: var(--font-sans); text-transform: 
 .faq-grid { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.5fr); gap: 64px; align-items: start; }
 .faq-side { position: sticky; top: 104px; }
 .faq-side .section-head { margin-bottom: 28px; }
+.faq-side .section-head h2 { font-size: clamp(30px, 3.4vw, 44px); } /* narrow column: keep "answered plainly" on one line */
 .faq-more { padding: 22px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); font-size: 14.5px; color: var(--fg-muted); }
 .faq-more-title { font-weight: 600; color: var(--fg); margin-bottom: 4px; }
 .faq-more a { display: inline-block; margin-top: 10px; color: var(--accent); font-weight: 600; text-decoration: none; }
