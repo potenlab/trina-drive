@@ -11,6 +11,10 @@ import { open, shot, OUT } from './browser.ts'
 type Any = any
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/** a browser step that must not hang the run */
+function withTimeout<T>(ms: number, what: string, f: () => Promise<T>): Promise<T> {
+  return Promise.race([f(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`${what}: no answer in ${ms / 1000} s`)), ms))])
+}
 
 /** a browser signed in to the drive as `who` (the fixture's session cookie: no extra sign-ins against the rate limit) */
 async function asPerson(t: Any, who: string, o: Parameters<typeof open>[0] = {}) {
@@ -143,14 +147,16 @@ export async function design(t: Any) {
     for (const [name, url, who] of pages) {
       const b = who ? await asPerson(t, who, { width, dark }) : { ...(await open({ width, dark })), page: null as Any }
       try {
-        const page = b.page ?? await b.context.newPage()
-        await page.goto(url); await settle(page)
-        out.shots.push(await shot(page, `s37-${name}-${tag}`))
-        if (width === 390) {
-          const sw = await page.evaluate(() => document.documentElement.scrollWidth)
-          if (sw > 392) out.overflow.push(`${name} ${tag}: page is ${sw}px wide at 390`)
-        }
-      } catch (e) { out.errors.push(`${name} ${tag}: ${(e as Error).message.slice(0, 120)}`) } finally { await b.close() }
+        await withTimeout(60_000, `${name} ${tag}`, async () => {
+          const page = b.page ?? await b.context.newPage()
+          await page.goto(url, { timeout: 30_000 }); await settle(page)
+          out.shots.push(await shot(page, `s37-${name}-${tag}`))
+          if (width === 390) {
+            const sw = await page.evaluate(() => document.documentElement.scrollWidth)
+            if (sw > 392) out.overflow.push(`${name} ${tag}: page is ${sw}px wide at 390`)
+          }
+        })
+      } catch (e) { out.errors.push(`${name} ${tag}: ${(e as Error).message.slice(0, 120)}`) } finally { await withTimeout(15_000, 'close', () => b.close()).catch(() => {}) }
     }
   }
   return out

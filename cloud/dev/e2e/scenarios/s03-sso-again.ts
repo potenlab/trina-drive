@@ -10,7 +10,8 @@ export default {
     const fx = t.fx
     const c = await fx.consoleAs('mina')
     const r = await c.openDrive(fx.slug)
-    t.check('mina: Open drive → signed in, no drive password asked', !!r.drive && !r.secondFactor, { error: r.error, hops: r.hops })
+    // a person with a drive passkey (S42 gives mina one) passes the drive's second factor next: still no password
+    t.check('mina: Open drive → signed in (or the drive\'s own second factor), no drive password asked', !!r.drive || !!r.secondFactor, { error: r.error, hops: r.hops })
     const claims = r.assertion ? JSON.parse(Buffer.from(r.assertion.split('.')[1]!, 'base64url').toString()) : {}
     t.check(`the assertion says how she signed in (amr ${JSON.stringify(claims.amr)})`, Array.isArray(claims.amr) && claims.amr.includes('pwd'), claims)
     t.check('aud = this team, lifetime ≤ 120 s, a jti', /^team_[0-9a-f]{20}$/.test(claims.aud) && claims.exp - claims.iat <= 120 && !!claims.jti, claims)

@@ -62,12 +62,16 @@ async function runOne(s: Scenario, c: Ctx, verbose: boolean): Promise<Result> {
   }
   if (t.pendings.length) return res('PENDING')
   resetLocalLimits(c)
-  try { await s.run(t) } catch (e) {
+  // a scenario that hangs (a browser that never answers) must not hold the whole gate: E2E_SCENARIO_TIMEOUT (s)
+  const limitMs = Number(process.env.E2E_SCENARIO_TIMEOUT ?? 1200) * 1000
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const hang = new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error(`timed out after ${limitMs / 1000} s (E2E_SCENARIO_TIMEOUT)`)), limitMs) })
+  try { await Promise.race([s.run(t), hang]) } catch (e) {
     if (e instanceof SkipScenario) return res('SKIP', e.message)
     t.failures.push(`threw: ${(e as Error)?.stack?.split('\n').slice(0, 4).join(' | ') || String(e) || typeof e}`)
-    if (verbose) console.log(`    ERROR ${(e as Error).stack ?? e}`)
+    if (verbose) console.log(`    ERROR ${(e as Error)?.stack ?? e}`)
     return res('ERROR')
-  }
+  } finally { clearTimeout(timer) }
   return res(t.verdict())
 }
 

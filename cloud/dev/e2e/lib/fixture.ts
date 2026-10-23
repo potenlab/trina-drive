@@ -217,6 +217,13 @@ export class Fixture {
       c.name = (await d.session()).me?.name ?? c.name
       this.keep(p, d)
     }
+    // let the console's member sync catch up, then check every kept session again before seeding
+    for (let i = 0; i < 30; i++) {
+      const m = await owner.members(teamId)
+      if (m.status === 200 && m.json().sync?.in_sync) break
+      await Bun.sleep(2000)
+    }
+    this.drives.clear()
   }
 
   // ---------- AWS: an existing test team ----------
@@ -250,6 +257,9 @@ export class Fixture {
     this.keep(who, d)
     return d
   }
+
+  /** drop a person's kept session (it was signed out): the next drive(who) signs in again */
+  forget(who: Who) { this.drives.delete(who); delete this.s.sessions[who]; this.save() }
 
   /** a fresh browser for this person (no kept cookies): what a scenario uses when it signs in itself */
   async freshDrive(who: Who): Promise<Drive> {

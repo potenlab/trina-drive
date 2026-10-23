@@ -84,8 +84,14 @@ export async function seedTeam(admin: Drive, fx: Pick<Fixture, 's' | 'slug'>): P
 
   // files: written by people who may write there (the admin reads none of the restricted folders)
   const as = async (who: string) => (fx as Fixture).drive(who as never)
-  const put = async (who: string, folder: string, name: string, canary: string) =>
-    ok(`upload ${folder}/${name}`, (await as(who)).upload(folder, name, `# ${name}\n${canary} — seeded for the end-to-end scenarios (${fx.slug}).\n매출 결산 1,234\n`))
+  // a session made a moment ago can be gone (the member sync that follows a console change signs people out once):
+  // sign in again and retry once
+  const put = async (who: string, folder: string, name: string, canary: string) => {
+    const body = `# ${name}\n${canary} — seeded for the end-to-end scenarios (${fx.slug}).\n매출 결산 1,234\n`
+    let r = await (await as(who)).upload(folder, name, body)
+    if (r.status === 401) { (fx as Fixture).forget(who as never); r = await (await as(who)).upload(folder, name, body) }
+    return ok(`upload ${folder}/${name}`, Promise.resolve(r))
+  }
   // the restricted folders get a temporary rule for the uploader where nobody of theirs writes (재무 is Viewer-only)
   await put('admin', '/공용', 'notice.md', CANARY.공용)
   await put('boss', '/경영', 'board.md', CANARY.경영)

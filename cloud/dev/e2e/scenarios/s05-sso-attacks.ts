@@ -13,12 +13,19 @@ export default {
     const fx = t.fx
     /** start on the drive and stop at the console's form_post page: the assertion, the state and the browser jar */
     const fresh = async (c: Console) => {
-      const { last } = await t.http.follow(`${fx.url}/api/sso/start?return=%2F`, { jar: c.jar })
+      let { last } = await t.http.follow(`${fx.url}/api/sso/start?return=%2F`, { jar: c.jar })
+      if (last.status === 429) { await Bun.sleep(61_000); last = (await t.http.follow(`${fx.url}/api/sso/start?return=%2F`, { jar: c.jar })).last }
       const f = parseFormPost(last.text)
       return { jar: c.jar as Jar, assertion: f?.fields.assertion ?? '', state: f?.fields.state ?? '', action: f ? new URL(f.action, last.url).toString() : `${fx.url}/api/sso/callback` }
     }
     const err = (loc: string) => /#\/sso-error\/([a-z_]+)/.exec(loc)?.[1] ?? `(no error: ${loc})`
-    const post = (x: { jar: Jar; action: string }, assertion: string, state: string) => postCallback(t.http, x.jar, x.action, { assertion, state })
+    // Caddy allows 30 sign-in requests a minute per address (/api/sso/* included): a 429 from it never reached the
+    // drive, so wait the minute out and send the same request again
+    const post = async (x: { jar: Jar; action: string }, assertion: string, state: string) => {
+      let r = await postCallback(t.http, x.jar, x.action, { assertion, state })
+      if (r.status === 429) { t.log('    (Caddy sign-in zone: 429, waiting 61 s)'); await Bun.sleep(61_000); r = await postCallback(t.http, x.jar, x.action, { assertion, state }) }
+      return r
+    }
 
     t.step('a console account that is not a member')
     const run = Date.now().toString(36)
@@ -55,7 +62,7 @@ export default {
     const ok = await post(g, g.assertion, g.state)
     t.check('the untouched assertion signs in', !/sso-error/.test(ok.location) && ok.status === 303, ok.location)
     const replay = await post(g, g.assertion, g.state)
-    t.check(`replayed → refused (${err(replay.location)})`, ['replayed', 'bad_state'].includes(err(replay.location)), replay.location)
+    t.check(`replayed → refused (${err(replay.location)})`, ['replayed', 'bad_state'].includes(err(replay.location)), `${replay.status} ${replay.location}`)
 
     if (process.env.E2E_FAST === '1') t.skipPart('expired assertion', 'E2E_FAST=1')
     else {
@@ -63,7 +70,8 @@ export default {
       const b = await fresh(c3)
       t.step('waiting 125 s for the assertion to expire (exp + 60 s skew)')
       await Bun.sleep(125_000)
-      t.check('expired → expired', err((await post(b, b.assertion, b.state)).location) === 'expired')
+      const ex = await post(b, b.assertion, b.state)
+      t.check('expired → expired', err(ex.location) === 'expired', `${ex.status} ${ex.location}`)
     }
   },
 } satisfies Scenario
