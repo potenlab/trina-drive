@@ -22,6 +22,14 @@ services:
       TDCLOUD_CADDY_CONTAINER: tdc-caddy
       TDCLOUD_CADDY_ASK_KEY: ${TDCLOUD_CADDY_ASK_KEY}
       TDCLOUD_TRUSTED_PROXIES: 10.250.250.10
+      # the host scaler on simulated hosts (drivers/local.ts LocalPool): one team per host, so the end-to-end test
+      # scales out from 0 for each team, reaches the limit, and scales an emptied host in after a short grace
+      TDCLOUD_AUTOSCALE: "1"
+      TDCLOUD_MAX_TEAMS_PER_HOST: "1"
+      TDCLOUD_MAX_HOSTS: "3"
+      TDCLOUD_LOCAL_HOST_BOOT: 3s
+      TDCLOUD_EMPTY_HOST_GRACE: 20s
+      TDCLOUD_SCALER_EVERY: 5s
       TDCLOUD_OPS_EMAIL: ops@trina.test
       TDCLOUD_MAIL_FROM: Trina Cloud (dev) <cloud@trina.test>
       # team instances mail through the relay below (TDRIVE_MAILER=ses → http://<team gateway>:8025), as on AWS
