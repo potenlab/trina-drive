@@ -206,6 +206,10 @@
   .cd-dots, .cd-users { display: none; }
   .cd-bar { justify-content: space-between; height: 46px; padding: 0 12px; }
   .cd-stack { padding: 18px 14px 6px; }
+  /* phones: show only the active conversation (stacking all four would leave a tall gap under the short ones);
+     the min-height keeps the jump between examples small */
+  .cd-convo { min-height: 500px; }
+  .cd-convo[data-active="false"] { display: none; }
   .cd-q p { max-width: 92%; font-size: 14.5px; }
   .cd-a { grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 16px; }
   .cd-bot { display: none; }

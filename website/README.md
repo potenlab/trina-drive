@@ -23,6 +23,7 @@ bun run og         # re-render public/og.png, og-ko.png and the PNG favicons (ne
 | `src/legal/*.md` | Terms / Privacy / Refund, EN + KO, rendered by `Legal.astro` at build time. Draft — lawyer review pending. Source of truth: `research/trina-drive/payments/legal/` (placeholders filled here) |
 | `api/paddle-webhook.js`, `api/_lib/` | Vercel function `POST /api/paddle-webhook` (signature, IP allowlist, dedup, alerts). `_lib` is not routed |
 | `test/` | `bun test` suites |
+| `src/pages/b.astro`, `src/content/en-b.ts`, `src/components/b/`, `src/styles/b.css`, `src/scripts/b.ts` | A/B variant B at `/b` for non-developer teams (noindex, canonical → `/`): AI chat demo hero, use cases by role, plain-language copy. Shares Nav, Pricing, Footer, Terminal and the security promise with `/`. Main CTAs in both variants carry `data-cta` (get-started, book-call, see-how, checkout-team, checkout-business) |
 | `src/components/` | `Landing.astro` (all sections), `Terminal.astro` (hero demo), `Pricing.astro`, `Nav`, `Footer`, `Legal`, `Thanks` (`/thanks`, Paddle's success page, noindex) |
 | `src/scripts/main.ts` | theme toggle, mobile menu, copy button, KRW/USD and monthly/yearly toggles, checkout buttons, terminal replay |
 | `public/` | favicon, OG images, `robots.txt`, `sitemap.xml`, `theme.js` (applies the saved theme before paint), `_headers` |

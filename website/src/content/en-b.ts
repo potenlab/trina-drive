@@ -343,7 +343,7 @@ const enB = {
         icon: 'log',
         label: 'Record',
         title: 'Every file an AI opens is on the record.',
-        body: 'Who asked, from which app, which file. Owners see it in one log, and the log can’t be quietly rewritten.',
+        body: 'Who asked, from which app, which file. Owners see it in one log, and a quiet rewrite of that log gets caught.',
       },
     ],
     views: [
@@ -368,7 +368,7 @@ const enB = {
       'Through Trina Drive nobody can change or delete your original files — not even admins.',
       'A newly added folder is hidden from every AI until you choose who may use it.',
       'Connections expire, can be cut off instantly, and a new device triggers an alert.',
-      'Every file an AI opens is recorded in a log that can’t be quietly edited.',
+      'Every file an AI opens is recorded, and a quiet edit to that record gets caught.',
     ],
     limits: [
       'What an AI reads goes to the AI company you use. Mark folders that must never leave as “No AI”.',
@@ -434,7 +434,7 @@ const enB = {
       },
       {
         q: 'Is our data used to train AI?',
-        a: 'Trina Drive doesn’t train any AI model and doesn’t send your files to us. When someone’s AI reads a file, that text goes to the AI company they use (Anthropic, OpenAI and others), under the terms of your plan with that company — whether it may be used for training is set there, not by us. Folders that must never reach an AI company can be marked “No AI”.',
+        a: 'Trina Drive doesn’t train any AI model, and your files aren’t copied to us. When someone’s AI reads a file, that text goes to the AI company they use (Anthropic, OpenAI and others), under the terms of your plan with that company — whether it may be used for training is set there, not by us. Folders that must never reach an AI company can be marked “No AI”.',
       },
       {
         q: 'How is this different from uploading files to ChatGPT or Claude?',
