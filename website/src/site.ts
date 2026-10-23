@@ -4,8 +4,7 @@ export const SITE_URL = 'https://drive.trina.app'
 export const CONTACT_EMAIL = 'contact@trina.app'
 
 export const LINKS = {
-  // TODO(launch): the repository is being renamed from "shelf" and is not public yet. Point these at the public repo
-  // and its security-model document once the open-source release is out.
+  // The repository is public (source on GitHub; the LICENSE file is not published yet — don't claim an OSI license).
   github: 'https://github.com/potenlab/trina-drive',
   docs: 'https://github.com/potenlab/trina-drive#readme',
   securityModel: 'https://github.com/potenlab/trina-drive/blob/main/docs/SECURITY-MODEL.md',

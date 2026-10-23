@@ -30,8 +30,9 @@ const a = (id: string) => `${home}#${id}`
       <div>
         <h4>{f.resources}</h4>
         <ul>
-          <li><a href="/security">{l.security}</a></li>
+          <li><a href={LINKS.docs} rel="noopener">{l.docs}</a></li>
           <li><a href={LINKS.github} rel="noopener">{l.github}</a></li>
+          <li><a href="/security">{l.security}</a></li>
           <li><a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a></li>
         </ul>
       </div>

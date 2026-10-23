@@ -15,6 +15,7 @@ const securityPage = '/security'
     <a class="logo" href={home} aria-label="Trina Drive home"><Logo /><span>Trina Drive</span></a>
     <nav class="nav-links" aria-label="Main">
       <a href={LINKS.docs} rel="noopener">{n.docs}</a>
+      <a class="nav-gh" href={LINKS.github} rel="noopener"><Icon name="github" />{n.github}</a>
       <a href={a('pricing')}>{n.pricing}</a>
       <a href={securityPage}>{n.security}</a>
       <a href={a('faq')}>{n.faq}</a>
@@ -32,6 +33,7 @@ const securityPage = '/security'
   </div>
   <div class="mobile-menu" id="mobile-menu" data-open="false">
     <a href={LINKS.docs} rel="noopener">{n.docs}</a>
+    <a href={LINKS.github} rel="noopener">{n.github}</a>
     <a href={a('pricing')}>{n.pricing}</a>
     <a href={securityPage}>{n.security}</a>
     <a href={a('faq')}>{n.faq}</a>
