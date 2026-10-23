@@ -1,9 +1,7 @@
-// Screen text in English and Korean. The browser's language picks the first one; the choice in Settings (or the
-// switch in the header) is kept in this browser. Korean must have every English key (TypeScript checks it).
-import { useSyncExternalStore } from 'react'
-import { NAME } from '../../src/brand'
-
-const en = {
+// The core screen text in English and Korean (everything that existed before the Trina Cloud v1 split). Korean must have
+// every English key (TypeScript checks it). Feature text lives in its own file next to this one (share.ts, sso.ts,
+// console.ts); index.ts merges them. Plain data: no DOM, so test/i18n-modules.test.ts can load it.
+export const en = {
   app_tagline: 'Team folders for AI agents',
   nav_folders: 'Folders', nav_people: 'People', nav_tokens: 'My tokens', nav_drafts: 'My drafts', nav_audit: 'Audit', nav_settings: 'Settings',
   sign_out: 'Sign out', notices: 'Notices', loading: 'Loading…', save: 'Save', cancel: 'Cancel', close: 'Close', copy: 'Copy', copied: 'Copied',
@@ -110,9 +108,9 @@ const en = {
   promise: 'Storage, permission decisions and the record stay on your server. What an agent reads goes to the AI company that runs that agent; mark folders that must not go there "No AI". The person who runs the server can see its disk.',
 }
 
-export type Key = keyof typeof en
+export type CoreKey = keyof typeof en
 
-const ko: Record<Key, string> = {
+export const ko: Record<CoreKey, string> = {
   app_tagline: 'AI 에이전트를 위한 팀 폴더',
   nav_folders: '폴더', nav_people: '사람', nav_tokens: '내 토큰', nav_drafts: '내 초안', nav_audit: '감사', nav_settings: '설정',
   sign_out: '로그아웃', notices: '알림', loading: '불러오는 중…', save: '저장', cancel: '취소', close: '닫기', copy: '복사', copied: '복사됨',
@@ -210,39 +208,3 @@ const ko: Record<Key, string> = {
   promise: '저장, 권한 판단, 기록은 여러분 서버에 있습니다. 에이전트가 읽은 내용은 그 에이전트를 만든 AI 회사로 갑니다. 그러면 안 되는 폴더는 "AI 연결 금지"로 두세요. 서버를 운영하는 사람은 디스크를 볼 수 있습니다.',
 }
 
-export type Locale = 'en' | 'ko'
-export const LOCALES: { id: Locale; label: string }[] = [{ id: 'en', label: 'English' }, { id: 'ko', label: '한국어' }]
-const DICTS: Record<Locale, Record<Key, string>> = { en, ko }
-const STORE_KEY = `${NAME}.locale`
-
-function initial(): Locale {
-  try { const v = localStorage.getItem(STORE_KEY); if (v === 'en' || v === 'ko') return v } catch { /* storage blocked */ }
-  return (navigator.languages ?? [navigator.language]).some((l) => l?.toLowerCase().startsWith('ko')) ? 'ko' : 'en'
-}
-
-let current: Locale = initial()
-const listeners = new Set<() => void>()
-document.documentElement.lang = current
-
-export function setLocale(l: Locale) {
-  current = l
-  document.documentElement.lang = l
-  try { localStorage.setItem(STORE_KEY, l) } catch { /* ignore */ }
-  listeners.forEach((f) => f())
-}
-export const getLocale = () => current
-
-export function t(key: Key, params?: Record<string, string | number>): string {
-  const s = DICTS[current][key] ?? en[key]
-  return params ? s.replace(/\{(\w+)\}/g, (all, k: string) => (params[k] !== undefined ? String(params[k]) : all)) : s
-}
-
-/** Re-render on language change. */
-export function useLocale(): Locale {
-  return useSyncExternalStore((f) => { listeners.add(f); return () => { listeners.delete(f) } }, () => current)
-}
-
-export function fmtDate(ms: number | null | undefined): string {
-  if (!ms) return '—'
-  return new Intl.DateTimeFormat(current === 'ko' ? 'ko-KR' : 'en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ms))
-}

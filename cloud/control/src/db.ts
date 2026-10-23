@@ -4,6 +4,7 @@
 import { Database } from 'bun:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
+import { runControlMigrations } from './migrations'
 
 export type DB = Database
 
@@ -89,6 +90,8 @@ export function openDb(file: string): DB {
   for (const [table, column, decl] of ADDED_COLUMNS) {
     if (!db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all().some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`)
   }
+  // modules' own tables and columns (migrations/index.ts)
+  runControlMigrations(db)
   if (file !== ':memory:') try { fs.chmodSync(file, 0o600) } catch { /* not ours to fix */ }
   return db
 }

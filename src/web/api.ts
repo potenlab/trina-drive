@@ -2,24 +2,27 @@
 // SameSite=Strict, Secure on https). Every state change needs the session's CSRF token (X-CSRF-Token) and, from a
 // browser, a same-origin Origin. Handlers only parse and route: who may see or change what is decided in rights.ts
 // (admin side) and policy.ts (drafts), reached through ops.ts and views.ts.
+// The route table is assembled from modules (W0 seams): sign-in in auth-routes.ts, people in people-ops.ts, rules in
+// src/share/rules.ts, and feature routes registered in routes.ts. A feature adds routes in its own module.
 import { appendAudit } from '../audit'
-import { CLI, NAME, PRODUCT, VERSION } from '../config'
-import { PeopleLimitError, StoreError, addPerson } from '../store'
+import { NAME } from '../config'
+import { PeopleLimitError, StoreError } from '../store'
 import type { Actor } from '../rights'
-import {
-  accountByLogin, AuthError, checkPasswordRules, consumeLink, consumeSetupToken, createSession, csrfOk, hashPassword, lookupSession,
-  peekLink, revokeSession, SESSION_COOKIE, SESSION_MAX_MS, setPassword, setupDone, setupPending, verifyPassword, type WebSession,
-} from './auth'
+import { AuthError, csrfOk, lookupSession, SESSION_COOKIE } from './auth'
 import * as approve from './approve'
 import * as files from './files'
 import * as managed from '../managed/web'
 import * as gdrive from '../gdrive/web'
 import * as apppw from '../dav/apppw'
 import { ManagedError } from '../managed/core'
-import { consumeTicket, createTicket, has2FA, ticketFailed, ticketPerson } from './mfa'
-import { ApiError, bad, json, notFound, rateLimited, type WebCtx } from './http'
+import { ApiError, bad, json, notFound, type WebCtx } from './http'
 import { markNoticesRead, noticesOf } from './notices'
 import * as ops from './ops'
+import * as people from './people-ops'
+import * as rules from '../share/rules'
+import { id, R, type Call, type Route } from './route'
+import { authRoutes } from './auth-routes'
+import { MODULE_ROUTES } from './routes'
 import { ensureWebSchema } from './schema'
 import * as views from './views'
 
@@ -32,11 +35,6 @@ export function readCookie(req: Request, name: string): string | undefined {
     if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim()
   }
   return undefined
-}
-
-const isHttps = (req: Request) => new URL(req.url).protocol === 'https:' || req.headers.get('x-forwarded-proto') === 'https'
-function sessionCookie(req: Request, value: string, maxAgeS: number) {
-  return `${SESSION_COOKIE}=${value}; Path=/api; HttpOnly; SameSite=Strict; Max-Age=${maxAgeS}${isHttps(req) ? '; Secure' : ''}`
 }
 
 /** The origin this server is reached at (what a same-origin browser request carries in Origin). */
@@ -67,142 +65,39 @@ async function body(req: Request): Promise<Record<string, unknown>> {
 
 export const base = (w: WebCtx, req: Request) => (w.opts.publicUrl ?? ownOrigin(req)).replace(/\/$/, '')
 
-function startSession(w: WebCtx, req: Request, personId: number, previous?: WebSession | null) {
-  if (previous) revokeSession(w.db, previous.idHash) // a new id on every sign-in (no fixation)
-  const s = createSession(w.db, personId, req.headers.get('user-agent') ?? undefined)
-  return { csrf: s.csrf, cookie: sessionCookie(req, s.cookie, SESSION_MAX_MS / 1000) }
-}
-
-/** raw: the handler reads the body itself (uploads: multipart or bytes, with their own size limits) */
-type Route = { method: string; re: RegExp; auth: boolean; fn: (c: Call) => Promise<Response | unknown> | Response | unknown; raw?: boolean }
-interface Call { w: WebCtx; req: Request; m: RegExpExecArray; body: Record<string, unknown>; s: WebSession | null; actor: Actor; op: ops.Op; addr: string; url: URL }
-
-const R = (method: string, path: string, auth: boolean, fn: Route['fn'], raw = false): Route =>
-  ({ method, re: new RegExp('^/api' + path.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$'), auth, fn, raw })
-const id = (c: Call, k = 'id') => { const v = Number(c.m.groups?.[k]); if (!Number.isSafeInteger(v) || v <= 0) throw notFound(); return v }
-
-const routes: Route[] = [
-  // ---------- before sign-in ----------
-  R('GET', '/state', false, ({ w }) => ({ name: NAME, product: PRODUCT, cli: CLI, version: VERSION, setup_pending: setupPending(w.db), setup_done: setupDone(w.db) })),
-  R('POST', '/setup', false, async ({ w, req, body: b, s, addr }) => {
-    if (!w.linkByAddr.hit(`setup:${addr}`)) throw rateLimited(w.linkByAddr.retryAfter(`setup:${addr}`))
-    const pw = checkPasswordRules(b.password)
-    const hash = await hashPassword(pw)
-    const name = typeof b.name === 'string' ? b.name.trim().normalize('NFC') : ''
-    const email = typeof b.email === 'string' ? b.email.trim() : ''
-    if (!/^[^\s/\\@#][^/\\\p{Cc}]{0,63}$/u.test(name) || !/^[^\s@]{1,64}@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw bad('bad_input', 'a name and a valid mail address are required')
-    if (!consumeSetupToken(w.db, b.setup_token)) throw new ApiError(403, 'bad_setup_token', 'that setup token is not valid (it is used once and printed by init)')
-    let personId = 0
-    w.db.transaction(() => {
-      const p = w.db.query<{ id: number; admin: number }, [string]>('SELECT id, admin FROM people WHERE name = ?').get(name)
-      if (p && !p.admin) throw new ApiError(409, 'not_admin', 'a person with that name exists and is not an admin')
-      personId = p?.id ?? addPerson(w.db, name, true).id
-      w.db.query('INSERT INTO accounts (person_id, email, password_hash, created_at, password_set_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (person_id) DO UPDATE SET email = excluded.email, password_hash = excluded.password_hash, password_set_at = excluded.password_set_at')
-        .run(personId, email, hash, Date.now(), Date.now())
-      appendAudit(w.db, { personId, tokenId: null, tool: 'web', command: `setup: first admin ${name}`, files: [], outcome: 'ok' })
-    })()
-    const everyone = ops.everyoneGroup(w)
-    w.db.query('INSERT OR IGNORE INTO memberships (group_id, person_id) VALUES (?, ?)').run(everyone, personId)
-    const ss = startSession(w, req, personId, s)
-    return json({ me: views.me(w, { personId, admin: true }), csrf: ss.csrf }, 200, { 'set-cookie': ss.cookie })
-  }),
-  R('POST', '/login', false, async ({ w, req, body: b, s, addr }) => {
-    const login = typeof b.login === 'string' ? b.login.trim().toLowerCase().slice(0, 254) : ''
-    const pw = typeof b.password === 'string' ? b.password : ''
-    if (!login || !pw) throw bad('bad_input', 'name or mail address, and password')
-    if (w.loginByName.blocked(login)) throw rateLimited(w.loginByName.retryAfter(login))
-    if (!w.loginByAddr.hit(addr)) throw rateLimited(w.loginByAddr.retryAfter(addr))
-    const acc = accountByLogin(w.db, login)
-    const ok = await verifyPassword(pw, acc?.password_hash)
-    if (!ok || !acc || !acc.active) {
-      w.loginByName.hit(login)
-      throw new ApiError(401, 'bad_login', 'wrong name or password')
-    }
-    w.loginByName.reset(login)
-    // a second factor when the person has one: a 5-minute ticket now, the session after the factor (POST /login/second)
-    if (has2FA(w.db, acc.person_id)) return { second_factor: await approve.secondFactorChallenge(w, createTicket(w.db, acc.person_id), acc.person_id) }
-    const ss = startSession(w, req, acc.person_id, s)
-    return json({ me: views.me(w, { personId: acc.person_id, admin: !!acc.admin }), csrf: ss.csrf }, 200, { 'set-cookie': ss.cookie })
-  }),
-  R('POST', '/login/second', false, async ({ w, req, body: b, s, addr }) => {
-    if (!w.loginByAddr.hit(addr)) throw rateLimited(w.loginByAddr.retryAfter(addr))
-    const ticket = typeof b.ticket === 'string' ? b.ticket : ''
-    const pid = ticketPerson(w.db, ticket)
-    if (pid == null) throw new ApiError(401, 'bad_ticket', 'sign in again')
-    const key = `mfa:${pid}`
-    if (w.loginByName.blocked(key)) throw rateLimited(w.loginByName.retryAfter(key))
-    let method: string
-    try { method = await approve.checkSecondFactor(w, ticket, pid, b) } catch (e) {
-      ticketFailed(w.db, ticket)
-      w.loginByName.hit(key)
-      throw e
-    }
-    const p = w.db.query<{ admin: number; active: number }, [number]>('SELECT admin, active FROM people WHERE id = ?').get(pid)
-    if (!p?.active || !consumeTicket(w.db, ticket)) throw new ApiError(401, 'bad_ticket', 'sign in again')
-    w.loginByName.reset(key)
-    if (method === 'recovery') appendAudit(w.db, { personId: pid, tokenId: null, tool: 'web', command: 'signed in with a recovery code', files: [], outcome: 'ok' })
-    const ss = startSession(w, req, pid, s)
-    return json({ me: views.me(w, { personId: pid, admin: !!p.admin }), csrf: ss.csrf }, 200, { 'set-cookie': ss.cookie })
-  }),
-  R('POST', '/logout', true, ({ w, req, s }) => {
-    revokeSession(w.db, s!.idHash)
-    return json({ ok: true }, 200, { 'set-cookie': sessionCookie(req, '', 0) })
-  }),
-  R('POST', '/links/check', false, ({ w, body: b, addr }) => {
-    if (!w.linkByAddr.hit(`link:${addr}`)) throw rateLimited(w.linkByAddr.retryAfter(`link:${addr}`))
-    const kind = b.kind === 'reset' ? 'reset' : 'invite'
-    const pid = peekLink(w.db, kind, b.token)
-    if (pid == null) throw new ApiError(404, 'bad_link', 'this link is used, expired or wrong')
-    return { name: w.db.query<{ name: string }, [number]>('SELECT name FROM people WHERE id = ?').get(pid)?.name }
-  }),
-  R('POST', '/links/accept', false, async ({ w, req, body: b, s, addr }) => {
-    if (!w.linkByAddr.hit(`link:${addr}`)) throw rateLimited(w.linkByAddr.retryAfter(`link:${addr}`))
-    const kind = b.kind === 'reset' ? 'reset' : 'invite'
-    const pw = checkPasswordRules(b.password)
-    const pid = consumeLink(w.db, kind, b.token)
-    if (pid == null) throw new ApiError(404, 'bad_link', 'this link is used, expired or wrong')
-    await setPassword(w.db, pid, pw)
-    appendAudit(w.db, { personId: pid, tokenId: null, tool: 'web', command: kind === 'invite' ? 'invite accepted' : 'password reset completed', files: [], outcome: 'ok' })
-    const p = w.db.query<{ admin: number; active: number }, [number]>('SELECT admin, active FROM people WHERE id = ?').get(pid)!
-    if (!p.active) return { ok: true }
-    // a reset link does not skip the second factor (R9: a reset mail must not be a way around it)
-    if (has2FA(w.db, pid)) return { second_factor: await approve.secondFactorChallenge(w, createTicket(w.db, pid), pid) }
-    const ss = startSession(w, req, pid, s)
-    return json({ me: views.me(w, { personId: pid, admin: !!p.admin }), csrf: ss.csrf }, 200, { 'set-cookie': ss.cookie })
-  }),
-
+const coreRoutes: Route[] = [
   // ---------- signed in ----------
   R('GET', '/session', true, ({ w, s, actor }) => ({ me: views.me(w, actor), csrf: s!.csrf })),
-  R('POST', '/me/password', true, ({ op, s, body: b }) => ops.changeOwnPassword(op, s!.idHash, b)),
+  R('POST', '/me/password', true, ({ op, s, body: b }) => people.changeOwnPassword(op, s!.idHash, b)),
   R('GET', '/notices', true, ({ w, actor }) => ({ notices: noticesOf(w.db, actor.personId) })),
   R('POST', '/notices/read', true, ({ w, actor }) => { markNoticesRead(w.db, actor.personId); return { ok: true } }),
 
   R('GET', '/people', true, ({ w, actor }) => views.peopleView(w, actor)),
-  R('POST', '/people', true, ({ op, body: b }) => ops.createPerson(op, b)),
-  R('PATCH', '/people/:id', true, (c) => ops.updatePerson(c.op, id(c), c.body)),
-  R('POST', '/people/:id/invite', true, (c) => ops.invitePerson(c.op, id(c), c.body)),
-  R('POST', '/people/:id/reset', true, (c) => ops.resetPassword(c.op, id(c))),
-  R('POST', '/groups', true, ({ op, body: b }) => ops.createGroup(op, b)),
-  R('DELETE', '/groups/:id', true, (c) => ops.deleteGroup(c.op, id(c))),
-  R('PUT', '/groups/:id/members/:pid', true, (c) => ops.setMember(c.op, id(c), id(c, 'pid'), true)),
-  R('DELETE', '/groups/:id/members/:pid', true, (c) => ops.setMember(c.op, id(c), id(c, 'pid'), false)),
+  R('POST', '/people', true, ({ op, body: b }) => people.createPerson(op, b)),
+  R('PATCH', '/people/:id', true, (c) => people.updatePerson(c.op, id(c), c.body)),
+  R('POST', '/people/:id/invite', true, (c) => people.invitePerson(c.op, id(c), c.body)),
+  R('POST', '/people/:id/reset', true, (c) => people.resetPassword(c.op, id(c))),
+  R('POST', '/groups', true, ({ op, body: b }) => people.createGroup(op, b)),
+  R('DELETE', '/groups/:id', true, (c) => people.deleteGroup(c.op, id(c))),
+  R('PUT', '/groups/:id/members/:pid', true, (c) => people.setMember(c.op, id(c), id(c, 'pid'), true)),
+  R('DELETE', '/groups/:id/members/:pid', true, (c) => people.setMember(c.op, id(c), id(c, 'pid'), false)),
 
   R('GET', '/folders', true, ({ w, actor }) => ({ folders: views.foldersView(w, actor) })),
   R('POST', '/folders', true, ({ op, body: b }) => ops.registerFolder(op, b)),
   R('GET', '/folders/:id', true, (c) => views.folderView(c.op, id(c))),
-  R('PATCH', '/folders/:id', true, (c) => ops.setFlags(c.op, id(c), c.body)),
+  R('PATCH', '/folders/:id', true, (c) => rules.setFlags(c.op, id(c), c.body)),
   R('DELETE', '/folders/:id', true, (c) => ops.unregisterFolder(c.op, id(c))),
-  R('PUT', '/folders/:id/rules', true, (c) => ops.setRule(c.op, id(c), c.body)),
+  R('PUT', '/folders/:id/rules', true, (c) => rules.setRule(c.op, id(c), c.body)),
   R('PUT', '/folders/:id/nas', true, (c) => ops.setNas(c.op, id(c), c.body)),
   R('PUT', '/folders/:id/owner', true, (c) => ops.setOwner(c.op, id(c), c.body)),
   R('POST', '/folders/:id/subfolders', true, (c) => ops.ensureSubfolder(c.op, id(c), c.body)),
-  R('PUT', '/folders/:id/managers/:pid', true, (c) => ops.setManage(c.op, id(c), id(c, 'pid'), true)),
-  R('DELETE', '/folders/:id/managers/:pid', true, (c) => ops.setManage(c.op, id(c), id(c, 'pid'), false)),
+  R('PUT', '/folders/:id/managers/:pid', true, (c) => rules.setManage(c.op, id(c), id(c, 'pid'), true)),
+  R('DELETE', '/folders/:id/managers/:pid', true, (c) => rules.setManage(c.op, id(c), id(c, 'pid'), false)),
 
   R('GET', '/tokens', true, ({ w, actor }) => ({ tokens: views.tokensView(w, actor) })),
   R('POST', '/tokens', true, ({ op, body: b }) => ops.createOwnToken(op, b)),
   R('DELETE', '/tokens/:id', true, (c) => ops.revokeOwnToken(c.op, id(c))),
-  R('POST', '/me/reauth', true, ({ op, s, body: b }) => ops.reauth(op, s!.idHash, b)),
+  R('POST', '/me/reauth', true, ({ op, s, body: b }) => people.reauth(op, s!.idHash, b)),
   R('POST', '/tokens/:id/provenance-reset', true, (c) => ops.resetProvenance(c.op, c.s!.idHash, id(c), c.body)),
 
   // second factors (own only; changes need the password typed within 5 minutes)
@@ -281,6 +176,13 @@ const routes: Route[] = [
   R('GET', '/audit', true, ({ w, actor, url }) => views.auditView(w, actor, url.searchParams.get('view') ?? 'mine', Number(url.searchParams.get('before') ?? '') || undefined)),
 ]
 
+/**
+ * The whole table, in match order: signing in (auth-routes.ts), the core routes above, then the feature modules'
+ * routes (routes.ts: src/share/http.ts, src/tdcloud/http.ts, …). A path that matches several routes picks the first
+ * with the request's method.
+ */
+export const routes: Route[] = [...authRoutes, ...coreRoutes, ...MODULE_ROUTES]
+
 export async function handleApi(w: WebCtx, req: Request, addr = 'unknown'): Promise<Response> {
   ensureWebSchema(w.db)
   const url = new URL(req.url)
@@ -290,7 +192,7 @@ export async function handleApi(w: WebCtx, req: Request, addr = 'unknown'): Prom
     const route = candidates.find((r) => r.method === req.method)
     if (!route) return json({ error: 'method_not_allowed' }, 405, { allow: candidates.map((r) => r.method).join(', ') })
     const changing = STATE_CHANGING.has(req.method)
-    if (changing && !originOk(req, w.opts.allowedOrigins)) throw new ApiError(403, 'bad_origin', 'cross-site request refused')
+    if (changing && !route.crossOrigin && !originOk(req, w.opts.allowedOrigins)) throw new ApiError(403, 'bad_origin', 'cross-site request refused')
     const s = lookupSession(w.db, readCookie(req, SESSION_COOKIE))
     if (route.auth && !s) throw new ApiError(401, 'signed_out', 'sign in first')
     // CSRF: every state change made with a session carries the session's token

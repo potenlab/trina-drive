@@ -31,6 +31,7 @@ import { mfaCommand, MFA_HELP, mfaServeNotice } from './web/mfa-cli'
 import { createManagedFolder } from './managed/folders'
 import { purgeExpired, rescan, usage } from './managed/ops'
 import { ensureRoot, metaSet, parseBytes, storageSettings } from './managed/settings'
+import { findCommand, registeredHelp } from './cli-registry'
 
 const HELP = `${PRODUCT} ${VERSION} — your team's files for AI agents, permission-aware (${CLI})
 
@@ -103,7 +104,7 @@ async function main(argv: string[]) {
   const [cmd, sub] = args
   const single = ['init', 'sh', 'serve', 'activity'].includes(cmd ?? '')
   const rest = args.slice(single ? 1 : 2)
-  if (!cmd || cmd === 'help' || cmd === '--help') return console.log(HELP)
+  if (!cmd || cmd === 'help' || cmd === '--help') return console.log(HELP + registeredHelp())
   // backup works on a data directory (and may run as root via launchd/sudo): never open or create a database for it
   if (cmd === 'backup') { process.exitCode = await backupCommand(args.slice(1), { dataDir }); return }
   // mcp add runs on a person's computer: no data directory there
@@ -304,12 +305,16 @@ async function main(argv: string[]) {
       }
       return new Promise(() => {})
     }
-    default:
+    default: {
+      // commands the feature modules register (src/cli-registry.ts); a built-in above always wins
+      const reg = findCommand(args)
+      if (reg) { const code = await reg.command.run({ db, dataDir, args: reg.rest, out: (s) => console.log(s), err: (s) => console.error(s) }); if (code) process.exitCode = code; return }
       if (cmd === 'public' && publicCommand(db, sub, rest)) return
       if (mfaCommand(db, `${cmd} ${sub ?? ''}`.trim(), rest)) return
       if (await notifyCommand(db, dataDir, `${cmd} ${sub ?? ''}`.trim(), rest)) return
-      console.error(`unknown command: ${args.join(' ')}\n\n${HELP}`)
+      console.error(`unknown command: ${args.join(' ')}\n\n${HELP}${registeredHelp()}`)
       process.exitCode = 2
+    }
   }
 }
 

@@ -2,25 +2,19 @@
 // sign in — with a password or an email link —, dashboard with Paddle checkout and upgrades, the Free sign-up at /free,
 // the wake page a paused free team links to at /wake/<slug>), a JSON API with the same operations (/api/*, used by the landing page and
 // the end-to-end test), the Paddle webhook, and two internal endpoints for Caddy and Prometheus.
+// Seams (W0): feature modules register routes in routes/index.ts (asked before the pages here), the session cookie,
+// headers and Origin rule are in routes/console-http.ts, the page frame and stylesheet in ui/layout.ts.
 import { CloudError, type Cloud } from './cloud'
 import { teamByPublicId, teamBySlug, type TeamRow } from './db'
 import { PADDLE_IPS, summarize, verifyPaddle, type PaddleEvent } from './paddle'
 import { suggestSlug } from './slug'
 import { iso, now, timingSafeEqualStr } from './util'
+import { findRoute } from './routes'
+import { HEADERS, originRefused, readSessionCookie, sameOrigin, sessionCookie } from './routes/console-http'
+import type { RouteCtx } from './routes/types'
+import { CSS, esc, page } from './ui/layout'
 
-const COOKIE = 'tdcloud_session'
 const MAX_BODY = 64 * 1024
-
-const CSP = [
-  "default-src 'self'", "script-src 'self' https://cdn.paddle.com https://challenges.cloudflare.com", "style-src 'self' 'unsafe-inline' https://cdn.paddle.com https://sandbox-cdn.paddle.com",
-  "img-src 'self' data: https://cdn.paddle.com https://sandbox-cdn.paddle.com", "frame-src https://buy.paddle.com https://sandbox-buy.paddle.com https://challenges.cloudflare.com",
-  "connect-src 'self' https://api.paddle.com https://sandbox-api.paddle.com", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'",
-].join('; ')
-const HEADERS: Record<string, string> = {
-  'content-security-policy': CSP, 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY',
-  'strict-transport-security': 'max-age=31536000; includeSubDomains', 'cross-origin-opener-policy': 'same-origin-allow-popups',
-  'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(self "https://buy.paddle.com" "https://sandbox-buy.paddle.com")',
-}
 
 export class RateLimit {
   constructor(private readonly cloud: Cloud) {}
@@ -34,23 +28,6 @@ export class RateLimit {
     return true
   }
 }
-
-const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
-
-function page(title: string, body: string, opts: { paddle?: boolean; turnstile?: boolean; wake?: boolean } = {}) {
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} · Trina Cloud</title><link rel="stylesheet" href="/static/app.css">${opts.paddle ? '<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script><script src="/static/checkout.js" defer></script>' : ''}${opts.turnstile ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : ''}${opts.wake ? '<script src="/static/wake.js" defer></script>' : ''}</head>
-<body><main><p class="brand"><a href="/">Trina Cloud</a></p>${body}</main></body></html>`, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
-}
-
-const CSS = `:root{color-scheme:light dark;--ink:#0a0b0d;--paper:#fbfaf7;--accent:#ff5b1f;--muted:#6b6f76;--line:#e3e1dc}
-@media (prefers-color-scheme:dark){:root{--ink:#f2f1ee;--paper:#111214;--muted:#a2a5ab;--line:#2a2c30}}
-body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 system-ui,sans-serif}main{max-width:640px;margin:0 auto;padding:32px 16px}
-.brand a{font-weight:700;color:var(--ink);text-decoration:none}h1{font-size:28px;margin:16px 0}label{display:block;margin:12px 0}
-input,select{display:block;width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit;font:inherit}
-button,.btn{display:inline-block;padding:10px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
-button.plain{background:transparent;color:var(--ink);border:1px solid var(--line)}.muted{color:var(--muted)}.err{color:#d12}.card{border:1px solid var(--line);border-radius:12px;padding:16px;margin:16px 0}
-code{font-family:ui-monospace,monospace}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}`
 
 const CHECKOUT_JS = `(() => {
   const cfg = document.getElementById('paddle-config'); if (!cfg || !window.Paddle) return
@@ -92,19 +69,6 @@ export function makeHandler(cloud: Cloud) {
     // the entry the trusted proxy appended (Caddy sends exactly one); never a value further left that a client wrote
     return req.headers.get('x-forwarded-for')?.split(',').at(-1)?.trim() || p
   }
-  const readCookie = (req: Request) => {
-    for (const part of (req.headers.get('cookie') ?? '').split(';')) {
-      const i = part.indexOf('=')
-      if (i > 0 && part.slice(0, i).trim() === COOKIE) return part.slice(i + 1).trim()
-    }
-    return undefined
-  }
-  const sameOrigin = (req: Request) => {
-    const o = req.headers.get('origin')
-    if (o) return o === controlOrigin
-    const site = req.headers.get('sec-fetch-site')
-    return !site || site === 'same-origin' || site === 'none'
-  }
   async function form(req: Request): Promise<Record<string, string>> {
     const len = Number(req.headers.get('content-length') ?? 0)
     if (len > MAX_BODY) throw new CloudError('too_large', 'request too large', 413)
@@ -117,7 +81,7 @@ export function makeHandler(cloud: Cloud) {
   const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } })
   const redirect = (to: string, headers: Record<string, string> = {}) => new Response(null, { status: 303, headers: { location: to, ...headers } })
-  const setCookie = (v: string, maxAge: number) => `${COOKIE}=${v}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${cfg.controlUrl.startsWith('https://') ? '; Secure' : ''}`
+  const setCookie = (v: string, maxAge: number) => sessionCookie(v, maxAge, cfg.controlUrl.startsWith('https://'))
   const limited = (r: Req, key: string, limit: number, windowMs: number) => {
     if (!rl.hit(`${key}:${r.ip}`, limit, windowMs)) throw new CloudError('rate_limited', 'too many attempts; try again later', 429)
   }
@@ -162,7 +126,9 @@ ${['active', 'past_due'].includes(t.status) ? `<div class="row"><a class="btn" h
     const s = cloud.session(r.cookie)
     const signedIn = () => { if (!s) throw new CloudError('signed_out', 'sign in first', 401); return s }
     const csrfOk = (b: Record<string, string>) => { if (!s || !b.csrf && !req.headers.get('x-csrf-token') || !timingSafeEqualStr(b.csrf ?? req.headers.get('x-csrf-token') ?? '', s.csrf)) throw new CloudError('bad_csrf', 'reload the page and try again', 403) }
-    if (m === 'POST' && !p.startsWith('/paddle/') && !sameOrigin(req)) throw new CloudError('bad_origin', 'cross-site request refused', 403)
+    // a route a module registered (routes/index.ts) may opt out of the Origin rule (a Bearer callback from a team)
+    const reg = findRoute(m, p)
+    if (originRefused(req, p, controlOrigin) && !reg?.route.crossOrigin) throw new CloudError('bad_origin', 'cross-site request refused', 403)
 
     // ---- static, health, internal
     if (p === '/static/app.css') return new Response(CSS, { headers: { 'content-type': 'text/css', 'cache-control': 'public, max-age=3600' } })
@@ -180,6 +146,17 @@ ${['active', 'past_due'].includes(t.status) ? `<div class="row"><a class="btn" h
 
     // ---- Paddle
     if (p === '/paddle/webhook' && m === 'POST') return paddleWebhook(r)
+
+    // ---- routes the feature modules register (routes/index.ts: the console, …): asked before the pages below, so a
+    // module may take one over; a changing request must come from the console's own pages unless the route says not
+    if (reg) {
+      if (m !== 'GET' && m !== 'HEAD' && !reg.route.crossOrigin && !sameOrigin(req, controlOrigin)) throw new CloudError('bad_origin', 'cross-site request refused', 403)
+      const ctx: RouteCtx = {
+        cloud, cfg, req, url, ip: r.ip, match: reg.match, session: s, signedIn, csrfOk, form: () => form(req),
+        limited: (key, limit, windowMs) => limited(r, key, limit, windowMs), rateLimit: rl, json, redirect,
+      }
+      return reg.route.fn(ctx)
+    }
 
     // ---- JSON API
     if (p === '/api/signup' && m === 'POST') { limited(r, 'signup', 10, 3600_000); const b = await form(req); await cloud.signup(b.email, b.password); return json({ ok: true, next: 'check your email' }) }
@@ -392,7 +369,7 @@ ${teams.map((t) => teamCard(t, s.csrf)).join('') || '<p class="muted">No team ye
 
   return async function handle(req: Request, peer: string | undefined): Promise<Response> {
     const url = new URL(req.url)
-    const r: Req = { req, url, ip: clientIp(req, peer), cookie: readCookie(req) }
+    const r: Req = { req, url, ip: clientIp(req, peer), cookie: readSessionCookie(req) }
     let res: Response
     try { res = await route(r) } catch (e) {
       const wantsJson = url.pathname.startsWith('/api/') || (req.headers.get('accept') ?? '').includes('application/json')
