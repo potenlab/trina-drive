@@ -1,6 +1,6 @@
 // A/B measurement with Vercel Web Analytics custom events: one "ab_view" per page view and "cta_click" per primary
-// button click, both tagged with the variant (set on <html data-variant> by the page). No cookies of our own beyond
-// the variant cookie the middleware sets; no personal data in events.
+// button click, both tagged with the variant (set on <html data-variant> by the page: / and /a → a, /b → b).
+// No cookies of our own; no personal data in events.
 (function () {
   window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments) }
   var variant = document.documentElement.dataset.variant

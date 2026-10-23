@@ -5,7 +5,6 @@
     "": {
       "name": "trina-drive-website",
       "dependencies": {
-        "@vercel/functions": "3",
         "astro": "7.3.8",
       },
     },

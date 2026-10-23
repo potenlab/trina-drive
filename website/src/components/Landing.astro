@@ -14,8 +14,8 @@ import Nav from './Nav.astro'
 import Pricing from './Pricing.astro'
 import Terminal from './Terminal.astro'
 
-interface Props { t: Copy }
-const { t } = Astro.props
+interface Props { t: Copy; /** Served at /a: same page, noindex with canonical → / (A/B link). */ abLink?: boolean }
+const { t, abLink = false } = Astro.props
 const home = '/'
 const h = t.hero
 
@@ -51,7 +51,7 @@ const jsonLd = {
   ],
 }
 ---
-<Base t={t} jsonLd={jsonLd} preloadHero variant="a">
+<Base t={t} jsonLd={abLink ? undefined : jsonLd} preloadHero variant="a" noindex={abLink} canonicalHref={abLink ? `${SITE_URL}/` : undefined}>
   <Nav t={t} home={home} />
   <main id="main">
     <!-- hero: copy centred over the key visual, then the product stage (Files view + the Alex/Sam terminal) -->
