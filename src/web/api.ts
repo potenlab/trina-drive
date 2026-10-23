@@ -4,7 +4,7 @@
 // (admin side) and policy.ts (drafts), reached through ops.ts and views.ts.
 import { appendAudit } from '../audit'
 import { CLI, NAME, PRODUCT, VERSION } from '../config'
-import { StoreError, addPerson } from '../store'
+import { PeopleLimitError, StoreError, addPerson } from '../store'
 import type { Actor } from '../rights'
 import {
   accountByLogin, AuthError, checkPasswordRules, consumeLink, consumeSetupToken, createSession, csrfOk, hashPassword, lookupSession,
@@ -301,6 +301,8 @@ export async function handleApi(w: WebCtx, req: Request, addr = 'unknown'): Prom
     return out instanceof Response ? out : json(out)
   } catch (e) {
     if (e instanceof ApiError || e instanceof AuthError) return json({ error: e.code, message: e.message }, e.status, e instanceof ApiError ? e.headers : undefined)
+    // the plan's people limit (TDRIVE_MAX_PEOPLE): the web shows this message on the People page
+    if (e instanceof PeopleLimitError) return json({ error: e.code, message: e.message, max_people: e.max }, 403)
     if (e instanceof StoreError) return json({ error: 'bad_request', message: e.message }, 400)
     if (e instanceof ManagedError) return json({ error: e.code, message: e.message }, e.status)
     console.error(`[${NAME}] ${req.method} ${url.pathname} failed:`, e)

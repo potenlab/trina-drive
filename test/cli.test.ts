@@ -64,3 +64,14 @@ test('cli sh exits with the command\'s exit code, also when the command fails', 
   expect(r.code).toBe(1)
   expect(r.ms).toBeLessThan(5000)
 })
+
+test('`activity --json` (what Trina Cloud reads over docker exec) and `person add` past TDRIVE_MAX_PEOPLE', () => {
+  const run = (args: string[], env: Record<string, string> = {}) => Bun.spawnSync([process.execPath, CLI, '--data', path.join(dir, 'data'), ...args], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, ...env } })
+  const a = run(['activity', '--json'])
+  expect(a.exitCode).toBe(0)
+  const j = JSON.parse(a.stdout.toString())
+  expect(Object.keys(j).sort()).toEqual(['dav', 'last_activity_at', 'mcp', 'web'])
+  const full = run(['person', 'add', 'one-too-many'], { TDRIVE_MAX_PEOPLE: '2' })
+  expect(full.exitCode).not.toBe(0)
+  expect(full.stderr.toString() + full.stdout.toString()).toContain('at most 2 people')
+})

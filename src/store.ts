@@ -3,7 +3,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { DB } from './db'
-import { TOKEN_PREFIX } from './config'
+import { ENV_PREFIX, TOKEN_PREFIX } from './config'
 import { nfc } from './names'
 
 export interface Person { id: number; name: string; admin: number; active: number }
@@ -41,7 +41,24 @@ export const isFolder = (row: { dev: string; ino: string; birth_ns: string }, de
 export class StoreError extends Error {}
 
 // ---------- people & groups ----------
+/** The most active people this server may have: <PREFIX>_MAX_PEOPLE (Trina Cloud sets it per plan, e.g. 3 on Free);
+ * unset or 0 = no limit. Deactivated people do not count. */
+export function maxPeople(env: Record<string, string | undefined> = process.env): number | null {
+  const n = Number(env[`${ENV_PREFIX}_MAX_PEOPLE`])
+  return env[`${ENV_PREFIX}_MAX_PEOPLE`] && Number.isSafeInteger(n) && n > 0 ? n : null
+}
+export class PeopleLimitError extends StoreError {
+  readonly code = 'people_limit'
+  constructor(readonly max: number) { super(`this workspace allows at most ${max} people on its plan: deactivate someone first, or upgrade the plan for more`) }
+}
+export const activePeople = (db: DB) => db.query<{ n: number }, []>('SELECT count(*) AS n FROM people WHERE active = 1').get()!.n
+/** Throws PeopleLimitError when one more active person would go past <PREFIX>_MAX_PEOPLE. */
+export function checkPeopleRoom(db: DB) {
+  const max = maxPeople()
+  if (max != null && activePeople(db) >= max) throw new PeopleLimitError(max)
+}
 export function addPerson(db: DB, name: string, admin = false): Person {
+  checkPeopleRoom(db)
   db.query('INSERT INTO people (name, admin, created_at) VALUES (?, ?, ?)').run(nfc(name), admin ? 1 : 0, Date.now())
   return person(db, name)
 }

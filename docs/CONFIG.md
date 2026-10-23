@@ -49,6 +49,7 @@ used by the macOS installer and the Docker image). Both keep managed storage in 
 | `TDRIVE_STORAGE` | `inplace` | `managed`: the web makes team folders in managed storage and offers uploads (also `tdrive init --managed` / `storage mode`) |
 | `TDRIVE_FILES_DIR` | `<data>/files` | the managed root |
 | `TDRIVE_STORAGE_QUOTA` | none | the team's total (files, trash, earlier versions, unfinished uploads), e.g. `50GB` (also `tdrive storage quota`) |
+| `TDRIVE_MAX_PEOPLE` | none | most **active** people (deactivated ones do not count); one more is refused on the web (`403 people_limit`, shown on the People page), the CLI and when someone is turned back on. Trina Cloud sets it per plan (Free: 3) |
 | `TDRIVE_MAX_FILE_BYTES`, `TDRIVE_VERSIONS_KEPT`, `TDRIVE_TRASH_DAYS` | 10 GB, 10, 30 | largest file, earlier versions kept per file, days in the trash |
 | `TDRIVE_WEBDAV` | on (managed storage) | `off` turns the `/dav/` mount off ([ARCHITECTURE.md](ARCHITECTURE.md#mount-as-a-drive-webdav)) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_API_KEY` | — | Google Drive import: all three set (and managed storage) turns it on; otherwise it is hidden. `GOOGLE_APP_ID` (Cloud project number) defaults to the client id's prefix |
@@ -101,6 +102,7 @@ usage: tdrive [--data DIR] <command>
   token create <person> [--name N] [--scope path1,path2] [--read-only] [--ttl 8h]
   token revoke <id>                      (same as connections revoke)
   audit verify
+  activity [--json]                      when people last used the server (web, MCP, WebDAV); Trina Cloud pauses idle Free workspaces
   folder promote <path> [--off]          let drafts be promoted into this folder and below (new files only; admin)
   mfa status                             who has a second factor (passkey, authenticator app), recovery codes left
   mfa reset <person>                     remove all of a person's second factors (they lost them); ends their sessions

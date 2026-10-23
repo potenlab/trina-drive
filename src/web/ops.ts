@@ -6,7 +6,7 @@ import path from 'node:path'
 import { appendAudit } from '../audit'
 import { isSystemName, nfc } from '../names'
 import { Rights, type Actor } from '../rights'
-import { addPerson, createToken, ensureFolder, LEVELS, registerFolder as storeRegister, StoreError, type FolderRow, type LevelName } from '../store'
+import { addPerson, checkPeopleRoom, createToken, ensureFolder, LEVELS, registerFolder as storeRegister, StoreError, type FolderRow, type LevelName } from '../store'
 import { revokeAppPasswordsOf } from '../dav/apppw'
 import { accountOf, checkPasswordRules, createLink, freshLogin, FRESH_LOGIN_MS, markReauth, revokeSessionsOf, revokeTokensOf, setPassword, verifyPassword } from './auth'
 import { ApiError, bad, forbidden, notFound, rateLimited, type WebCtx } from './http'
@@ -125,6 +125,8 @@ export async function updatePerson(op: Op, id: unknown, body: { admin?: unknown;
   const losesAdmin = (body.admin === false && p.admin) || (body.active === false && p.admin)
   if (losesAdmin && admins.length === 1 && admins[0] === p.id) throw bad('last_admin', 'there must be at least one admin')
   if (body.active === false && p.id === op.actor.personId) throw bad('self', 'you cannot deactivate yourself')
+  // turning someone back on counts against the plan's people limit like a new person
+  if (body.active === true && !p.active) checkPeopleRoom(db)
   let oldEmail: string | undefined
   try {
     db.transaction(() => {
