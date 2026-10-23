@@ -40,6 +40,23 @@ export interface Config {
   helperImage: string
   /** AWS driver: slots per host before a new host is needed (a Team-plan team takes 1, Business 2) */
   maxTeamsPerHost: number
+  /** the scaler (scaler.ts): hosts are launched when a team finds no room and terminated when empty. Off: a fixed pool
+   * (AWS: every SSM-online host; local: one host 'local'). */
+  autoscale: boolean
+  /** the most hosts the scaler runs (also bounded by the ASG's max size) */
+  maxHosts: number
+  /** free slots kept ready ahead of demand (0: hosts start only when a paid team needs one) */
+  spareSlots: number
+  /** a host without any team for this long is terminated (its data volume deleted) */
+  emptyHostGraceMs: number
+  /** a launched host whose bootstrap has not finished by then is replaced */
+  hostBootTimeoutMs: number
+  /** ops are told when a paid team has waited this long for a host */
+  hostWaitAlertMs: number
+  /** how often the scaler looks at the pool when nothing is happening (more often while a team waits or a host boots) */
+  scalerEveryMs: number
+  /** local driver: how long a simulated host takes to "boot" */
+  localHostBootMs: number
   /** first uid for team containers (each team gets its own uid: uidBase + team number) */
   uidBase: number
   mailer: MailerName
@@ -83,6 +100,8 @@ export interface Config {
     route53ZoneId: string | null
     /** SSM Parameter Store prefix for team env files */
     ssmPrefix: string
+    /** the team hosts' Auto Scaling group */
+    asgName: string
   }
   /** metrics: disk usage poll interval (minutes) */
   metricsEveryMinutes: number
@@ -97,6 +116,14 @@ const int = (v: string | undefined, dflt: number, name: string) => {
   const n = Number(v)
   if (!Number.isFinite(n) || n < 0) throw new ConfigError(`${name} must be a non-negative number`)
   return n
+}
+
+const UNITS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3600_000, d: 86400_000 }
+/** "6h", "30m", "45s", "500ms", "2d"; a bare number is in `bareUnit` */
+export function parseDuration(v: string | undefined, dflt: string, name: string, bareUnit: keyof typeof UNITS = 'h'): number {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)?\s*$/.exec(v === undefined || v === '' ? dflt : v)
+  if (!m) throw new ConfigError(`${name} must be a duration like 6h, 30m or 45s`)
+  return Math.round(Number(m[1]) * UNITS[m[2] ?? bareUnit]!)
 }
 
 /** "Name <a@b.c>" or "a@b.c" → a@b.c (lower case), or null. */
@@ -150,7 +177,15 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     apparmorProfile: env.TDCLOUD_APPARMOR ?? 'trina-drive-bwrap',
     caddyContainer: env.TDCLOUD_CADDY_CONTAINER || 'tdc-caddy',
     helperImage: env.TDCLOUD_HELPER_IMAGE || 'tdcloud-control:dev',
-    maxTeamsPerHost: int(env.TDCLOUD_MAX_TEAMS_PER_HOST, 20, 'TDCLOUD_MAX_TEAMS_PER_HOST'),
+    maxTeamsPerHost: Math.max(1, int(env.TDCLOUD_MAX_TEAMS_PER_HOST, 20, 'TDCLOUD_MAX_TEAMS_PER_HOST')),
+    autoscale: env.TDCLOUD_AUTOSCALE !== undefined && env.TDCLOUD_AUTOSCALE !== '' ? env.TDCLOUD_AUTOSCALE === '1' : driver !== 'fake',
+    maxHosts: int(env.TDCLOUD_MAX_HOSTS, 3, 'TDCLOUD_MAX_HOSTS'),
+    spareSlots: int(env.TDCLOUD_SPARE_SLOTS, 0, 'TDCLOUD_SPARE_SLOTS'),
+    emptyHostGraceMs: parseDuration(env.TDCLOUD_EMPTY_HOST_GRACE, '6h', 'TDCLOUD_EMPTY_HOST_GRACE'),
+    hostBootTimeoutMs: parseDuration(env.TDCLOUD_HOST_BOOT_TIMEOUT, '15m', 'TDCLOUD_HOST_BOOT_TIMEOUT', 'm'),
+    hostWaitAlertMs: parseDuration(env.TDCLOUD_HOST_WAIT_ALERT, '15m', 'TDCLOUD_HOST_WAIT_ALERT', 'm'),
+    scalerEveryMs: parseDuration(env.TDCLOUD_SCALER_EVERY, '60s', 'TDCLOUD_SCALER_EVERY', 's'),
+    localHostBootMs: parseDuration(env.TDCLOUD_LOCAL_HOST_BOOT, '5s', 'TDCLOUD_LOCAL_HOST_BOOT', 's'),
     uidBase: int(env.TDCLOUD_UID_BASE, 20000, 'TDCLOUD_UID_BASE'),
     mailer,
     mailFrom: env.TDCLOUD_MAIL_FROM || 'Trina Cloud <cloud@trina.app>',
@@ -181,6 +216,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       hostTag: env.TDCLOUD_AWS_HOST_TAG || 'host',
       route53ZoneId: env.TDCLOUD_ROUTE53_ZONE_ID || null,
       ssmPrefix: (env.TDCLOUD_SSM_PREFIX || '/tdcloud').replace(/\/$/, ''),
+      asgName: env.TDCLOUD_ASG_NAME || 'tdcloud-hosts',
     },
     metricsEveryMinutes: int(env.TDCLOUD_METRICS_EVERY_MINUTES, 15, 'TDCLOUD_METRICS_EVERY_MINUTES'),
   }

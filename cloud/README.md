@@ -11,15 +11,19 @@ cloud/
   dev/       local Trina Cloud on Docker (up.sh / down.sh) and the end-to-end test (e2e.ts)
   host/      EC2 bootstrap and the host agent the control plane drives over SSM
   infra/     Terraform for AWS (applied once, 2026-10-23: test deploy, now on hold)
+
+  control/src/scaler.ts   the host scaler: team hosts start when a paid team needs one and go when empty
 ```
 
-Status: **runs end to end locally** (two teams, 149 checks), with every team in hosted mode (admins enrol a
+Status: **runs end to end locally** (four teams on simulated hosts, 179 checks), with every team in hosted mode (admins enrol a
 second factor), behind Caddy as its one trusted proxy, on managed storage with the plan's quota, and sending its own
 mail through the host's mail relay. The AWS path (driver, host agent, mail relay → SES, Terraform) is written and
 unit-tested against fake AWS endpoints, and was **deployed once to AWS on 2026-10-23** (one control instance, one
 m7g.xlarge host, the dogfood team `trina`): provisioning over SSM, hosted-mode settings, the host firewall, the mail
 relay up to SES, backups to S3 and an export through KMS all worked; DNS delegation, TLS certificates and real mail wait
 on the Gabia NS records and SES. The deployment is now in [hold mode](#hold-mode-no-teams-until-the-first-customer).
+Team hosts [scale out from 0 and back in](#hosts-scale-out-and-scale-in) by themselves (built after that deploy: tested
+locally and against fake AWS endpoints; needs a Terraform apply and a new control image, see the section).
 See [Known gaps](#known-gaps-and-follow-ups) before launch.
 
 ## How it works
@@ -52,7 +56,8 @@ flowchart LR
    `POST /paddle/webhook` (a second notification destination next to the website's `/api/paddle-webhook`).
    The control plane verifies the signature over the raw body (HMAC-SHA256, 5 s tolerance, secret rotation),
    de-duplicates by `event_id`, ignores out-of-order events by `occurred_at`, answers 200 at once and queues the work.
-4. **Provision** (a job, retried with backoff, operator alerted after 5 failures): pick the least-loaded host, create
+4. **Provision** (a job, retried with backoff, operator alerted after 5 failures): a ready host with room (none: the
+   team waits in `provisioning` while the [scaler](#hosts-scale-out-and-scale-in) starts one), create
    the team's network, data directory/volume (XFS project quota on AWS), uid, `tdrive init` (prints the one-time setup
    token), `tdrive public enable --url https://acme.cloud.trina.app` (OAuth issuer and MCP resource for the
    connectors), `tdrive backup keygen --set`, the container, Caddy joined to the team network, health check, the
@@ -210,6 +215,9 @@ cloud/dev/down.sh        # removes every tdcloud container, network, volume and 
   TLS root: `cloud/dev/.state/caddy-root.crt`
 - Team mail (invites, resets) through the relay `tdc-mail`: `cloud/dev/.state/team-mail.log`
 - Admin CLI: `docker exec tdc-control bun /app/src/main.ts teams list` (all commands: `… help`)
+- Hosts: simulated by the local driver (`LocalPool`: names `local-1`, `local-2`, … all on this engine, a 3 s "boot",
+  one team per host, at most three, an emptied host goes after 20 s; `dev/compose.yml`), so scale-out from 0 and
+  scale-in run here as on AWS: `docker exec tdc-control bun /app/src/main.ts hosts list`
 
 What `e2e.ts` checks, over HTTPS through Caddy: two buyers sign up and confirm their email from the outbox, create
 teams, a signed `subscription.created` provisions each (an unsigned one is refused, a replay is a no-op), the mailed
@@ -227,9 +235,17 @@ has hosted mode, the trusted proxy, managed storage at 100 GB and SES through th
 connection list and the setup rate-limit keys — under the two real addresses, never a forged one or Caddy's; the
 relay refuses another From and a sender that is not a team container**; no certificate for an unknown name; Host/SNI mismatch refused (421);
 suspend → paused page → resume; backup (no plaintext in the object), export (decrypts), upgrade (data and tokens
-survive, same address and env); the audit chain verifies and has every action. Last run: **149/149 passed in 87 s**.
+survive, same address and env); the audit chain verifies and has every action; **hosts**: no host before the first
+team, each team waits in `provisioning` until a host was launched and finished booting for it, a third team takes the
+last host, a fourth waits at the limit (ops alerted, no setup mail yet), takes the host the third leaves when it is
+deleted, and once it is deleted too that emptied host is scaled in after the grace period while the hosts of acme and
+of the suspended globex stay. Last run: **179/179 passed in 199 s** (most of it waiting for hosts and grace periods).
 
-Unit tests (`cd cloud/control && bun test`, 42 tests): the billing state machine with a fake driver (grace,
+Unit tests (`cd cloud/control && bun test`, 56 tests): the host scaler with a fake pool (scale-out from 0 with the team
+waiting and the ready mail last, concurrent sign-ups and a second process, Business slots, the host limit, failed
+bootstraps replaced and the stop after three, spare slots, scale-in only of hosts no team names — suspended and failed
+teams keep theirs — and never of a host that holds unknown data or does not answer, a draining host, a lost host),
+Auto Scaling / EC2 request shapes against fake endpoints; the billing state machine with a fake driver (grace,
 suspend, resume, cancel → final backup → delete, resubscription, stale and foreign events, failed provisioning),
 sealing (tampering, truncation), the AWS SigV4 test vector, sealed SSM outputs, Route 53/KMS request shapes, the
 docker arguments of a team container; team network addresses, the team env (the product's own `mailEnv` accepts it),
@@ -325,7 +341,7 @@ rm -P control.env
 ```
 
 **7. Everything else:** `terraform apply -var-file=$S/terraform.tfvars` (control instance + Elastic IP +
-`cloud.trina.app` A record, the host ASG and its Elastic IPs). First boot takes ~3 minutes
+`cloud.trina.app` A record, the host ASG at 0: hosts start with the first team). First boot takes ~3 minutes
 (`/var/log/tdcloud-bootstrap.log` on the instance; it ends with `tdcloud bootstrap done (host|control)`). On a host,
 `iptables -S TDCLOUD-INPUT` must list the relay rule (the bootstrap stops if the isolation rules are missing).
 
@@ -351,8 +367,9 @@ chmod 0755 /usr/local/sbin/tdcloud-bootstrap && /usr/local/sbin/tdcloud-bootstra
 ```
 
 (the control container and the hosts' mail relay `tdc-mail` restart from the new image; team containers keep
-running). Changed host scripts reach the artifacts bucket with `terraform apply -target=aws_s3_object.artifacts`. More capacity: raise `host_count`, `terraform apply` (new teams go to the least-loaded host;
-`TDCLOUD_MAX_TEAMS_PER_HOST` slots each). Product upgrade: push a new `trina-drive` tag, set `TDCLOUD_IMAGE` in
+running). Changed host scripts reach the artifacts bucket with `terraform apply -target=aws_s3_object.artifacts`.
+Capacity is the scaler's ([Hosts](#hosts-scale-out-and-scale-in)); a higher ceiling: `host_max` in Terraform and
+`TDCLOUD_MAX_HOSTS` in `/tdcloud/control/env` (and the vCPU quota). Product upgrade: push a new `trina-drive` tag, set `TDCLOUD_IMAGE` in
 `/tdcloud/control/env`, rerun the control bootstrap, then `teams upgrade --all` (each team: backup, new container on
 the same data). Backups of the control database: nightly to `s3://<backup bucket>/control/`.
 
@@ -387,45 +404,103 @@ the deployment is in this state:
 | Route 53 zone `cloud.trina.app` (+ `cloud.trina.app` A, DKIM, DMARC, CAA), SES identity, KMS key, ECR images, S3 buckets (team backups, control DB copy), VPC, IAM roles, launch template, SSM parameters `/tdcloud/control/env` and `/tdcloud/caddy-ask-key` | team hosts (ASG at 0, their Elastic IPs released, data volumes deleted), the test team's container, network, data and env parameter, its DNS record |
 | control instance **stopped** (its root volume and Elastic IP kept, so `cloud.trina.app` stays put) | |
 
-Going on hold:
+Going on hold was done by hand on 2026-10-23 (before the scaler existed: `host_count = 0` and `terraform apply`). With
+the scaler it is shorter — the hosts go by themselves once no team names them:
 
 ```sh
-# 1. each team: a last backup, stopped (kept in the control DB as suspended), host-side removed, DNS record removed
-docker exec tdc-control bun /app/src/main.ts teams backup <slug>; … teams suspend <slug>
-#    on its host: docker rm -f tdc-<slug>; docker network rm tdc-net-<slug>; tdcloud-host cleanup <slug>
-aws ssm delete-parameter --name /tdcloud/teams/<slug>/env
-aws route53 change-resource-record-sets … DELETE <slug>.cloud.trina.app A <host EIP>
+# 1. each team: a last backup, then deleted (its host is scaled in TDCLOUD_EMPTY_HOST_GRACE later, volume and address
+#    included). A team kept as `suspended` keeps its host: suspended teams count as occupying (their data is there).
+docker exec tdc-control bun /app/src/main.ts teams backup <slug>; … teams delete <slug> --yes
+docker exec tdc-control bun /app/src/main.ts hosts list          # wait for the hosts to show `gone`
 # 2. a copy of the control DB in S3 (the nightly cron does not run while it is stopped)
-# 3. hosts: scale-in protection off, then host_count = 0
-aws autoscaling set-instance-protection --auto-scaling-group-name tdcloud-hosts --no-protected-from-scale-in --instance-ids <ids>
-terraform apply -var-file=$S/terraform.tfvars        # host_count = 0: ASG 0/0/0, host EIPs released
-aws ec2 delete-volume --volume-id <the host's /dev/sdf volume>   # kept on termination by design; the data is in S3
-# 4. the control instance (nothing can sign up or pay yet: Paddle is not wired, SES is in the sandbox)
+# 3. the control instance (nothing can sign up or pay yet: Paddle is not wired, SES is in the sandbox)
 aws ec2 stop-instances --instance-ids <control instance id>
 ```
 
 Coming back: `aws ec2 start-instances --instance-ids <control>` (its containers restart by themselves; Caddy gets
-the `cloud.trina.app` certificate once Gabia delegates the zone), `host_count = 1` and `terraform apply` (a new host
-boots in ~3 minutes with its own Elastic IP from the pool), then `teams create` for new teams. A team kept from before
-the hold (the dogfood `trina`) is restored by hand onto the new host: `teams export` gives the archive and keys; there
-is no `teams restore` yet, and its row still names the terminated host.
+the `cloud.trina.app` certificate once Gabia delegates the zone). Nothing else: the first paid team (or `teams
+create`) launches a host, which boots in ~3 minutes with an Elastic IP the control plane allocated for it. A team kept
+from before the hold (the dogfood `trina`) is restored by hand onto a host: `teams export` gives the archive and keys;
+there is no `teams restore` yet, and its row still names the terminated host (the scaler ignores a host that is not in
+the group; `hosts list` does not show it).
 
-What automatic scale-out from 0 and scale-in of empty hosts would need (not built):
+### Hosts: scale-out and scale-in
 
-- **Out**: `pickHost` throws "no online host with room"; the provision job retries for ~7 minutes, then fails and
-  alerts. Instead, on that error the control plane should raise the ASG's desired capacity (IAM:
-  `autoscaling:SetDesiredCapacity` / `UpdateAutoScalingGroup` on `tdcloud-hosts`, max raised with it), keep the
-  team in `provisioning` with a longer retry window (a host needs ~3 minutes to boot and register with SSM), and only
-  pick a host whose bootstrap finished (SSM online is earlier than that: e.g. a `tdcloud:ready` tag the bootstrap sets,
-  or `tdcloud-host info` answering). Each host also needs a free Elastic IP in the pool before it boots (the
-  bootstrap takes one; with none it keeps its ephemeral address and team DNS records would point at that).
-- **In**: a host is empty when no team row names it (`teams` with `host = <id>` and status not deleted).
-  Remove its scale-in protection (`autoscaling:SetInstanceProtection`) and terminate it through the ASG
-  (`TerminateInstanceInAutoScalingGroup --should-decrement-desired-capacity`), then delete its data volume
-  (`delete_on_termination = false` on purpose) and release or keep its Elastic IP. Keep one host warm if sign-ups
-  should not wait 3+ minutes.
-- Both: `host_count` in Terraform must stop owning the ASG size (`ignore_changes = [desired_capacity]`, min 0,
-  max = a cap), or the next apply undoes the control plane's choice.
+The control plane owns the number of team hosts (`control/src/scaler.ts`, the AWS side in `control/src/drivers/aws.ts`
+`AwsPool`); Terraform only sets the bounds (ASG min 0, max `host_max`, `ignore_changes = [desired_capacity]`). With no
+paying team there is no host.
+
+- **Scale-out.** A paid team that finds no ready host with room stays in `provisioning` (the dashboard says "a server
+  is being prepared for it") and its provision job comes back every 5–30 s without using up its five attempts. The
+  scaler — one pass a minute (`TDCLOUD_SCALER_EVERY`), every 5 s while a team waits or a host boots — places the
+  waiting teams on free slots (ready hosts, hosts still booting, launches the group has not started yet) and raises
+  the group's desired count by the hosts still missing, up to min(`TDCLOUD_MAX_HOSTS`, the group's max). Just before,
+  it allocates one Elastic IP per host to come (tag `tdcloud:pool=hosts`), which the host takes at boot. A new host is
+  `booting` until `tdcloud-host info` (over SSM, every 15 s) reports its bootstrap done — `/etc/tdcloud/ready`, the
+  bootstrap's last step, after the firewall, the data volume, the address, Caddy and the mail relay. Only then is the
+  team provisioned on it, and only then does its owner get the "ready" mail with the setup link: from 0 hosts about
+  4–5 minutes after payment. Teams go on the fullest host that still fits, so other hosts empty out.
+- **Concurrent sign-ups.** Hosts still booting and launches not started count as capacity, and passes never overlap
+  (chained in the process, and a lease in the control database keeps a second process out), so teams paying at the
+  same moment launch only the hosts they need — twenty Team-plan teams, one host. Placing a team on a host is one
+  database transaction.
+- **The limit.** No room and no more hosts allowed: the team keeps waiting (it never turns `failed`); ops get "host
+  limit reached" once per episode, and "team X has waited 15 min" (`TDCLOUD_HOST_WAIT_ALERT`). It starts as soon as a
+  slot frees up or the limit is raised.
+- **A host that does not boot** within `TDCLOUD_HOST_BOOT_TIMEOUT` (15 min) is terminated (with decrement, its volume
+  deleted) and the same pass launches another if a team still needs it; ops hear each time. Three in a row stop
+  scale-out (alert; fix it, then `hosts resume`). A host that finds no free pool address in 5 minutes stops its
+  bootstrap on purpose (team DNS records must point at a stable address).
+- **Scale-in.** A ready host that no team row names for `TDCLOUD_EMPTY_HOST_GRACE` (6 h) — suspended, failed and
+  half-made teams name theirs (their data is there), only deleted ones do not — is marked `draining` in the same
+  transaction that checks the team rows (from then on no team can be placed on it), asked over SSM for team directories
+  and team containers (it must answer, with none: an unreachable host is kept for now, one with unknown team data is
+  marked keep and ops alerted), then its scale-in protection comes off and it is terminated through the group with
+  `TerminateInstanceInAutoScalingGroup` and `ShouldDecrementDesiredCapacity`. Once it is gone its data volume is
+  deleted and its Elastic IP released. Never while a team waits, one host per pass, never below the spare slots,
+  never a host marked with `hosts keep`; min 0.
+- **Spare slots.** `TDCLOUD_SPARE_SLOTS=N` keeps N free slots ready (launched ahead, empty hosts kept) so that sign-ups
+  do not wait for a boot; 20 = one warm host (~$180/month). Default 0.
+- **A host that leaves otherwise** (the group replacing a host that failed its EC2 health check, a terminate by hand)
+  while teams name it becomes `lost` and ops are alerted; its data volume is kept (restore by hand).
+
+```
+$ docker exec tdc-control bun /app/src/main.ts hosts list
+pool       aws tdcloud-hosts: desired 2, running 2, max 3 (TDCLOUD_MAX_HOSTS 3, pool max 3)
+per host   20 slots (Team 1, Business 2); spare slots 0; empty hosts go after 6.0h; boot timeout 15m
+waiting    -
+
+HOST                  STATE       SLOTS   FREE  EMPTY SINCE                  IP               TEAMS / NOTE
+i-0a1b2c3d4e5f60718   ready       3/20    17    -                            3.36.1.2         acme,globex,trina
+i-0f1e2d3c4b5a69788   ready       0/20    20    2026-11-02T03:10:00Z (2.1h)  3.36.4.5
+```
+
+`hosts scale` runs a pass now, `hosts keep|unkeep <id>`, `hosts resume`; `/internal/metrics` has `tdcloud_hosts`,
+`tdcloud_host_slots_free` and `tdcloud_teams_waiting_for_host`. Every decision is in the audit log (`hosts.scale_out`,
+`host.ready`, `team.waiting_for_host`, `team.host_assigned`, `hosts.scale_in`, `host.boot_failed`, `host.gone`,
+`host.lost`).
+
+The control role's IAM for this (`infra/terraform/iam.tf`): `autoscaling:DescribeAutoScalingGroups`,
+`ec2:DescribeInstances` / `DescribeVolumes` / `DescribeAddresses` (no resource-level permissions exist for these);
+`autoscaling:SetDesiredCapacity`, `SetInstanceProtection`, `TerminateInstanceInAutoScalingGroup` on the
+`tdcloud-hosts` group only; `ec2:DeleteVolume` on volumes tagged `tdcloud:role=host`; `ec2:AllocateAddress` only with
+the tag `tdcloud:pool=hosts` (and `CreateTags` only as part of that allocation), `ec2:ReleaseAddress` only on
+addresses with that tag. `TDCLOUD_AUTOSCALE=0` turns the scaler off (then: every SSM-online host with the tag, as
+before, sized by hand).
+
+**Making it live on AWS** (the deployment predates it): push a control image built from this code and roll it to the
+control instance (Operations above; nothing to roll on hosts — there are none), then
+
+```sh
+# terraform.tfvars: host_count is gone → host_max = 3
+terraform apply -var-file=$S/terraform.tfvars
+#   ~ aws_autoscaling_group.hosts      max_size 0 → 3 (min stays 0, desired is no longer Terraform's)
+#   ~ aws_iam_role_policy.control       + PoolRead, PoolSize, HostVolumes, PoolAddress* statements
+#   ~ aws_s3_object.artifacts["host/bootstrap.sh"], ["host/tdcloud-host"]   ready mark, info fields, address wait
+#   (aws_eip.hosts had count 0 since the hold: nothing to destroy; the host_elastic_ips output becomes hosts_asg_name)
+# /tdcloud/control/env: add TDCLOUD_MAX_HOSTS=3 (TDCLOUD_ASG_NAME defaults to tdcloud-hosts; `terraform output
+# control_env_template` has the new lines), then rerun the control bootstrap
+```
 
 ## Cost estimate (AWS, Seoul, on-demand, USD per month)
 
@@ -450,7 +525,14 @@ data volume.
 
 The first deploy (one m7g.xlarge host with a 50 GB data volume, the control instance, three public IPv4 addresses)
 runs at about **$6/day** (~$180/month). **On hold** (control stopped, no hosts): control root volume 30 GB $2.74,
-its Elastic IP $3.65, KMS key $1, Route 53 zone $0.50, ECR/S3 a few cents — **about $8/month**.
+its Elastic IP $3.65, KMS key $1, Route 53 zone $0.50, ECR/S3 a few cents — **about $8/month**. Hosts follow the
+teams ([scaler](#hosts-scale-out-and-scale-in)): with the control instance running and no paying team, there is no
+host and no host address (the control plane allocates a host's Elastic IP just before it launches and releases it
+after the scale-in), **~$27/month** (t4g.small $15 + its root volume and address). The first paying team starts the
+first host: **+~$180/month** (m7g.xlarge $146, 300 GB data + 30 GB root gp3 $30, its address $3.65), billed from the
+minute it launches; a host that has had no team for 6 hours costs nothing from then on. Up to 20 Team-plan teams
+share it, the 21st starts the second. `host_max = 3` (12 vCPU of hosts + 2 for the control instance) stays inside
+Seoul's default 16-vCPU quota for standard instances; more needs a quota increase first.
 
 Against $99/month (Team) the infrastructure is 15–25% of revenue. The two big levers: a 1-year Compute Savings Plan
 takes roughly a quarter off EC2, and **incremental backups** (instead of 7 full copies) would cut S3 by ~80% —
@@ -478,7 +560,15 @@ host; RPO 24 h). An m7g.large host (10 slots, $73) halves the 10-team compute bu
 | `TDCLOUD_PAST_DUE_GRACE_DAYS`, `_CANCELED_GRACE_DAYS`, `_DELETE_AFTER_DAYS` | 7, 3, 30 | |
 | `TDCLOUD_CADDY_ASK_KEY` | — | required in production |
 | `TDCLOUD_TRUSTED_PROXIES` | — | peers whose X-Forwarded-For is believed |
-| `TDCLOUD_MAX_TEAMS_PER_HOST` | 20 | slots (Business = 2) |
+| `TDCLOUD_MAX_TEAMS_PER_HOST` | 20 | slots per host (Team = 1, Business = 2) |
+| `TDCLOUD_AUTOSCALE` | 1 (`0` with the fake driver) | the host scaler; `0`: a fixed pool ([Hosts](#hosts-scale-out-and-scale-in)) |
+| `TDCLOUD_MAX_HOSTS` | 3 | most hosts the scaler runs (also capped by the ASG's max size, `host_max`) |
+| `TDCLOUD_SPARE_SLOTS` | 0 | free slots kept ready ahead of sign-ups |
+| `TDCLOUD_EMPTY_HOST_GRACE` | `6h` | a host no team names for this long is terminated (durations: `6h`, `30m`, `45s`; bare number = hours) |
+| `TDCLOUD_HOST_BOOT_TIMEOUT`, `TDCLOUD_HOST_WAIT_ALERT` | `15m`, `15m` | a host not booted by then is replaced; ops hear about a team waiting this long |
+| `TDCLOUD_SCALER_EVERY` | `60s` | scaler passes when nothing happens (every 5 s while a team waits or a host boots) |
+| `TDCLOUD_ASG_NAME` | `tdcloud-hosts` | the hosts' Auto Scaling group (AWS) |
+| `TDCLOUD_LOCAL_HOST_BOOT` | `5s` | local driver: a simulated host's boot time |
 | `TDCLOUD_ROUTE53_ZONE_ID`, `TDCLOUD_SSM_PREFIX`, `TDCLOUD_AWS_HOST_TAG`, `AWS_REGION` | —, `/tdcloud`, `host`, `ap-northeast-2` | AWS driver |
 | `PADDLE_ENV`, `PADDLE_WEBHOOK_SECRET`, `PADDLE_CLIENT_TOKEN`, `PADDLE_CHECK_IP`, `PADDLE_WEBHOOK_TOLERANCE_SEC` | sandbox, —, —, off, 5 | |
 | `PADDLE_PRICE_{TEAM,BUSINESS}_{MONTHLY,YEARLY}` | — | price id → plan, and the dashboard's checkout buttons |
@@ -490,8 +580,9 @@ hosts: `TDCLOUD_FRONT_PROXIES` (empty; [Client addresses](#client-addresses)).
 
 ## Upgrade path: Business on its own VM
 
-The AWS driver places a team on any instance tagged `tdcloud:role=host`. A dedicated host for one Business customer
-is the same launch template with a separate tag value and `TDCLOUD_MAX_TEAMS_PER_HOST`-style capacity of one; moving
+The scaler places a team on a ready host of the `tdcloud-hosts` group. A dedicated host for one Business customer
+is the same launch template in a second group (its own tag value and a capacity of one) — the pool and the scaler
+would need to know more than one group (not built); moving
 an existing team is backup → provision on the new host → restore → DNS switch (a `teams move` command is the
 natural next step; not built). The container, limits and keys stay the same.
 
@@ -545,3 +636,8 @@ Before a real AWS launch:
 13. A team container can also reach the relay port on the host's VPC address (not only its gateway); the relay still
     accepts only a team container's address and the team From.
 14. No `teams restore`: bringing a team back after hold mode or a lost host is the manual procedure above.
+15. Hosts are packed (the fullest host that fits) but teams are never moved: a host with one team left stays until
+    that team goes. A `teams move` (backup → restore on another host → DNS) would let the scaler consolidate.
+16. The scaler's first AWS run is still ahead: it is tested locally (simulated hosts) and against fake Auto Scaling /
+    EC2 endpoints. Watch the first scale-out and scale-in (`hosts list`, the audit log), and the Elastic IP quota
+    (5 per region by default: `host_max` + the control instance's).

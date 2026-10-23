@@ -5,7 +5,7 @@ import { Cloud } from '../src/cloud'
 import { loadConfig, type Config } from '../src/config'
 import { openDb } from '../src/db'
 import { DirTarget } from '../src/backup'
-import { FakeDriver } from '../src/drivers/fake'
+import { FakeDriver, FakePool } from '../src/drivers/fake'
 import { LocalKeyWrapper } from '../src/keys'
 import { MemoryMailer } from '../src/mailer'
 import { makeHandler } from '../src/web'
@@ -14,7 +14,7 @@ import crypto from 'node:crypto'
 
 export const SECRET = 'pdl_ntfset_test_secret'
 
-export function setup(env: Record<string, string> = {}) {
+export function setup(env: Record<string, string> = {}, o: { pool?: boolean; clock?: () => number } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdcloud-test-'))
   const cfg: Config = loadConfig({
     TDCLOUD_STATE_DIR: dir, TDCLOUD_DOMAIN: 'cloud.example.com', TDCLOUD_CONTROL_URL: 'https://cloud.example.com', TDCLOUD_DRIVER: 'fake',
@@ -22,14 +22,15 @@ export function setup(env: Record<string, string> = {}) {
   })
   const driver = new FakeDriver(path.join(dir, 'fake'))
   const mailer = new MemoryMailer()
-  const cloud = new Cloud({ cfg, db: openDb(cfg.dbFile), driver, mailer, keys: new LocalKeyWrapper(crypto.randomBytes(32)), target: new DirTarget(path.join(dir, 'backups')), log: () => {} })
+  const pool = new FakePool()
+  const cloud = new Cloud({ cfg, db: openDb(cfg.dbFile), driver, mailer, keys: new LocalKeyWrapper(crypto.randomBytes(32)), target: new DirTarget(path.join(dir, 'backups')), log: () => {}, pool: o.pool ? pool : null, clock: o.clock })
   const handle = makeHandler(cloud)
   const call = (method: string, p: string, o: { body?: unknown; headers?: Record<string, string>; ip?: string; raw?: string } = {}) =>
     handle(new Request(`https://cloud.example.com${p}`, {
       method, headers: { ...(o.body !== undefined ? { 'content-type': 'application/json' } : {}), ...o.headers },
       body: o.raw ?? (o.body !== undefined ? JSON.stringify(o.body) : undefined),
     }), o.ip ?? '203.0.113.9')
-  return { dir, cfg, cloud, driver, mailer, handle, call, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) }
+  return { dir, cfg, cloud, driver, pool, mailer, handle, call, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) }
 }
 
 export type Env = ReturnType<typeof setup>

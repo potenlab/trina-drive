@@ -45,13 +45,33 @@ CREATE TABLE IF NOT EXISTS audit (
   detail TEXT NOT NULL, prev_hash TEXT NOT NULL, hash TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS rate (
   key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);
+-- the team hosts as the scaler knows them (scaler.ts); the pool (ASG) is the truth for what runs, this is what the
+-- control plane decided and saw: booting | ready | draining | terminating | gone | lost
+CREATE TABLE IF NOT EXISTS hosts (
+  id TEXT PRIMARY KEY, state TEXT NOT NULL, first_seen INTEGER NOT NULL, ready_at INTEGER, empty_since INTEGER,
+  last_probe INTEGER, online INTEGER NOT NULL DEFAULT 1, public_ip TEXT, volumes TEXT,
+  -- 1: never scaled in (operator's \`hosts keep\`, or team data found that no team row names)
+  keep INTEGER NOT NULL DEFAULT 0,
+  note TEXT, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS kv (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
 `
+
+/** columns added after a table was first made (CREATE TABLE IF NOT EXISTS leaves an existing table alone) */
+const ADDED_COLUMNS: [table: string, column: string, decl: string][] = [
+  // a paid team with no host to go on yet (scale-out in progress, or the host limit reached)
+  ['teams', 'waiting_since', 'INTEGER'],
+  ['teams', 'wait_alerted_at', 'INTEGER'],
+]
 
 export function openDb(file: string): DB {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
   const db = new Database(file, { create: true, strict: true })
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
   db.exec(SCHEMA)
+  for (const [table, column, decl] of ADDED_COLUMNS) {
+    if (!db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all().some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`)
+  }
   if (file !== ':memory:') try { fs.chmodSync(file, 0o600) } catch { /* not ours to fix */ }
   return db
 }
@@ -64,6 +84,14 @@ export interface TeamRow {
   backup_pub: string | null; backup_key_enc: string | null; last_backup_at: number | null
   disk_bytes: number | null; disk_checked_at: number | null; over_quota_since: number | null
   error: string | null; created_at: number; updated_at: number
+  waiting_since: number | null; wait_alerted_at: number | null
+}
+
+export type HostState = 'booting' | 'ready' | 'draining' | 'terminating' | 'gone' | 'lost'
+export interface HostRow {
+  id: string; state: HostState; first_seen: number; ready_at: number | null; empty_since: number | null
+  last_probe: number | null; online: number; public_ip: string | null; volumes: string | null; keep: number
+  note: string | null; updated_at: number
 }
 export type TeamStatus = 'pending_payment' | 'provisioning' | 'active' | 'past_due' | 'suspended' | 'deleting' | 'deleted' | 'failed'
 

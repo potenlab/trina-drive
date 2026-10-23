@@ -3,10 +3,14 @@
 // uid); env files and backup staging under the state directory. The state directory must be at the same absolute path
 // for the Docker engine as for this process (cloud/dev/up.sh mounts it that way), because staging is a bind mount.
 // No hard disk quota here (named volumes have none): the metrics loop measures and flags (README, "Quotas").
+//
+// LocalPool simulates the AWS host pool on this one engine, so the scaler's scale-out from 0 and scale-in run end to
+// end in dev: hosts local-1, local-2, … are names (every one is this engine), "boot" for TDCLOUD_LOCAL_HOST_BOOT, and
+// a host's teams are the containers labelled tdcloud.host=<it>. The desired count lives in <state>/local-pool.json.
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { BackupArtifact, ExecResult, TeamSpec } from './types'
+import type { BackupArtifact, ExecResult, HostPool, HostProbe, PoolStatus, TeamSpec } from './types'
 import { DockerDriver, type HostLayout, type RunOpts, type Runner } from './docker'
 
 export class LocalRunner implements Runner {
@@ -73,4 +77,58 @@ export function localDockerDriver(o: { stateDir: string; seccomp: string; apparm
     name: 'local', runner, layout: new LocalLayout(o.stateDir, o.seccomp, o.apparmor, runner, o.helperImage),
     caddyContainer: o.caddyContainer, helperImage: o.helperImage, pickHost: async () => 'local',
   })
+}
+
+interface LocalPoolState { desired: number; next: number; hosts: { id: string; launchedAt: number }[] }
+
+export class LocalPool implements HostPool {
+  readonly name = 'local (simulated hosts)'
+  readonly probeEveryMs = 1000
+  private readonly file: string
+  constructor(stateDir: string, private readonly runner: Runner, private readonly o: { bootMs: number; max: number; clock?: () => number }) {
+    this.file = path.join(stateDir, 'local-pool.json')
+  }
+  private now() { return (this.o.clock ?? Date.now)() }
+  private read(): LocalPoolState {
+    try { return JSON.parse(fs.readFileSync(this.file, 'utf8')) as LocalPoolState } catch { return { desired: 0, next: 1, hosts: [] } }
+  }
+  private write(s: LocalPoolState) {
+    fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 })
+    fs.writeFileSync(`${this.file}.tmp`, JSON.stringify(s, null, 2), { mode: 0o600 })
+    fs.renameSync(`${this.file}.tmp`, this.file)
+  }
+  /** like the ASG: launches until there are `desired` hosts */
+  private reconcile(s: LocalPoolState) {
+    while (s.hosts.length < s.desired) s.hosts.push({ id: `local-${s.next++}`, launchedAt: this.now() })
+    return s
+  }
+  async status(): Promise<PoolStatus> {
+    const s = this.reconcile(this.read())
+    this.write(s)
+    return {
+      desired: s.desired, max: this.o.max,
+      instances: s.hosts.map((h) => ({ id: h.id, lifecycle: this.now() - h.launchedAt < Math.min(1000, this.o.bootMs) ? 'pending' : 'in_service', online: true })),
+    }
+  }
+  async setDesired(n: number) {
+    const s = this.read()
+    s.desired = Math.min(n, this.o.max)
+    this.write(this.reconcile(s))
+  }
+  async probe(id: string): Promise<HostProbe | null> {
+    const h = this.read().hosts.find((x) => x.id === id)
+    if (!h) return null
+    const r = await this.runner.run('local', ['docker', 'ps', '-aq', '--filter', `label=tdcloud.host=${id}`])
+    if (r.code !== 0) return null
+    return { ready: this.now() - h.launchedAt >= this.o.bootMs, teams: r.stdout.trim().split('\n').filter(Boolean).length, publicIp: null }
+  }
+  async terminate(id: string) {
+    const s = this.read()
+    if (!s.hosts.some((h) => h.id === id)) throw new Error(`no host ${id}`)
+    s.hosts = s.hosts.filter((h) => h.id !== id)
+    s.desired = Math.max(0, s.desired - 1)
+    this.write(s)
+    return { volumes: [] }
+  }
+  async cleanup() { return true }
 }

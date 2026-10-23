@@ -7,11 +7,15 @@
 // command whose output is a secret (setup token, backup key) pipes it through `seal` to a one-time X25519 key that
 // only this process holds, so the stored output is ciphertext.
 //
-// This file is exercised by unit tests with a fake AWS endpoint only; it has not been run against a real account.
-import { AwsClient } from '../aws'
+// AwsPool: the team hosts' Auto Scaling group as the scaler (scaler.ts) sees it: its desired/max size and instances,
+// raising the desired count, terminating one empty host (protection off, terminate with decrement, then its data
+// volume deleted), and the pool of Elastic IPs the hosts take at boot (allocated before a launch, released after).
+//
+// The driver ran against a real account once (2026-10-23); AwsPool is exercised by unit tests with fake endpoints only.
+import { AwsClient, AwsError } from '../aws'
 import { generateTeamKey, unseal } from '../seal'
 import { shq } from '../util'
-import type { BackupArtifact, ExecResult, TeamSpec } from './types'
+import type { BackupArtifact, ExecResult, HostPool, HostProbe, PoolInstance, PoolStatus, TeamSpec } from './types'
 import { DockerDriver, type HostLayout, type RunOpts, type Runner } from './docker'
 import { DriverError } from './types'
 
@@ -104,4 +108,101 @@ export function awsDriver(o: {
       return hosts[0].instanceId
     },
   })
+}
+
+/** the tag value the hosts' Elastic IPs carry (tdcloud:pool); the bootstrap takes a free one (host/bootstrap.sh) */
+export const EIP_POOL = 'hosts'
+
+export class AwsPool implements HostPool {
+  readonly name: string
+  constructor(private readonly aws: AwsClient, private readonly runner: Runner, private readonly o: { asgName: string; hostTag: string; addressName?: string }) {
+    this.name = `aws ${o.asgName}`
+  }
+
+  async status(): Promise<PoolStatus> {
+    const doc = await this.aws.query('autoscaling', 'DescribeAutoScalingGroups', { 'AutoScalingGroupNames.member.1': this.o.asgName })
+    const g = doc.find('AutoScalingGroups')?.all('member')[0]
+    if (!g) throw new DriverError(`no Auto Scaling group ${this.o.asgName}`)
+    const online = new Map((await this.aws.listHosts(this.o.hostTag)).map((h) => [h.instanceId, h.ping === 'Online']))
+    const instances: PoolInstance[] = g.at('Instances', 'member').map((i) => {
+      const ls = i.get('LifecycleState')
+      return {
+        id: i.get('InstanceId'),
+        lifecycle: ls.startsWith('Pending') ? 'pending' : ls === 'InService' ? 'in_service' : ls.startsWith('Terminat') ? 'terminating' : 'other',
+        online: online.get(i.get('InstanceId')) ?? false,
+      }
+    })
+    return { desired: Number(g.get('DesiredCapacity')), max: Number(g.get('MaxSize')), instances }
+  }
+
+  async setDesired(n: number) {
+    await this.aws.query('autoscaling', 'SetDesiredCapacity', { AutoScalingGroupName: this.o.asgName, DesiredCapacity: n, HonorCooldown: false })
+  }
+
+  async probe(id: string): Promise<HostProbe | null> {
+    try {
+      const r = await this.runner.run(id, ['/usr/local/sbin/tdcloud-host', 'info'], { timeoutS: 60 })
+      if (r.code !== 0) return null
+      const j = JSON.parse(r.stdout.trim().split('\n').at(-1) ?? '') as { ready?: boolean; teams?: number; containers?: number; publicIp?: string | null }
+      return { ready: j.ready === true, teams: Number(j.teams ?? 0) + Number(j.containers ?? 0), publicIp: j.publicIp ?? null }
+    } catch {
+      return null
+    }
+  }
+
+  async terminate(id: string): Promise<{ volumes: string[] }> {
+    // the data volume outlives the instance on purpose (delete_on_termination = false): note it before the instance goes
+    const inst = (await this.aws.query('ec2', 'DescribeInstances', { 'InstanceId.1': id })).find('reservationSet')?.at('item', 'instancesSet', 'item')[0]
+    const root = inst?.get('rootDeviceName')
+    const volumes = (inst?.at('blockDeviceMapping', 'item') ?? [])
+      .filter((b) => b.get('deviceName') !== root && b.child('ebs')?.get('deleteOnTermination') !== 'true')
+      .map((b) => b.child('ebs')?.get('volumeId') ?? '').filter(Boolean)
+    await this.aws.query('autoscaling', 'SetInstanceProtection', { AutoScalingGroupName: this.o.asgName, 'InstanceIds.member.1': id, ProtectedFromScaleIn: false })
+    try {
+      await this.aws.query('autoscaling', 'TerminateInstanceInAutoScalingGroup', { InstanceId: id, ShouldDecrementDesiredCapacity: true })
+    } catch (e) {
+      // put the protection back: nothing else may pick this host for a scale-in
+      await this.aws.query('autoscaling', 'SetInstanceProtection', { AutoScalingGroupName: this.o.asgName, 'InstanceIds.member.1': id, ProtectedFromScaleIn: true }).catch(() => {})
+      throw e
+    }
+    return { volumes }
+  }
+
+  async cleanup(_id: string, volumes: string[]): Promise<boolean> {
+    let left = 0
+    for (const v of volumes) {
+      let status: string
+      try {
+        status = (await this.aws.query('ec2', 'DescribeVolumes', { 'VolumeId.1': v })).find('volumeSet')?.all('item')[0]?.get('status') ?? 'gone'
+      } catch (e) {
+        if (e instanceof AwsError && e.code === 'InvalidVolume.NotFound') continue
+        throw e
+      }
+      if (status === 'available') await this.aws.query('ec2', 'DeleteVolume', { VolumeId: v })
+      else if (status !== 'deleting' && status !== 'deleted' && status !== 'gone') left++ // still attached while the instance terminates
+    }
+    return left === 0
+  }
+
+  /** One free pool address per host still to come (desired − hosts that hold one), so a booting host always finds one;
+   * free addresses beyond that are released (each costs $3.65/month idle). */
+  async maintain(desired: number, status: PoolStatus) {
+    const addrs = ((await this.aws.query('ec2', 'DescribeAddresses', { 'Filter.1.Name': 'tag:tdcloud:pool', 'Filter.1.Value.1': EIP_POOL })).find('addressesSet')?.all('item') ?? [])
+      .map((a) => ({ alloc: a.get('allocationId'), instance: a.get('instanceId'), association: a.get('associationId') }))
+    const members = new Set(status.instances.filter((i) => i.lifecycle !== 'terminating').map((i) => i.id))
+    const held = addrs.filter((a) => a.instance && members.has(a.instance)).length
+    const free = addrs.filter((a) => !a.association && !a.instance)
+    const want = Math.max(0, desired - held)
+    for (let i = free.length; i < want; i++) {
+      await this.aws.query('ec2', 'AllocateAddress', {
+        Domain: 'vpc', 'TagSpecification.1.ResourceType': 'elastic-ip',
+        'TagSpecification.1.Tag.1.Key': 'tdcloud:pool', 'TagSpecification.1.Tag.1.Value': EIP_POOL,
+        'TagSpecification.1.Tag.2.Key': 'Name', 'TagSpecification.1.Tag.2.Value': this.o.addressName ?? 'tdcloud-host',
+      })
+    }
+    for (const a of free.slice(want)) {
+      // a host may have taken it a moment ago: then it is in use and stays
+      try { await this.aws.query('ec2', 'ReleaseAddress', { AllocationId: a.alloc }) } catch (e) { if (!(e instanceof AwsError && /InUse|NotFound/.test(e.code))) throw e }
+    }
+  }
 }

@@ -1,7 +1,8 @@
 # Least privilege. Hosts: run what SSM tells them, pull images, read their boot files, read team env parameters, upload
 # backups, take an Elastic IP from the pool, send the teams' mail (the host's mail relay; from the team address only).
 # Control: send commands to hosts only, manage team parameters and DNS records, wrap keys, read/prune backups, send
-# mail (from the control plane's address only).
+# mail (from the control plane's address only), and size the host pool (the scaler: the hosts' Auto Scaling group,
+# the hosts' data volumes and the pool's Elastic IPs only).
 data "aws_iam_policy_document" "ec2_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -204,6 +205,62 @@ data "aws_iam_policy_document" "control" {
     sid       = "BootFiles"
     actions   = ["s3:GetObject"]
     resources = ["${aws_s3_bucket.artifacts.arn}/*"]
+  }
+  # ---- the host scaler (cloud/control/src/scaler.ts, drivers/aws.ts AwsPool)
+  # Describe calls have no resource-level permissions
+  statement {
+    sid       = "PoolRead"
+    actions   = ["autoscaling:DescribeAutoScalingGroups", "ec2:DescribeInstances", "ec2:DescribeVolumes", "ec2:DescribeAddresses"]
+    resources = ["*"]
+  }
+  # raise the desired count; take one host's scale-in protection off and terminate it (with decrement). Only this group.
+  statement {
+    sid       = "PoolSize"
+    actions   = ["autoscaling:SetDesiredCapacity", "autoscaling:SetInstanceProtection", "autoscaling:TerminateInstanceInAutoScalingGroup"]
+    resources = ["arn:${local.partition}:autoscaling:${var.region}:${local.account}:autoScalingGroup:*:autoScalingGroupName/${var.name}-hosts"]
+  }
+  # the data volume a scaled-in host leaves behind (the launch template tags host volumes tdcloud:role=host; an
+  # attached volume cannot be deleted)
+  statement {
+    sid       = "HostVolumes"
+    actions   = ["ec2:DeleteVolume"]
+    resources = ["arn:${local.partition}:ec2:${var.region}:${local.account}:volume/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/tdcloud:role"
+      values   = ["host"]
+    }
+  }
+  # the hosts' Elastic IPs: allocated tagged tdcloud:pool=hosts (one per host about to launch), released when free
+  statement {
+    sid       = "PoolAddressAllocate"
+    actions   = ["ec2:AllocateAddress"]
+    resources = ["arn:${local.partition}:ec2:${var.region}:${local.account}:elastic-ip/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/tdcloud:pool"
+      values   = ["hosts"]
+    }
+  }
+  statement {
+    sid       = "PoolAddressTagOnCreate"
+    actions   = ["ec2:CreateTags"]
+    resources = ["arn:${local.partition}:ec2:${var.region}:${local.account}:elastic-ip/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:CreateAction"
+      values   = ["AllocateAddress"]
+    }
+  }
+  statement {
+    sid       = "PoolAddressRelease"
+    actions   = ["ec2:ReleaseAddress"]
+    resources = ["arn:${local.partition}:ec2:${var.region}:${local.account}:elastic-ip/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/tdcloud:pool"
+      values   = ["hosts"]
+    }
   }
 }
 

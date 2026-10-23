@@ -13,6 +13,9 @@
 //  7. client addresses: fixed team network addresses; Caddy overwrites X-Forwarded-For, so the team records (and
 //     rate-limits by) the real client address — not Caddy's, not a spoofed header; the relay refuses non-team senders
 //  8. Caddy: no certificate for unknown names; suspend → paused page → resume; backup + export decrypt; audit chain
+//  9. hosts (simulated, one team each: compose.yml): every team above scaled out from 0; a third team takes the last
+//     host, a fourth waits at the limit (ops alerted), takes the host the third leaves, and once it is gone too the
+//     emptied host is scaled in after the grace period — never the hosts of acme or the suspended globex
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -126,6 +129,8 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
     await Bun.sleep(2000)
   }
   check(`provisioned (status ${status})`, status === 'active', admin('jobs', 'list').out)
+  const row = showTeam(slug)
+  check(`${slug} runs on a host the scaler launched for it (${row.host})`, /^local-\d+$/.test(row.host ?? '') && hostLine(row.host).includes(' ready '), admin('hosts', 'list').out)
 
   step(`${slug}: one-time setup link from the mail`)
   const ready = outbox().filter((m) => m.to === buyer && m.subject.startsWith('Your Trina Drive is ready')).at(-1)
@@ -281,13 +286,68 @@ const post = (path, body, headers) => new Promise((res, rej) => { const q = http
   void a
 }
 
+const showTeam = (slug: string) => { const r = admin('teams', 'show', slug); return (r.code === 0 ? JSON.parse(r.out) : {}) as { host?: string; status?: string; waiting_since?: number | null } }
+/** the `hosts list --all` line of one host ('' when not listed) */
+const hostLine = (id: string | undefined) => (id ? admin('hosts', 'list', '--all').out.split('\n').find((l) => l.startsWith(`${id} `)) ?? '' : '')
+async function until(what: () => boolean, ms: number) {
+  const end = Date.now() + ms
+  while (Date.now() < end) { if (what()) return true; await Bun.sleep(1500) }
+  return what()
+}
+
+/** Scale-out to the limit, a team waiting at it, scale-in of an emptied host (compose.yml: one slot per host, at most
+ * three hosts, simulated boot 3 s, empty hosts go after 20 s). */
+async function autoscale() {
+  step('hosts: the last host, the limit, scale-in')
+  const acmeHost = showTeam('acme').host, globexHost = showTeam('globex').host
+  check('acme and globex are on two different hosts (one slot each)', !!acmeHost && !!globexHost && acmeHost !== globexHost, { acmeHost, globexHost })
+  check('hosts list shows both ready, 1/1 slots, none free', [acmeHost, globexHost].every((h) => / ready +1\/1 +0 /.test(hostLine(h))), admin('hosts', 'list').out)
+  check('suspend globex (its host still holds its data)', admin('teams', 'suspend', 'globex').code === 0)
+  const zeta = admin('teams', 'create', 'zeta', '--owner', 'ops-zeta@trina.test', '--name', 'Zeta')
+  const zetaHost = showTeam('zeta').host
+  check(`a third team: a third host is launched for it (${zetaHost})`, zeta.code === 0 && !!zetaHost && ![acmeHost, globexHost].includes(zetaHost), zeta.out + zeta.err)
+  const desired = () => JSON.parse(fs.readFileSync(path.join(STATE, 'local-pool.json'), 'utf8')).desired as number
+  check('the pool runs 3 hosts (the limit)', desired() === 3)
+
+  // a fourth team: no room and no more hosts — it waits, and ops hear about it
+  sh(['docker', 'exec', '-d', 'tdc-control', 'bun', '/app/src/main.ts', 'teams', 'create', 'omega', '--owner', 'ops-omega@trina.test', '--name', 'Omega'])
+  await until(() => !!showTeam('omega').waiting_since, 30_000)
+  const omega = showTeam('omega')
+  check('omega waits in provisioning without a host', omega.status === 'provisioning' && !omega.host && !!omega.waiting_since, omega)
+  check('ops are alerted: host limit reached', await until(() => outbox().some((m) => m.to === 'ops@trina.test' && m.subject.includes('host limit reached') && m.text.includes('omega')), 30_000))
+  check("no setup mail to omega's owner while it waits", !outbox().some((m) => m.to === 'ops-omega@trina.test'))
+  check('still 3 hosts', desired() === 3)
+
+  // zeta goes: its host is not scaled in while omega waits — omega takes it
+  check('delete zeta', admin('teams', 'delete', 'zeta', '--yes').code === 0)
+  check('omega starts on the host zeta left', await until(() => showTeam('omega').status === 'active', 90_000) && showTeam('omega').host === zetaHost, showTeam('omega'))
+  check("omega's owner gets the ready mail once it runs", outbox().some((m) => m.to === 'ops-omega@trina.test' && m.subject.startsWith('Your Trina Drive is ready')))
+  check('omega serves over HTTPS', (await req('GET', `${teamUrl('omega')}/api/state`)).status === 200)
+
+  // omega goes too: the host is empty, and after the 20 s grace it is scaled in
+  check('delete omega', admin('teams', 'delete', 'omega', '--yes').code === 0)
+  check(`${zetaHost} is empty`, await until(() => / ready +0\/1 +1 +\d{4}-/.test(hostLine(zetaHost)), 15_000), hostLine(zetaHost))
+  check(`${zetaHost} is scaled in after the grace period`, await until(() => / gone /.test(hostLine(zetaHost)), 90_000), admin('hosts', 'list', '--all').out)
+  check('the pool is down to 2 hosts', desired() === 2)
+  check("acme's host and suspended globex's host are untouched", [acmeHost, globexHost].every((h) => / ready +1\/1 /.test(hostLine(h))), admin('hosts', 'list').out)
+  check('resume globex', admin('teams', 'resume', 'globex').code === 0)
+  check('globex serves again', (await bash('globex', globexBoss, 'cat /경영/board.md')).stdout.includes('globex 매출'))
+  const log = admin('audit', 'list', '--limit', '400').out
+  for (const action of ['team.waiting_for_host', 'hosts.scale_out', 'host.ready', 'team.host_assigned', 'hosts.scale_in', 'host.gone']) check(`audit has ${action}`, log.includes(action))
+  check('control-plane audit chain verifies', admin('audit', 'verify').code === 0)
+}
+let globexBoss = ''
+
 async function tlsOk(slug: string): Promise<boolean> {
   try { await fetch(`${teamUrl(slug)}/`, { tls: { ca: CA }, signal: AbortSignal.timeout(10_000) } as RequestInit); return true } catch { return false }
 }
 
 async function main() {
+  step('hosts: none before the first team (hold mode)')
+  check('no hosts, pool at 0', /\(no hosts\)/.test(admin('hosts', 'list').out) && /desired 0/.test(admin('hosts', 'list').out), admin('hosts', 'list').out)
   const a = await buyAndSetUp('acme', 'Acme Inc.', 'buyer@acme.test')
   const b = await buyAndSetUp('globex', 'Globex Corp.', 'owner@globex.test')
+  globexBoss = b.boss
 
   step('isolation between acme and globex')
   for (const [who, tok, from, to] of [['kim@acme', a.kim, a, b], ['boss@acme', a.boss, a, b], ['admin@acme', a.adminPat, a, b], ['boss@globex', b.boss, b, a], ['admin@globex', b.adminPat, b, a]] as const) {
@@ -350,6 +410,8 @@ async function main() {
   const acmeNet = JSON.parse(sh(['docker', 'network', 'inspect', 'tdc-net-acme']).out)[0].IPAM.Config[0].Subnet as string
   const [o1, o2, o3, o4] = acmeNet.split('/')[0]!.split('.').map(Number) as [number, number, number, number]
   check('after the upgrade: the same fixed address and env', afterUpgrade.NetworkSettings.Networks['tdc-net-acme']?.IPAddress === `${o1}.${o2}.${o3}.${o4 + 3}` && (afterUpgrade.Config.Env as string[]).includes('TDRIVE_HOSTED=1'), afterUpgrade.NetworkSettings.Networks)
+
+  await autoscale()
 
   console.log(`\n${failed ? 'FAILED' : 'PASSED'}: ${passed} checks passed, ${failed} failed (${Math.round((Date.now() - t0) / 1000)}s)`)
   console.log(`\n  acme    ${teamUrl('acme')}    admin alex / admin-acme-password`)

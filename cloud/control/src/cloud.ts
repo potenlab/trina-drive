@@ -3,6 +3,7 @@
 //
 // Team lifecycle
 //   pending_payment ──(subscription active/trialing)──▶ provisioning ──▶ active
+//   provisioning: waits (no attempts used) while no host has room; the scaler (scaler.ts) launches one
 //   active ──(past_due)──▶ past_due ──(grace over, still unpaid)──▶ suspended
 //   active/past_due ──(canceled)──▶ (grace) ──▶ suspended ──(deleteAfterDays)──▶ final export ──▶ deleted
 //   suspended ──(active again)──▶ active          paused ──▶ suspended ──(resumed)──▶ active
@@ -11,11 +12,12 @@ import { audit } from './audit'
 import type { BackupTarget } from './backup'
 import { teamUrl, type Config, type PlanId } from './config'
 import { teamById, teamByPublicId, teamBySlug, teamBySubscription, updateTeam, type DB, type TeamRow } from './db'
-import type { Driver, TeamSpec } from './drivers/types'
+import type { Driver, HostPool, TeamSpec } from './drivers/types'
 import { hashPassword, verifyPassword, type KeyWrapper } from './keys'
 import type { Mailer } from './mailer'
 import type { EventSummary } from './paddle'
 import { DATA_HEADROOM_GB, planOf, type PlanLimits } from './plans'
+import { Scaler } from './scaler'
 import { generateTeamKey } from './seal'
 import { slugProblem } from './slug'
 import { teamNet, type TeamNet } from './teamnet'
@@ -26,7 +28,17 @@ export class CloudError extends Error {
   constructor(readonly code: string, message: string, readonly status = 400) { super(message) }
 }
 
-export interface Deps { cfg: Config; db: DB; driver: Driver; mailer: Mailer; keys: KeyWrapper; target: BackupTarget; log?: (s: string) => void }
+export interface Deps {
+  cfg: Config; db: DB; driver: Driver; mailer: Mailer; keys: KeyWrapper; target: BackupTarget; log?: (s: string) => void
+  /** the host pool: with one, teams are placed by the scaler (scale-out / scale-in); without, by driver.pickHost */
+  pool?: HostPool | null
+  clock?: () => number
+}
+
+/** No host has room for the team yet: its provision job waits (and is retried) without using up an attempt. */
+export class WaitingForHost extends Error {
+  constructor(readonly retryInMs: number) { super('waiting for a host with room (the scaler is launching one)') }
+}
 
 export const VERIFY_TTL = 2 * DAY
 export const SESSION_TTL = 7 * DAY
@@ -38,9 +50,11 @@ type JobKind = 'provision' | 'suspend' | 'resume' | 'limits' | 'grace_check' | '
 export class Cloud {
   readonly cfg: Config; readonly db: DB; readonly driver: Driver; readonly mailer: Mailer; readonly keys: KeyWrapper; readonly target: BackupTarget
   readonly log: (s: string) => void
+  readonly scaler: Scaler | null
   constructor(d: Deps) {
     this.cfg = d.cfg; this.db = d.db; this.driver = d.driver; this.mailer = d.mailer; this.keys = d.keys; this.target = d.target
     this.log = d.log ?? ((s) => console.log(`${new Date().toISOString()} ${s}`))
+    this.scaler = d.pool ? new Scaler({ cfg: d.cfg, db: d.db, pool: d.pool, alert: (s, t) => this.alertOps(s, t), log: this.log, clock: d.clock }) : null
   }
 
   // ---------------------------------------------------------------- accounts
@@ -265,6 +279,10 @@ export class Cloud {
         await this.runJob(j.kind, j.team_id)
         this.db.query('UPDATE jobs SET done_at = ?, attempts = attempts + 1 WHERE id = ?').run(now(), j.id)
       } catch (e) {
+        if (e instanceof WaitingForHost) {
+          this.db.query('UPDATE jobs SET last_error = ?, run_at = ? WHERE id = ?').run(e.message, now() + e.retryInMs, j.id)
+          continue
+        }
         const msg = (e as Error).message + ((e as { detail?: string }).detail ? `\n${(e as { detail?: string }).detail}` : '')
         const attempts = j.attempts + 1
         this.log(`job ${j.kind} team ${j.team_id} failed (attempt ${attempts}): ${msg}`)
@@ -299,8 +317,15 @@ export class Cloud {
   private async provision(t: TeamRow) {
     if (t.status !== 'provisioning') return
     // a retry after a half-finished attempt: clear what is left, then start over
-    const host = t.host ?? await this.driver.pickHost()
-    if (!t.host) updateTeam(this.db, t.id, { host })
+    let host = t.host
+    if (!host && this.scaler) {
+      host = this.scaler.claim(t)
+      if (!host) throw await this.waitForHost(t)
+      audit(this.db, { actor: 'system', action: 'team.host_assigned', teamId: t.id, detail: { host, waited_s: t.waiting_since ? Math.round((now() - t.waiting_since) / 1000) : 0 } })
+    } else if (!host) {
+      host = await this.driver.pickHost()
+      updateTeam(this.db, t.id, { host })
+    }
     if ((await this.driver.state(host, t.slug)) !== 'missing') await this.driver.destroy(host, t.slug)
     const spec = this.spec(t)
     const r = await this.driver.create(host, spec)
@@ -319,6 +344,22 @@ export class Cloud {
       audit(this.db, { actor: 'system', action: 'team.setup_link_failed', teamId: t.id, detail: { error: (e as Error).message.slice(0, 300) } })
       await this.alertOps(`setup link for ${t.slug} not sent`, `${(e as Error).message}\n\nWhen mail works: teams resend-setup ${t.slug}`)
     }
+  }
+
+  /** No host has room: the team stays in `provisioning` (the owner's "ready" mail comes when it runs), the scaler
+   * launches a host, and the job comes back in 5–30 s. Ops hear about a team that has waited hostWaitAlertMs. */
+  private async waitForHost(t: TeamRow): Promise<WaitingForHost> {
+    const since = t.waiting_since ?? now()
+    if (!t.waiting_since) {
+      updateTeam(this.db, t.id, { waiting_since: since })
+      audit(this.db, { actor: 'system', action: 'team.waiting_for_host', teamId: t.id })
+      this.log(`${t.slug}: waiting for a host`)
+    } else if (now() - since >= this.cfg.hostWaitAlertMs && !t.wait_alerted_at) {
+      updateTeam(this.db, t.id, { wait_alerted_at: now() })
+      const hosts = this.scaler!.view().map((h) => `  ${h.id} ${h.state} ${h.used}/${h.capacity}${h.note ? ` (${h.note})` : ''}`).join('\n') || '  (none)'
+      await this.alertOps(`team ${t.slug} has waited ${Math.round((now() - since) / 60_000)} min for a host`, `It paid and is still in provisioning: no host has room. It starts as soon as one does.\n\nHosts:\n${hosts}\n\nSee \`hosts list\`.`)
+    }
+    return new WaitingForHost(Math.min(30_000, Math.max(5_000, Math.round((now() - since) / 4))))
   }
 
   /** Hook for DNS (AWS driver: one A record per team → the host's Elastic IP). Set by main.ts when Route 53 is configured. */
@@ -361,7 +402,14 @@ export class Cloud {
   }
 
   async resume(t: TeamRow, actor: string) {
-    if (t.status !== 'suspended' || !t.host) return
+    if (t.status !== 'suspended') return
+    if (!t.host) {
+      // paused before it ever got a host (it was still waiting for one): provision it now
+      updateTeam(this.db, t.id, { status: 'provisioning', suspended_at: null, suspend_reason: null, grace_until: null, delete_after: null, error: null, waiting_since: null, wait_alerted_at: null })
+      this.enqueue('provision', t.id)
+      audit(this.db, { actor, action: 'team.resume', teamId: t.id, detail: { provision: true } })
+      return
+    }
     await this.driver.start(t.host, this.spec(t))
     updateTeam(this.db, t.id, { status: 'active', suspended_at: null, suspend_reason: null, grace_until: null, delete_after: null })
     this.db.query("UPDATE jobs SET done_at = ? WHERE team_id = ? AND kind = 'delete' AND done_at IS NULL").run(now(), t.id)

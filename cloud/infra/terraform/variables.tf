@@ -39,13 +39,13 @@ variable "azs" {
   default     = ["ap-northeast-2a", "ap-northeast-2c"]
 }
 
-variable "host_count" {
-  description = "Team hosts in the pool (the ASG's fixed size). Add one when the control plane says no host has room. 0 = hold mode (no teams running; README, \"Hold mode\")."
+variable "host_max" {
+  description = "Most team hosts the control plane's scaler may run (the Auto Scaling group's max size; the scaler starts at 0 and also stops at TDCLOUD_MAX_HOSTS). Mind the account's vCPU quota: m7g.xlarge has 4 vCPU, the Seoul default for standard instances is 16 (control instance included)."
   type        = number
-  default     = 1
+  default     = 3
   validation {
-    condition     = var.host_count >= 0 && floor(var.host_count) == var.host_count
-    error_message = "host_count is a whole number, 0 or more."
+    condition     = var.host_max >= 0 && floor(var.host_max) == var.host_max
+    error_message = "host_max is a whole number, 0 or more."
   }
 }
 

@@ -1,6 +1,7 @@
 // A small AWS client with no SDK: Signature Version 4, credentials from the environment or the instance role (IMDSv2),
 // and the handful of calls the control plane makes — SSM (run host-agent commands, Parameter Store), KMS (wrap keys),
-// SES v2 (mail), Route 53 (one A record per team). S3 goes through Bun's built-in S3 client (backup.ts).
+// SES v2 (mail), Route 53 (one A record per team), and the Query APIs of Auto Scaling and EC2 (the host pool:
+// drivers/aws.ts AwsPool). S3 goes through Bun's built-in S3 client (backup.ts).
 // Nothing here is called by the local driver or the tests except through an injected fetch.
 import crypto from 'node:crypto'
 
@@ -98,6 +99,26 @@ export class AwsClient {
     return (text ? JSON.parse(text) : {}) as T
   }
 
+  /** AWS Query protocol (Auto Scaling, EC2): form-encoded POST, XML answer. Lists are passed flattened by the caller
+   * (`InstanceIds.member.1`, `Filter.1.Value.1`). */
+  async query(service: 'autoscaling' | 'ec2', action: string, params: Record<string, string | number | boolean> = {}): Promise<XmlNode> {
+    const version = service === 'ec2' ? '2016-11-15' : '2011-01-01'
+    const form = new URLSearchParams({ Action: action, Version: version })
+    for (const [k, v] of Object.entries(params)) form.set(k, String(v))
+    const res = await this.request({
+      service, method: 'POST', url: `https://${service}.${this.region}.amazonaws.com/`, body: form.toString(),
+      headers: { 'content-type': 'application/x-www-form-urlencoded; charset=utf-8' },
+    })
+    const text = await res.text()
+    let doc: XmlNode
+    try { doc = parseXml(text) } catch { throw new AwsError(res.status, 'BadResponse', `${service} ${action}: ${res.status} ${text.slice(0, 300)}`) }
+    if (!res.ok) {
+      const code = doc.find('Code')?.text ?? 'Error'
+      throw new AwsError(res.status, code, `${service} ${action}: ${code}: ${doc.find('Message')?.text ?? text.slice(0, 300)}`)
+    }
+    return doc
+  }
+
   // ---- SSM ----
   /** Runs a shell script on one managed instance and waits for it (AWS-RunShellScript). */
   async runShell(instanceId: string, script: string, opts: { timeoutS?: number; comment?: string; pollMs?: number } = {}): Promise<{ status: string; stdout: string; stderr: string; exitCode: number }> {
@@ -173,3 +194,54 @@ export class AwsClient {
 }
 
 const xml = (s: string) => s.replace(/[<>&'"]/g, (c) => `&#${c.charCodeAt(0)};`)
+
+// ---- a minimal XML reader for the Query APIs' answers (elements and text; attributes, CDATA and mixed content are not
+// needed there and are ignored)
+export class XmlNode {
+  readonly children: XmlNode[] = []
+  text = ''
+  constructor(readonly name: string) {}
+  /** first direct child with this name */
+  child(name: string): XmlNode | undefined { return this.children.find((c) => c.name === name) }
+  /** direct children with this name */
+  all(name: string): XmlNode[] { return this.children.filter((c) => c.name === name) }
+  /** first element with this name anywhere below (depth first) */
+  find(name: string): XmlNode | undefined {
+    for (const c of this.children) { if (c.name === name) return c; const f = c.find(name); if (f) return f }
+    return undefined
+  }
+  /** a path of direct children, e.g. at('instancesSet', 'item') → all items of the instancesSet child */
+  at(...path: string[]): XmlNode[] {
+    let cur: XmlNode[] = [this]
+    for (const p of path) cur = cur.flatMap((n) => n.all(p))
+    return cur
+  }
+  /** text of a direct child ('' when absent) */
+  get(name: string): string { return this.child(name)?.text ?? '' }
+}
+
+const ENTITIES: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" }
+const decode = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) =>
+  e[0] === '#' ? String.fromCodePoint(e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : (ENTITIES[e] ?? m))
+
+export function parseXml(src: string): XmlNode {
+  const root = new XmlNode('#document')
+  const stack: XmlNode[] = [root]
+  const re = /<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<(\/?)([A-Za-z_][\w:.-]*)[^>]*?(\/?)>|([^<]+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(src))) {
+    if (m[4] !== undefined) { stack.at(-1)!.text += decode(m[4]); continue }
+    if (!m[2]) continue
+    if (m[1]) {
+      const top = stack.pop()
+      if (!top || top.name !== m[2] || !stack.length) throw new Error(`unbalanced XML at </${m[2]}>`)
+      top.text = top.children.length ? '' : top.text.trim()
+      continue
+    }
+    const n = new XmlNode(m[2])
+    stack.at(-1)!.children.push(n)
+    if (!m[3]) stack.push(n)
+  }
+  if (stack.length !== 1) throw new Error('unclosed XML')
+  return root
+}
