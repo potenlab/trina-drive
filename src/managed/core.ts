@@ -345,6 +345,16 @@ export function dropGrantsOf(db: DB, files: { dev: string | bigint; ino: string 
   return n
 }
 
+/**
+ * A folder became personal (My files restored from Former members, src/tdcloud/my-files.ts): every file share inside it
+ * is removed (A2: a personal folder holds no shares, and moving it out again must not share anything again). Files are
+ * found by identity on disk (a stale location does not hide one). Inside the caller's transaction. Returns grant rows removed.
+ */
+export function dropGrantsUnder(db: DB, real: string): number {
+  if (!fs.existsSync(real)) return 0
+  return dropGrantsOf(db, diskWalk(real).files)
+}
+
 /** How many grant rows the files hold (a move response's `shared_with`, so the app can warn first). */
 export function grantsOn(db: DB, files: { dev: string | bigint; ino: string | bigint }[]): number {
   let n = 0

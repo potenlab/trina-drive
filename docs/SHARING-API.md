@@ -64,6 +64,7 @@ All parts apply in one transaction (with the audit row and the R6 re-check) or n
 | `202 { status: 'approval_pending', approval_id, widens }` | an Editor's widening change sent with `confirm_widening`: it waits in the approval inbox for a manager of the sources (or the admin). `status: 'closed'` = nobody can approve it |
 | `409 { error: 'widening', count, people, sources, sources_hidden, can_confirm, needs_approval }` | AI-draft copies here would reach people who cannot read their sources. `sources` = paths the caller can read, `sources_hidden` = how many they cannot ("N folders you cannot see"). Managers/admins: send again with `confirm_widening` (the copies close until a source manager confirms, or are confirmed at once if the caller manages the sources). Editors: `confirm_widening` asks for approval (202) |
 | `403 not_manager` | visible, but the caller cannot share here |
+| `403 personal` | a personal folder (My files): never shared — "Move it to a team folder to share" |
 | `403 editors_cannot_share` | the caller is an Editor and the toggle is off here or above |
 | `403 manager_only` / `admin_only` / `invite_admin_only` | that part needs a manager / an admin |
 | `403 step_up_required` | an Editor opening wider to the team without a valid step-up assertion for this folder and this `general` |

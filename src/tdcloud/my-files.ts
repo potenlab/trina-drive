@@ -22,7 +22,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { appendAudit } from '../audit'
 import type { DB } from '../db'
-import { relocateFolderRows, taken } from '../managed/core'
+import { dropGrantsUnder, relocateFolderRows, taken } from '../managed/core'
 import { isManagedFolder, makeMountDir, registerManaged } from '../managed/folders'
 import { ensureRoot, storageSettings } from '../managed/settings'
 import { nfc } from '../names'
@@ -178,6 +178,7 @@ function clearSharing(db: DB, real: string): number {
     n += db.query('DELETE FROM rules WHERE folder_id = ?').run(id).changes
     n += db.query('DELETE FROM manage_grants WHERE folder_id = ?').run(id).changes
   }
+  n += dropGrantsUnder(db, real) // A2: file shares inside go too (moving into a personal folder unshares)
   return n
 }
 
@@ -259,7 +260,7 @@ function restore(db: DB, dataDir: string, personId: number, handle: string): { v
       db.query('UPDATE folders SET inherit_break = 0 WHERE id = ?').run(g.id)
       db.query("UPDATE cloud_my_files SET state = 'mine', mount_name = ?, former_at = NULL, former_name = NULL WHERE folder_id = ?").run(name, g.id)
       history(db, g.id, 'personal_owner', null, String(personId))
-      audit(db, `my files of ${handle}: back from /${fm.mount_name}/${path.basename(from)} as /${name}${cleared ? ` (${cleared} rules or manage grants there cleared: a personal folder has none)` : ''}`, [`/${fm.mount_name}/${path.basename(from)}`, `/${name}`])
+      audit(db, `my files of ${handle}: back from /${fm.mount_name}/${path.basename(from)} as /${name}${cleared ? ` (${cleared} rules, manage grants or file shares there cleared: a personal folder has none)` : ''}`, [`/${fm.mount_name}/${path.basename(from)}`, `/${name}`])
       return folderById(db, g.id)!
     })
   }

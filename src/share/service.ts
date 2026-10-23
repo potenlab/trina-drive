@@ -556,6 +556,8 @@ export async function changeShare(op: Op, sessionHash: string, body: Record<stri
   const it = resolveFolder(w, a, body.path)
   if (!it.managed) throw bad('inplace', 'this folder is on the NAS (in place): who reads it is set on its folder page')
   const { f, r } = it
+  // My files / a personal folder: only its owner reads it (R0); it is never shared — say so plainly (not "editors cannot share")
+  if (r.personal(f)) throw err(403, 'personal', 'a personal folder is not shared: move what you want to share to a team folder')
   const kind = kindOf(r, a, f)
   const plan = planChange(db, r, f, a, kind, body)
   const mgr = kind === 'admin' || kind === 'manager'
