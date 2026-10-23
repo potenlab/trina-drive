@@ -4,6 +4,7 @@
 // with a second factor on this drive, hands over to /#/sso-second/<ticket> first. `reauth=1` asks the console for the
 // password again (max_age=0): the new session then counts as a fresh login (2FA changes, app passwords, provenance
 // reset), which is how a person without a drive password re-authenticates (review finding 4).
+import { applyShareInvites } from '../share/invites'
 import { tellWidened, withRejudge, type Judgement } from '../share/rejudge'
 import crypto from 'node:crypto'
 import { appendAudit } from '../audit'
@@ -13,6 +14,7 @@ import { lookupSession, markReauth, SESSION_COOKIE } from '../web/auth'
 import { isHttps, startSession } from '../web/auth-routes'
 import { ApiError, notFound, rateLimited, type WebCtx } from '../web/http'
 import { createTicket, has2FA, ticketPerson } from '../web/mfa'
+import { notify } from '../web/notices'
 import * as approve from '../web/approve'
 import { ensureWebSchema, metaGet } from '../web/schema'
 import { stateHash, verifyAssertion, type Claims } from './assertion'
@@ -136,6 +138,7 @@ export async function callback(w: WebCtx, req: Request, addr: string, base: stri
   const c = v.claims
   let who!: SignedIn, stored!: { return_to: string; reauth: number }
   let widened: Judgement | null = null
+  let shared = 0
   try {
     // a new or reactivated person joins Everyone here: the R6 re-check runs in the same transaction (src/share/rejudge.ts)
     widened = withRejudge(db, () => {
@@ -145,6 +148,8 @@ export async function callback(w: WebCtx, req: Request, addr: string, base: stri
       if (!s) throw new SsoFail('bad_state')
       stored = s
       who = personFor(db, c)
+      // S16: shares given by mail before this address was a member arrive with it (same transaction and re-check)
+      shared = applyShareInvites(db, who.personId, c.email, nowMs)
       syncEveryone(db)
       closeSetupIfCloudAdmin(db)
       const name = db.query<{ name: string }, [number]>('SELECT name FROM people WHERE id = ?').get(who.personId)!.name
@@ -161,6 +166,7 @@ export async function callback(w: WebCtx, req: Request, addr: string, base: stri
   }
   if (who.newAdmin) await announceNewAdmins({ db, mailer: w.mailer, baseUrl: base }, [who.personId], 'Trina Cloud sign-in')
   if (widened) await tellWidened({ db, mailer: w.mailer, baseUrl: base }, widened)
+  if (shared) await notify({ db, mailer: w.mailer, baseUrl: base }, [who.personId], 'shared', '/#/shared', { count: shared })
   // My files (B2): made on the first sign-in, back from Former members on a return; never blocks signing in
   try { await afterReconcile({ db, mailer: w.mailer, baseUrl: base }, reconcileMyFiles(db, w.dataDir, { only: who.personId })) }
   catch (e) { console.error(`[tdcloud] my files at sign-in: ${(e as Error).message}`) }
