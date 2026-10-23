@@ -45,5 +45,10 @@ export const LIMITS = {
   draftBytesPerPerson: envBytes('DRAFT_PERSON_MAX_BYTES', 1024 * 1024 * 1024),
 }
 
-export const SUPPORTED_PROTOCOL_VERSIONS = ['2026-07-28', '2025-11-25'] as const
+/** "modern" MCP (2026-07-28 on): no handshake; every request carries its version and client capabilities in _meta, and
+ * server/discover tells a client what the server speaks */
+export const MODERN_PROTOCOL_VERSIONS = ['2026-07-28'] as const
+/** "legacy" MCP: an initialize handshake picks the version (answered here, never with a modern version) */
+export const LEGACY_PROTOCOL_VERSIONS = ['2025-11-25'] as const
+export const SUPPORTED_PROTOCOL_VERSIONS = [...MODERN_PROTOCOL_VERSIONS, ...LEGACY_PROTOCOL_VERSIONS] as const
 export const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]

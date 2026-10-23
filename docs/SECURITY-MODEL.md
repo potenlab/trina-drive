@@ -145,7 +145,7 @@ Thresholds `bulkRead.files` 200, `bulkRead.bytes` 50 MB, `bulkRead.folders` 20 (
 `bulkRead.autoSuspend` (off by default) revokes the token when it fires (suspension = revocation; the owner makes a new
 token). Example: `notify set bulkRead.files 500`.
 
-**Connections.** Each authenticated MCP message records token × client: `clientInfo` name/version from `initialize`,
+**Connections.** Each authenticated MCP message records token × client: `clientInfo` name/version from `initialize` (2025-11-25) or from each request's `_meta` (2026-07-28),
 user-agent product (version stripped, so updates are not new clients) and source IP (`newClientByIp`, default on). CLI
 `sh` records itself as `tdrive cli` from `local`. `connections list` shows token, person, client, IP, last used, request
 count; `connections revoke <token-id>` (= `token revoke`) revokes at once. `mcp.ts` checks the token (revoked, expired,
