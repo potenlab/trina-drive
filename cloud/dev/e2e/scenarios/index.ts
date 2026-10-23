@@ -1,6 +1,13 @@
 // Every scenario, in run order (plan §10.5). Phase 1 = the release gate; each file runs alone (run.ts --only Sxx).
 import type { Scenario } from '../lib/ctx'
 import m01 from './m01-matrix'
+import s01 from './s01-signup'
+import s02 from './s02-team'
+import s03 from './s03-sso-again'
+import s04 from './s04-return-path'
+import s05 from './s05-sso-attacks'
+import s06 from './s06-invite'
+import s08 from './s08-promote-remove'
 import s10 from './s10-files'
 import s12 from './s12-finance-hidden'
 import s14 from './s14-restrict-here'
@@ -17,8 +24,10 @@ import s32 from './s32-upgrade'
 import s33 from './s33-hosts'
 import s34 from './s34-isolation'
 import s35 from './s35-edge'
+import s37 from './s37-design'
 import s40 from './s40-mcp-versions'
 import s43 from './s43-agents-never-share'
 import s47 from './s47-noai-webdav'
+import s48 from './s48-mobile-webkit'
 
-export const SCENARIOS: Scenario[] = [s10, s12, m01, s14, s15, s17, s18, s19, s24, s25, s26, s28, s29, s32, s33, s34, s35, s40, s43, s47]
+export const SCENARIOS: Scenario[] = [s01, s02, s03, s04, s05, s06, s08, s10, s12, m01, s14, s15, s17, s18, s19, s24, s25, s26, s28, s29, s32, s33, s34, s35, s37, s40, s43, s47, s48]

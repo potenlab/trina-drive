@@ -52,7 +52,7 @@ export class Features {
 
   get(f: Feature): Promise<FeatureResult> {
     let p = this.cache.get(f)
-    if (!p) { p = this.probe(f).then((ok) => ({ ok, reason: ok ? '' : WHO[f] }), (e) => ({ ok: false, reason: `${WHO[f]} (probe: ${(e as Error).message})` })); this.cache.set(f, p) }
+    if (!p) { p = this.probe(f).then((ok) => ({ ok, reason: ok ? '' : WHO[f] }), (e) => ({ ok: false, reason: f === 'browser' || f === 'webkit' ? WHO[f] : `${WHO[f]} (probe: ${(e as Error).message.slice(0, 120)})` })); this.cache.set(f, p) }
     return p
   }
   /** forget probes (after the fixture made the team) */
