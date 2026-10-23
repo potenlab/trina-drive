@@ -25,6 +25,7 @@ import {
   recheckDir, relocateFolderRows, retireFolderRows, stageCopy, stageVersion, taken, trackNew, trackReplace, blobPath, type Placed, type Staged,
 } from './core'
 import { ensureRoot, MANAGED_LIMITS, storageSettings, systemDirs, type StorageSettings } from './settings'
+import { relocateCopies } from '../share/rejudge'
 
 export type Conflict = 'fail' | 'rename' | 'replace'
 export const asConflict = (v: unknown, dflt: Conflict = 'fail'): Conflict => v === 'rename' || v === 'replace' || v === 'fail' ? v : dflt
@@ -244,7 +245,7 @@ export class Managed {
     fs.renameSync(real, to)
     if (e.kind === 'dir') relocateFolderRows(this.db, real, to)
     const vto = `${parent.vpath}/${n}`
-    try { this.db.transaction(() => this.audit(`files rename ${from} -> ${vto}`, [from, vto]))() } catch (err) {
+    try { this.db.transaction(() => { relocateCopies(this.db, real, to); this.audit(`files rename ${from} -> ${vto}`, [from, vto]) })() } catch (err) {
       fs.renameSync(to, real); if (e.kind === 'dir') relocateFolderRows(this.db, to, real); throw err
     }
     return { path: vto }
@@ -292,7 +293,10 @@ export class Managed {
     const vto = `${target.vpath}/${n}`
     const widens = this.widens(parent.rows, target.rows)
     try {
-      this.db.transaction(() => this.audit(`files move ${vpath} -> ${vto}${widens ? ` (widens: ${widens} more ${widens === 1 ? 'person reads' : 'people read'} it)` : ''}`, [vpath, vto]))()
+      this.db.transaction(() => {
+        relocateCopies(this.db, real, dest) // AI-draft copies are found where they are now (src/share/rejudge.ts)
+        this.audit(`files move ${vpath} -> ${vto}${widens ? ` (widens: ${widens} more ${widens === 1 ? 'person reads' : 'people read'} it)` : ''}`, [vpath, vto])
+      })()
     } catch (err) { fs.renameSync(dest, real); if (e.kind === 'dir') relocateFolderRows(this.db, dest, real); throw err }
     return { to: vto, widens }
   }
@@ -361,6 +365,7 @@ export class Managed {
         id = Number(this.db.query(`INSERT INTO mtrash (kind, name, orig_parent, orig_vpath, trash_path, dev, ino, size, files, deleted_at, deleted_by, purge_after)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(e.kind, name, pid, vpath, dest, String(st.dev), String(st.ino), bytes, count, now, this.personId,
           now + this.s.trashDays * 86400_000).lastInsertRowid)
+        relocateCopies(this.db, real, dest)
         this.audit(`files delete ${vpath} (to the trash${e.kind === 'dir' ? `, ${count} files` : ''})`, [vpath])
       })()
     } catch (err) {
@@ -466,6 +471,7 @@ export class Managed {
     try {
       this.db.transaction(() => {
         this.db.query('UPDATE mtrash SET restored_at = ?, restored_by = ? WHERE id = ?').run(Date.now(), this.personId, t.id)
+        relocateCopies(this.db, t.trash_path, dest)
         this.audit(`trash restore #${t.id} -> ${vto}`, [vto])
       })()
     } catch (e) { fs.renameSync(dest, t.trash_path); if (t.kind === 'dir') relocateFolderRows(this.db, dest, t.trash_path); throw e }

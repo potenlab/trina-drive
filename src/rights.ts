@@ -114,6 +114,27 @@ export class Rights {
     if (own) return own.personal_owner === a.personId
     return this.manages(a.personId, f) || this.aiLevel(a.personId, f) >= 1 || this.nasReader(a.personId, f) === true
   }
+  // ---------- sharing (Trina Cloud v1: Viewer = read, Editor = write, Manager = write + manage; owner decision O1) ----------
+  /**
+   * O1 "Editors can change permissions and share": on unless this folder or one above it turned it off (NULL = as the
+   * folder above, a top folder's NULL = on). Off above cannot be turned back on below, like the flags (R0).
+   */
+  editorsCanShare(f: FolderRow): boolean {
+    const chain = this.chain(f)
+    return chain.length > 0 && !this.personal(f) && !chain.some((r) => (r as FolderRow & { editors_can_share?: number | null }).editors_can_share === 0)
+  }
+  /** The folder is closed to people on the web (quarantine, a widened copy pending): nobody shares it until it opens. */
+  closedForPeople(f: FolderRow) { return this.chain(f).some((r) => r.quarantine || r.widened_pending) }
+  /**
+   * May change sharing on f at all (the share dialog's controls): the admin, a manager of f, or an Editor (level write)
+   * where editors may share (O1). Never inside a personal folder. What each may change is decided in src/share/service.ts.
+   */
+  canShare(a: Actor, f: FolderRow): boolean {
+    if (!this.top(f) || this.personal(f)) return false
+    if (a.admin || this.manages(a.personId, f)) return true
+    return this.aiLevel(a.personId, f) >= 2 && this.editorsCanShare(f) && !this.closedForPeople(f)
+  }
+
   /** Change AI readers (rules) and "start fresh here" on f: admin or manage (R7). Never inside a personal folder. */
   canEditRules(a: Actor, f: FolderRow) { return !this.personal(f) && (a.admin || this.manages(a.personId, f)) }
   /** no-AI on: admin, manage, or the owner of a personal folder. off: admin, or that owner (R7: manage cannot). */
