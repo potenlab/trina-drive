@@ -3,8 +3,10 @@
 //   cloud.console_url   where Members, billing and the account live
 //   cloud.managed       this person comes from the console (people pages are read-only for them)
 //   cloud.has_password  false: re-authenticate with a passkey, an authenticator code or the console (reauth_url)
+//   myFilesPath         "/<mount name>" of the person's My files (B2, docs/MY-FILES.md), or null; absent when self-hosted
 import type { MeExtra } from '../web/me-extras'
 import { cloudConfig } from './config'
+import { myFilesPath } from './my-files'
 
 export const cloudMeExtras: MeExtra[] = [
   (w, a) => {
@@ -17,4 +19,5 @@ export const cloudMeExtras: MeExtra[] = [
       display_name: r?.display_name ?? null, reauth_url: r?.cloud_user ? '/api/sso/start?reauth=1' : null,
     } }
   },
+  (w, a) => cloudConfig(w.db) ? { myFilesPath: myFilesPath(w.db, a.personId) } : {},
 ]

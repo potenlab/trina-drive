@@ -2,6 +2,7 @@
 //   cloud sync-members --json B64 | --stdin   the console's member sync (docs/SSO-CONTRACT.md), one JSON line out
 //   cloud usage --json                        people, AI use and storage for the console (hourly)
 //   people reset-link NAME [--break-glass]    emergency way in when the console is down: a one-time reset link
+//   cloud my-files [--dry-run] [--url URL]    backfill My files (B2): one for every active member, leavers' to Former members
 import { appendAudit } from '../audit'
 import { ENV_PREFIX } from '../config'
 import type { CliCommand, CliContext } from '../cli-registry'
@@ -16,6 +17,7 @@ import { OutboxMailer, RelayMailer, type Mailer } from '../web/mail'
 import { notify } from '../web/notices'
 import { ensureWebSchema } from '../web/schema'
 import { cloudConfigFromEnv, cloudConfig } from './config'
+import { afterReconcile, reconcileMyFiles } from './my-files'
 import { applySync, decodePayload } from './sync'
 
 export const BREAK_GLASS_MS = 24 * 3600_000
@@ -51,7 +53,7 @@ const syncMembers: CliCommand = {
     if (j >= 0 && args[j + 1]) raw = decodePayload(args[j + 1]!, true)
     else if (args.includes('--stdin')) raw = decodePayload(await readStdin(), false)
     else { line({ ok: false, error: 'bad_json', message: 'give --json <base64url JSON> or --stdin' }); return 1 }
-    const r = await applySync({ db, cfg, mailer: cliMailer(dataDir), baseUrl: teamUrl(db, args) }, raw)
+    const r = await applySync({ db, cfg, mailer: cliMailer(dataDir), baseUrl: teamUrl(db, args), dataDir }, raw)
     line(r)
     return r.ok ? 0 : 1
   },
@@ -108,4 +110,32 @@ const resetLink: CliCommand = {
   },
 }
 
-export const cloudCommands: CliCommand[] = [syncMembers, usageCmd, resetLink]
+/**
+ * `cloud my-files`: what the sync and every sign-in do anyway, for everyone at once — for teams that existed before My
+ * files (run once after the upgrade), and to repair. --dry-run only counts. One JSON line out.
+ */
+const myFilesCmd: CliCommand = {
+  name: 'cloud my-files',
+  help: '  cloud my-files [--dry-run] [--url URL]     give every active member a My files folder, move leavers\' to Former members (one JSON line)',
+  run: async ({ db, dataDir, args, out }) => {
+    const line = (o: unknown) => out(JSON.stringify(o))
+    if (!cloudConfig(db)) { line({ ok: false, error: 'not_cloud', message: `${ENV_PREFIX}_CLOUD_ISSUER, _TEAM and _SSO_KEYS are not set` }); return 1 }
+    if (storageSettings(db, dataDir).mode !== 'managed') { line({ ok: false, error: 'not_managed', message: 'My files live in managed storage; this drive is in-place' }); return 1 }
+    ensureWebSchema(db)
+    if (args.includes('--dry-run')) {
+      const missing = db.query<{ name: string }, []>(`SELECT p.name FROM people p JOIN accounts a ON a.person_id = p.id WHERE p.active = 1 AND a.cloud_user IS NOT NULL
+        AND p.id NOT IN (SELECT person_id FROM cloud_my_files WHERE state = 'mine') ORDER BY p.name`).all().map((p) => p.name)
+      const leaving = db.query<{ name: string }, []>(`SELECT DISTINCT p.name FROM people p JOIN cloud_my_files c ON c.person_id = p.id WHERE p.active = 0 AND c.state = 'mine' ORDER BY p.name`).all().map((p) => p.name)
+      line({ ok: true, dry_run: true, without_my_files: missing, to_former_members: leaving })
+      return 0
+    }
+    const r = reconcileMyFiles(db, dataDir)
+    await afterReconcile({ db, mailer: cliMailer(dataDir), baseUrl: teamUrl(db, args) }, r)
+    if (r.created || r.adopted || r.restored || r.transferred)
+      appendAudit(db, { personId: null, tokenId: null, tool: 'cli', command: `cloud my-files: ${r.created} created, ${r.adopted} adopted, ${r.restored} restored, ${r.transferred} moved to former members`, files: [], outcome: 'ok' })
+    line({ ok: !r.failed.length, created: r.created, adopted: r.adopted, restored: r.restored, transferred: r.transferred, failed: r.failed })
+    return r.failed.length ? 1 : 0
+  },
+}
+
+export const cloudCommands: CliCommand[] = [syncMembers, usageCmd, resetLink, myFilesCmd]

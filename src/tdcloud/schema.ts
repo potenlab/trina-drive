@@ -30,4 +30,15 @@ export const cloudMigrations: Migration[] = [
       -- member-sync events already applied (idempotent by id), kept 30 days
       CREATE TABLE IF NOT EXISTS cloud_sync_events (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);`),
   },
+  {
+    // B2 "My files" (src/tdcloud/my-files.ts): each person's managed personal folder, by its folders row (the id stays
+    // through moves). state 'mine' = their My files now, 'former' = in Former members/<former_name> (they left),
+    // 'gone' = an admin released it (no longer tracked). At most one 'mine' per person, even with two processes.
+    id: 'tdcloud.my_files', phase: 'core', up: (db) => db.exec(`
+      CREATE TABLE IF NOT EXISTS cloud_my_files (
+        folder_id INTEGER PRIMARY KEY, person_id INTEGER NOT NULL, mount_name TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('mine','former','gone')), created_at INTEGER NOT NULL,
+        former_at INTEGER, former_name TEXT);
+      CREATE UNIQUE INDEX IF NOT EXISTS cloud_my_files_mine ON cloud_my_files (person_id) WHERE state = 'mine';`),
+  },
 ]
