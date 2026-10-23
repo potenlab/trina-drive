@@ -105,8 +105,9 @@ export class DockerDriver implements Driver {
       '--security-opt', 'no-new-privileges:true', '--read-only', '--mount', l.dataMount(spec.slug), '--mount', l.stagingMount(spec.slug),
       '--entrypoint', '/bin/sh', spec.image, '-c', `chown ${spec.uid}:${spec.uid} /data /backup && chmod 0700 /data /backup`], { what: 'chown data' })
     const init = await this.once(host, spec, ['init'], { secret: true })
-    const setupToken = SETUP_RE.exec(init.stdout)?.[1]
-    if (!setupToken) throw new DriverError('tdrive init printed no setup token')
+    // SSO-only drives print no token ("web setup is already done"): people come in through the console
+    const setupToken = SETUP_RE.exec(init.stdout)?.[1] ?? null
+    if (!setupToken && !/setup is already done/.test(init.stdout)) throw new DriverError('tdrive init printed no setup token')
     // the OAuth issuer / MCP resource for claude.ai and ChatGPT connectors (src/oauth); passkeys' RP ID
     await this.once(host, spec, ['public', 'enable', '--url', spec.url])
     const key = await this.once(host, spec, ['backup', 'keygen', '--set'], { secret: true })

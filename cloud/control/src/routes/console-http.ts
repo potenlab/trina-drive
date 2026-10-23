@@ -30,7 +30,7 @@ export function ssoPostCsp(teamOrigin: string): string {
 }
 
 export const HEADERS: Record<string, string> = {
-  'content-security-policy': CSP, 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY',
+  'content-security-policy': CSP, 'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin', 'x-frame-options': 'DENY',
   'strict-transport-security': 'max-age=31536000; includeSubDomains', 'cross-origin-opener-policy': 'same-origin-allow-popups',
   'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(self "https://buy.paddle.com" "https://sandbox-buy.paddle.com")',
 }
@@ -66,8 +66,10 @@ export const sessionCookie = (v: string, maxAge: number, secure: boolean) =>
 /** A browser request from the console's own pages (or no browser headers at all: curl, the landing page's server). */
 export function sameOrigin(req: Request, controlOrigin: string): boolean {
   const o = req.headers.get('origin')
-  if (o) return o === controlOrigin
+  // Chromium sends `Origin: null` for forms on a page whose Referrer-Policy hides the origin; fall back to Fetch Metadata
   const site = req.headers.get('sec-fetch-site')
+  if (o === 'null') return site === 'same-origin'
+  if (o) return o === controlOrigin
   return !site || site === 'same-origin' || site === 'none'
 }
 

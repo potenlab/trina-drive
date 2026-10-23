@@ -20,8 +20,8 @@ export interface TeamSpec {
 export interface ExecResult { code: number; stdout: string; stderr: string }
 
 export interface CreateResult {
-  /** printed once by `tdrive init`; mailed to the buyer, never stored */
-  setupToken: string
+  /** printed once by `tdrive init`; mailed to the buyer, never stored. null in SSO mode: init prints none (review #6) */
+  setupToken: string | null
   /** the product's backup SECRET key (`backup keygen`); wrapped by the master key before it is stored */
   productBackupSecret: string
   /** the address the team's DNS record points at (AWS: the host's Elastic IP; local: none) */
