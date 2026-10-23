@@ -6,8 +6,11 @@
 #   tdcloud-host prepare <slug> <uid> <disk-gb> <ssm-parameter>   team directory, XFS project quota, env file (0600)
 #   tdcloud-host cleanup <slug>                                   remove the quota and the team directory
 #   tdcloud-host ship <slug> <s3://bucket/prefix/> <file>...      upload backup files from staging, print JSON lines
-#   tdcloud-host info                                             JSON: instance, Elastic IP, free space, teams,
-#                                                                 team containers, bootstrap done (ready)
+#   tdcloud-host info                                             JSON: instance, Elastic IP, free/total space and
+#                                                                 use % of the data volume, teams, team containers,
+#                                                                 bootstrap done (ready)
+#   tdcloud-host check <slug>                                     isolation probes from inside the team's container
+#                                                                 (ok|FAIL|skip lines; exit 1 on a FAIL)
 set -euo pipefail
 export PATH=$PATH:/usr/local/sbin:/snap/bin
 ROOT=/srv/tdcloud
@@ -83,11 +86,81 @@ case $cmd in
     ip=$(imds meta-data/public-ipv4)
     free=$(df -B1 --output=avail "$ROOT" | tail -1 | tr -d ' ')
     free=${free:-0}
+    size=$(df -B1 --output=size "$ROOT" | tail -1 | tr -d ' ')
+    size=${size:-0}
+    pct=$(df --output=pcent "$ROOT" | tail -1 | tr -dc '0-9')
+    pct=${pct:-0}
     # the scaler terminates an empty host only when both are 0 (and no team row names it)
     teams=$(find "$TEAMS" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
     containers=$(docker ps -aq --filter label=tdcloud.team 2>/dev/null | wc -l)
     ready=$([ -f /etc/tdcloud/ready ] && echo true || echo false)
-    printf '{"instanceId":"%s","publicIp":%s,"freeBytes":%s,"teams":%s,"containers":%s,"ready":%s}\n' "$(imds meta-data/instance-id)" "$([ -n "$ip" ] && echo "\"$ip\"" || echo null)" "$free" "$teams" "$containers" "$ready"
+    printf '{"instanceId":"%s","publicIp":%s,"freeBytes":%s,"sizeBytes":%s,"usedPct":%s,"teams":%s,"containers":%s,"ready":%s}\n' "$(imds meta-data/instance-id)" "$([ -n "$ip" ] && echo "\"$ip\"" || echo null)" "$free" "$size" "$pct" "$teams" "$containers" "$ready"
     ;;
-  *) sed -n '2,10p' "$0"; exit 2 ;;
+  check)
+    # What a team's container can reach, tried from inside it (as the team's uid, with its network): the metadata
+    # service, the VPC (the control plane's private address), the host's own ports and other teams must be out of
+    # reach; the mail relay on its gateway, public HTTPS and the control plane's public address (hairpin: invites call
+    # back to it) must work. Settings from /etc/tdcloud/host.conf; CHECK_* override them (the local stack, cloud/dev).
+    [ $# -eq 1 ] || die "usage: check <slug>"
+    slug=$1; slug_ok "$slug"
+    # shellcheck source=/dev/null
+    [ -r /etc/tdcloud/host.conf ] && . /etc/tdcloud/host.conf
+    c=tdc-$slug net=tdc-net-$slug
+    [ "$(docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null)" = true ] || die "$c is not running"
+    gw=$(docker network inspect -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}' "$net") || die "no network $net"
+    others=$(for o in $(docker ps --filter label=tdcloud.team --format '{{.Names}}'); do
+      [ "$o" = "$c" ] || docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$o"
+    done | tr ' ' '\n' | grep -v '^$' | head -3 | tr '\n' ' ')
+    hairpin=${CHECK_HAIRPIN_URL-${DOMAIN:+https://$DOMAIN/healthz}}
+    probe='
+const e = process.env, out = []
+const line = (s, n, d) => { out.push(`${s} ${n} ${d}`) }
+const tcp = (host, port, ms = 3000) => new Promise((res) => {
+  const t = setTimeout(() => res("timeout"), ms)
+  Bun.connect({ hostname: host, port, socket: { open(s) { clearTimeout(t); s.end(); res("open") }, data() {}, error() { clearTimeout(t); res("error") }, connectError() { clearTimeout(t); res("refused") } } })
+    .catch(() => { clearTimeout(t); res("refused") })
+})
+const blocked = async (name, host, port) => {
+  if (!host) return line("skip", name, "(no address)")
+  const r = await tcp(host, port)
+  line(r === "open" ? "FAIL" : "ok", name, `${host}:${port} ${r === "open" ? "REACHABLE" : r}`)
+}
+const reach = async (name, url, want) => {
+  if (!url) return line("skip", name, "(no address)")
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000), redirect: "manual" })
+    const body = (await r.text()).slice(0, 300)
+    const good = r.status < 500 && (!want || want(r, body))
+    line(good ? "ok" : "FAIL", name, `${url} ${r.status} ${body.replace(/\s+/g, " ").slice(0, 80)}`)
+  } catch (x) { line("FAIL", name, `${url} ${x.name}: ${x.message}`) }
+}
+await blocked("imds-blocked", "169.254.169.254", 80)
+await blocked("control-private-blocked", e.CONTROL, 8790)
+await blocked("control-private-443-blocked", e.CONTROL, 443)
+for (const p of (e.HOST_PORTS || "22 80 443 2019").split(" ").filter(Boolean).map(Number)) await blocked(`host-port-${p}-blocked`, e.GW, p)
+for (const ip of (e.OTHERS || "").split(" ").filter(Boolean)) await blocked("other-team-blocked", ip, 8787)
+await reach("relay-reachable", `http://${e.GW}:${e.RELAY_PORT}/healthz`, (r) => r.status === 200)
+await reach("public-https", e.PUBLIC_URL)
+await reach("hairpin-control", e.HAIRPIN, (r) => r.status === 200)
+console.log(out.join("\n"))
+// a dropped connection attempt keeps retrying in the background for a minute or two: do not wait for it
+process.exit(0)
+'
+    out=$(docker exec -e GW="$gw" -e CONTROL="${CHECK_CONTROL_ADDR-${CONTROL_PRIVATE_IP:-}}" -e OTHERS="$others" \
+      -e RELAY_PORT="${MAIL_RELAY_PORT:-8025}" -e HOST_PORTS="${CHECK_HOST_PORTS:-22 80 443 2019}" -e PUBLIC_URL="${CHECK_PUBLIC_URL:-https://checkip.amazonaws.com/}" \
+      -e HAIRPIN="$hairpin" "$c" /usr/local/bin/bun -e "$probe") || die "the probe did not run in $c"
+    # the host side: the relay's firewall rule (on AWS hosts; not on the local stack)
+    if command -v iptables >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then
+      if iptables -C TDCLOUD-INPUT -i tdcb+ -p tcp --dport "${MAIL_RELAY_PORT:-8025}" -j ACCEPT 2>/dev/null && iptables -C DOCKER-USER -i tdcb+ -d 169.254.0.0/16 -j DROP 2>/dev/null; then
+        out="$out"$'\n'"ok firewall-rules TDCLOUD-INPUT relay rule + DOCKER-USER metadata drop"
+      else
+        out="$out"$'\n'"FAIL firewall-rules TDCLOUD-INPUT / DOCKER-USER rules missing (rerun tdcloud-firewall)"
+      fi
+    else
+      out="$out"$'\n'"skip firewall-rules (no iptables as root here)"
+    fi
+    echo "$out"
+    ! grep -q '^FAIL' <<<"$out"
+    ;;
+  *) sed -n '2,13p' "$0"; exit 2 ;;
 esac

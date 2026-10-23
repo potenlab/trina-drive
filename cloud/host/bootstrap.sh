@@ -153,6 +153,7 @@ TDCLOUD_SLUG_LABEL=$(awk -F. '{print NF}' <<<"$DOMAIN")
 TDCLOUD_ASK_URL=http://$CONTROL_PRIVATE_IP:8790/internal/caddy/ask?key=$ask_key
 ACME_EMAIL=$ACME_EMAIL
 TDCLOUD_FRONT_PROXIES=${FRONT_PROXIES:-}
+TDCLOUD_TRUSTED_OFFICE_CIDRS=${OFFICE_CIDRS:-192.0.2.0/32}
 EOF
   chmod 0600 /etc/tdcloud/caddy.env
   docker network inspect tdc-edge >/dev/null 2>&1 || docker network create tdc-edge
@@ -206,6 +207,13 @@ EOF
   cat > /etc/cron.d/tdcloud-control-backup <<EOF
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
 23 2 * * * root f=/var/lib/tdcloud/control-snapshot.db; rm -f \$f; docker exec tdc-control bun /app/src/main.ts db snapshot \$f && aws s3 cp --only-show-errors \$f s3://$BACKUP_BUCKET/control/control-\$(date -u +\%Y\%m\%dT\%H\%M\%SZ).db; rm -f \$f
+EOF
+  # hourly: each team host's data volume (ops mail at TDCLOUD_HOST_DISK_ALERT_PCT, default 80%, once per host and
+  # half day; `hosts check`, control/src/cli/ops-hosts.ts). The volume is shared by every team on the host: when it
+  # fills, every team's database stops — grow it (gp3 grows online) or stop placing teams there.
+  cat > /etc/cron.d/tdcloud-host-disk <<'EOF'
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+17 * * * * root docker exec tdc-control bun /app/src/main.ts hosts check --alert >/var/log/tdcloud-host-check.log 2>&1
 EOF
 fi
 # the scaler's signal: everything above is in place (the firewall, the data volume, the address, Caddy, the relay)
