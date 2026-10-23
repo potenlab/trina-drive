@@ -66,8 +66,10 @@ describe('Paddle → provisioning', () => {
     expect(env.driver.calls).toContain('create acme')
     const mail = env.mailer.sent.find((m) => m.subject.startsWith('Your Trina Drive is ready'))!
     expect(mail.to).toBe('buyer@acme.test')
-    const token = mail.text.match(/#\/setup\/(\S+)/)![1]!
+    // in the fragment (never sent to a server) and pre-filled by the setup page: nothing to paste
+    const token = mail.text.match(/\/#token=(\S+)/)![1]!
     expect(token).toStartWith('tdrive_setup_')
+    expect(mail.text).not.toContain('paste')
     expect(mail.text).toContain(`${s.team.url}/mcp`)
     // never in the control plane's database (any table, any column)
     const dump = env.cloud.db.query<{ sql: string }, []>("SELECT name AS sql FROM sqlite_master WHERE type = 'table'").all()

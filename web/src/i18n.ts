@@ -11,6 +11,7 @@ const en = {
   // sign in / setup / links
   login_title: 'Sign in', login_name: 'Name or mail address', password: 'Password', login_submit: 'Sign in',
   login_rate: 'Too many attempts. Wait a few minutes.', login_bad: 'Wrong name or password.',
+  setup_intro_link: 'The setup token came with your link. Create the admin account.',
   setup_title: 'First setup', setup_intro: 'Paste the one-time setup token that `init` printed on the server, then create the admin account.',
   setup_token: 'Setup token', your_name: 'Your name', person_name: 'Name', email: 'Mail address', new_password: 'New password (10+ characters)',
   setup_submit: 'Create admin', setup_none: 'This server has no setup pending. Run `init` on the server to print a setup token.',
@@ -117,6 +118,7 @@ const ko: Record<Key, string> = {
   yes: '예', no: '아니요', unknown: '모름', remove: '빼기', add: '더하기', none: '없음', error_generic: '문제가 생겼습니다.',
   login_title: '로그인', login_name: '이름 또는 메일 주소', password: '비밀번호', login_submit: '로그인',
   login_rate: '시도가 너무 많습니다. 몇 분 뒤에 다시 하세요.', login_bad: '이름 또는 비밀번호가 맞지 않습니다.',
+  setup_intro_link: '설정 토큰은 링크에서 채워졌습니다. 관리자 계정을 만드세요.',
   setup_title: '처음 설정', setup_intro: '서버에서 `init`이 출력한 일회용 설정 토큰을 붙여 넣고 관리자 계정을 만드세요.',
   setup_token: '설정 토큰', your_name: '이름', person_name: '이름', email: '메일 주소', new_password: '새 비밀번호(10자 이상)',
   setup_submit: '관리자 만들기', setup_none: '이 서버에는 대기 중인 설정이 없습니다. 서버에서 `init`을 실행해 설정 토큰을 받으세요.',

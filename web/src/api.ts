@@ -29,7 +29,9 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
 export const get = <T = any>(path: string) => api<T>('GET', path)
 
 // shapes the server returns (src/web/views.ts)
-export interface Me { id: number; name: string; admin: boolean; email: string | null; unread_notices: number; approvals?: number; second_factor?: boolean; storage?: 'managed' | 'inplace' }
+export interface Me { id: number; name: string; admin: boolean; email: string | null; unread_notices: number; approvals?: number; second_factor?: boolean; storage?: 'managed' | 'inplace'
+  /** hosted server: this admin must add a second factor before anything else (src/web/hosted.ts) */
+  second_factor_required?: boolean }
 export interface FolderSummary {
   /** in managed storage (the server owns it): no NAS, rules decide who views and who edits */
   managed?: boolean

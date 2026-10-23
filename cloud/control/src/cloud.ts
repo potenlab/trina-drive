@@ -285,10 +285,8 @@ export class Cloud {
       text: [
         `${t.name}'s Trina Drive is running at ${url}`,
         '',
-        'Create the first admin account (this link works once, for 7 days):',
-        `${url}/#/setup/${token}`,
-        '',
-        `If the page asks for a setup token, paste this: ${token}`,
+        'Create the first admin account (this link works once, for 7 days; the setup token is filled in for you):',
+        `${url}/#token=${token}`,
         '',
         `Then connect Claude or ChatGPT: in Claude, Settings → Connectors → Add custom connector → ${url}/mcp`,
         '',

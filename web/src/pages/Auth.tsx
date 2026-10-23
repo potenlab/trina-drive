@@ -38,9 +38,10 @@ export function Login({ onDone }: { onDone?: () => void } = {}) {
   )
 }
 
-export function Setup({ pending, onDone }: { pending: boolean; onDone: () => void }) {
+/** `token`: from the setup link's #fragment (App.tsx), pre-filled. */
+export function Setup({ pending, token = '', onDone }: { pending: boolean; token?: string; onDone: () => void }) {
   const { me, setMe } = useSession()
-  const [form, setForm] = useState({ setup_token: '', name: '', email: '', password: '' })
+  const [form, setForm] = useState({ setup_token: token, name: '', email: '', password: '' })
   const a = useAction()
   if (!me) {
     if (!pending) return <div className="card narrow"><h1>{t('setup_title')}</h1><p>{t('setup_none')}</p></div>
@@ -52,9 +53,9 @@ export function Setup({ pending, onDone }: { pending: boolean; onDone: () => voi
         if (r) { setCsrf(r.csrf); setMe(r.me); onDone(); go('/setup/folders') }
       }}>
         <h1>{t('setup_title')}</h1>
-        <p className="muted">{t('setup_intro')}</p>
+        <p className="muted">{t(token ? 'setup_intro_link' : 'setup_intro')}</p>
         <label>{t('setup_token')}<input {...f('setup_token')} required autoComplete="off" spellCheck={false} /></label>
-        <label>{t('your_name')}<input {...f('name')} required autoComplete="username" /></label>
+        <label>{t('your_name')}<input {...f('name')} required autoComplete="username" autoFocus={!!token} /></label>
         <label>{t('email')}<input type="email" {...f('email')} required autoComplete="email" /></label>
         <label>{t('new_password')}<input type="password" {...f('password')} required minLength={10} autoComplete="new-password" /></label>
         <ErrorLine error={a.error} />

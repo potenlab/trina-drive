@@ -6,6 +6,7 @@ import type { DriveEvent } from '../notify/events'
 import type { McpLimiter } from '../ratelimit'
 import type { RateLimiter } from './auth'
 import type { Mailer } from './mail'
+import type { TrustedProxies } from './proxy'
 
 export interface WebOptions {
   /** extra origins allowed to call /api and /mcp (besides the server's own) */
@@ -23,6 +24,10 @@ export interface WebOptions {
   emit?: (e: DriveEvent) => void
   /** the OAuth authorization server (src/oauth): default from `public enable` (meta), null = off */
   oauth?: OAuthOptions | null
+  /** reverse proxies whose forwarded client address is believed on the main listener (proxy.ts); default none */
+  trustedProxy?: TrustedProxies | null
+  /** hosted mode (hosted.ts): admins must enrol a second factor before anything else */
+  hosted?: boolean
 }
 
 export interface WebCtx extends Ctx {

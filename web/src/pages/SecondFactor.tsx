@@ -173,3 +173,19 @@ export function SecondFactorSettings() {
     </section>
   )
 }
+
+/** Hosted servers: an admin without a second factor sees only this (the server refuses everything else). */
+export function EnrollSecondFactor({ onDone }: { onDone: () => void }) {
+  const { me, setMe } = useSession()
+  return (
+    <div className="card">
+      <h1>{at('mfa_enroll_title')}</h1>
+      <p className="muted">{at('mfa_enroll_intro')}</p>
+      <SecondFactorSettings />
+      <p>
+        <button type="button" className="btn primary" disabled={!me?.second_factor} onClick={onDone}>{at('mfa_enroll_continue')}</button>{' '}
+        <button type="button" className="btn ghost" onClick={() => api('POST', '/logout').finally(() => { setMe(null); go('/login') })}>{t('sign_out')}</button>
+      </p>
+    </div>
+  )
+}
