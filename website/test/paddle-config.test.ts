@@ -72,10 +72,11 @@ test('extraSeatsFor counts people beyond the included seats', () => {
 describe('checkoutMailto', () => {
   const body = (url: string) => decodeURIComponent(url.split('body=')[1] ?? '')
   const subject = (url: string) => decodeURIComponent(url.split('subject=')[1]?.split('&')[0] ?? '')
-  test('KRW managed plan → bank transfer + tax invoice inquiry', () => {
+  test('KRW fallback (Paddle not configured) is a plain request, no bank transfer', () => {
     const url = checkoutMailto('team', { currency: 'KRW', lang: 'ko', billing: 'yearly', people: 12 })
     expect(url.startsWith('mailto:contact@trina.app?')).toBe(true)
-    expect(subject(url)).toContain('계좌이체·세금계산서 문의')
+    expect(subject(url)).toBe('Trina Drive 팀 (관리형) 신청')
+    expect(body(url)).not.toContain('계좌이체')
     expect(body(url)).toContain('결제 주기: 연 결제')
     expect(body(url)).toContain('인원(AI를 연결할 사람 수): 12')
   })

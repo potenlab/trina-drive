@@ -1,10 +1,9 @@
 // The one entry point for buying a plan. Every pricing button calls startCheckout(planId, options).
 //
 // Routing (decision: research/trina-drive/payments/README.md):
-//   - USD, Team/Business, Paddle configured at build time → Paddle overlay checkout (Paddle.com is Merchant of
-//     Record). Paddle.js is loaded from cdn.paddle.com only when a price button is clicked.
-//   - KRW (Korean customers)                            → email: bank transfer + 전자세금계산서 (card monthly billing
-//     via Payple comes later).
+//   - Team/Business, Paddle configured at build time → Paddle overlay checkout (Paddle.com is Merchant of Record) in
+//     both currencies: Korean cards are charged in KRW through the prices' KR overrides. Paddle.js is loaded from
+//     cdn.paddle.com only when a price button is clicked.
 //   - Setup & migration                                 → email (a human service, quoted; not sold through a MoR).
 //   - Anything else, or Paddle not configured / blocked → email (the original mailto flow).
 // The CSP in vercel.json and public/_headers allows Paddle's origins.
@@ -40,18 +39,16 @@ const PLAN_NAMES: Record<PlanId, { en: string; ko: string }> = {
 export function checkoutMailto(planId: PlanId, { currency, lang, billing = 'monthly', people }: CheckoutOptions): string {
   const plan = PLAN_NAMES[planId][lang]
   const managed = isPaidPlan(planId)
-  const krwTransfer = currency === 'KRW' && managed
   const cycle = lang === 'ko' ? (billing === 'yearly' ? '연 결제' : '월 결제') : billing === 'yearly' ? 'yearly' : 'monthly'
   const n = people && people > 0 ? String(Math.floor(people)) : ''
   const subject = lang === 'ko'
-    ? krwTransfer ? `Trina Drive ${plan} 계좌이체·세금계산서 문의` : `Trina Drive ${plan} 신청`
-    : krwTransfer ? `Trina Drive ${plan} — bank transfer (KRW) with tax invoice` : `Trina Drive ${plan}`
+    ? `Trina Drive ${plan} 신청`
+    : `Trina Drive ${plan}`
   const lines = lang === 'ko'
     ? [
         `플랜: ${plan}`,
         ...(managed ? [`결제 주기: ${cycle}`] : []),
         `통화: ${currency}`,
-        ...(krwTransfer ? ['결제 방법: 계좌이체 (전자세금계산서 발행)', '사업자등록번호:', '세금계산서 받을 이메일:'] : []),
         '회사 이름:',
         `인원(AI를 연결할 사람 수): ${n}`,
         'NAS 또는 맥 미니 유무:',
@@ -60,7 +57,6 @@ export function checkoutMailto(planId: PlanId, { currency, lang, billing = 'mont
         `Plan: ${plan}`,
         ...(managed ? [`Billing: ${cycle}`] : []),
         `Currency: ${currency}`,
-        ...(krwTransfer ? ['Payment: bank transfer with a Korean tax invoice', 'Business registration no.:'] : []),
         'Company:',
         `AI-connected people: ${n}`,
         'NAS or Mac mini in the office:',
@@ -123,8 +119,8 @@ const prefersDark = () =>
     : window.matchMedia('(prefers-color-scheme: dark)').matches
 
 /** Whether this click would open the Paddle checkout (vs. email). */
-export function usesPaddle(planId: PlanId, { currency, billing = 'monthly', people }: CheckoutOptions): boolean {
-  if (currency !== 'USD' || !isPaidPlan(planId)) return false
+export function usesPaddle(planId: PlanId, { billing = 'monthly', people }: CheckoutOptions): boolean {
+  if (!isPaidPlan(planId)) return false
   return !!checkoutItems(PADDLE, planId, billing, extraSeatsFor(planId, people))
 }
 

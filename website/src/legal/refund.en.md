@@ -26,7 +26,7 @@ If we cannot install or operate Trina Drive on your hardware for reasons on our 
 ## 5. How to request a refund
 
 - **Online orders (paid through Paddle):** request at **https://paddle.net** (look up your order with the email you used), or email contact@trina.app with your order number and we will process it with Paddle. Refunds go back to the original payment method. Banks usually take 5–10 business days to show it.
-- **Korean customers invoiced directly in KRW:** email contact@trina.app. We refund to your bank account (or cancel the card payment) within 7 business days of approval and issue an amended electronic tax invoice (수정세금계산서).
+- **Customers contracted directly by quote (e.g. setup services):** email contact@trina.app. We refund to your bank account (or cancel the card payment) within 7 business days of approval and issue an amended electronic tax invoice (수정세금계산서).
 
 ## 6. Your statutory rights
 

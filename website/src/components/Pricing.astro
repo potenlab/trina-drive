@@ -89,12 +89,7 @@ const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bi
           {plan.ctaKind === 'link'
             ? <a class="btn btn-secondary btn-block" href={LINKS.github} rel="noopener">{plan.cta}</a>
             : <button type="button" class={`btn btn-block ${plan.featured ? 'btn-primary' : 'btn-secondary'}`} data-plan={plan.id}>
-                {plan.ctaKrw
-                  ? <>
-                      <span class="price-usd">{online && plan.ctaPay ? plan.ctaPay : plan.cta}</span>
-                      <span class="price-krw">{plan.ctaKrw}</span>
-                    </>
-                  : plan.cta}
+                {online && plan.ctaPay ? plan.ctaPay : plan.cta}
               </button>}
         </article>
         )

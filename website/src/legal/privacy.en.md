@@ -40,7 +40,7 @@ We use the following service providers. Several are outside Korea, so your infor
 | Our email provider | May be outside Korea | Emails you send to us; recipient address and content of service notifications we send | Business email and service notifications | Over the network when an email is sent or received | Per our retention in §1 |
 | Tailscale Inc. | Canada / United States | Device names, operator account, connection metadata (not your files) | Secure remote operation of your server | Over the network during operation | Contract term |
 
-Customers in Korea pay by bank transfer, and we issue electronic tax invoices through the National Tax Service's Hometax system. If we later add card payments for KRW orders through a Korean payment provider (Payple), we will list it here before it is used.
+All online payments, in Korea and elsewhere, are processed by Paddle.com. We use the National Tax Service's Hometax system only to issue electronic tax invoices for setup services contracted directly by quote.
 
 Contact details of overseas recipients are available on request at contact@trina.app.
 
