@@ -333,7 +333,7 @@ export const authRoutes: ControlRoute[] = [
   { method: 'POST', path: '/api/me/totp/enable', async fn(c) {
     const s = c.signedIn(); const b = await c.form(); c.csrfOk(b)
     const codes = await c.cloud.mfa.confirm(s.userId, b.code, `user:${s.userId}`)
-    c.cloud.db.query('UPDATE sessions SET totp_at = ? WHERE id_hash = ?').run(Date.now(), s.idHash)
+    c.cloud.db.query('UPDATE sessions SET totp_at = ?, amr = ? WHERE id_hash = ?').run(Date.now(), JSON.stringify([...new Set([...s.amr, 'totp'])]), s.idHash)
     return c.json({ ok: true, recovery_codes: codes })
   } },
   { method: 'POST', path: '/api/stepup', async fn(c) {

@@ -137,6 +137,12 @@ function membersPage(c: RouteCtx) {
 <td>${roleBadge(i.role)}</td><td>${badge('Invited', 'warn')}</td><td></td><td class="actions">${admin ? `<details class="row-menu"><summary class="icon-btn" aria-label="Actions for the invite to ${esc(i.email)}">⋯</summary><div class="menu right">
 <form method="post" action="/t/${esc(t.slug)}/invites/${esc(invitePublicId(i.id))}/resend">${csrfField(s.csrf)}<button class="menu-btn">Send again</button></form>
 <form method="post" action="/t/${esc(t.slug)}/invites/${esc(invitePublicId(i.id))}/revoke">${csrfField(s.csrf)}<button class="menu-btn danger-link">Revoke invite</button></form></div></details>` : ''}</td></tr>`).join('')
+  // people removed in the console whose removal the drive has not applied yet (finding 5): shown in red until it has
+  const activeSubs = new Set(members.map((m) => m.public_id))
+  const gone = [...pending].filter((p) => !activeSubs.has(p))
+  const goneRows = gone.length ? c.cloud.db.query<{ public_id: string; email: string; name: string | null }, string[]>(`SELECT public_id, email, name FROM users WHERE public_id IN (${gone.map(() => '?').join(',')})`).all(...gone)
+    .map((u) => `<tr><td class="wide"><div class="who"><span class="avatar" style="background:var(--danger-soft);color:var(--danger)">${esc((u.name || u.email)[0]!.toUpperCase())}</span><div><b>${esc(u.name || u.email.split('@')[0])}</b><span>${esc(u.email)}</span></div></div></td>
+<td></td><td>${badge('Removal pending', 'danger')}</td><td class="faint">removed</td><td></td></tr>`).join('') : ''
   const full = seats.max != null && seats.used >= seats.max
   const inviteCard = !admin ? '' : `<section class="section"><div class="card"><div class="sec-head"><div><h2>Invite people</h2><p>They get an email link that works only for that address.</p></div></div>
 <form method="post" action="/t/${esc(t.slug)}/invite">${csrfField(s.csrf)}<div class="sec-body"><div class="inline"><label class="field" style="flex:3;min-width:220px">Email addresses<input name="emails" required placeholder="mina@company.com, sam@company.com" autocomplete="off"${full || !enrolled ? ' disabled' : ''}></label>
@@ -145,7 +151,7 @@ ${fresh ? '' : `<label class="field">Authenticator code <span class="faint" styl
 <div class="sec-foot"><span class="muted">${seats.max != null ? `${seats.used} of ${seats.max} people on ${planName(t)}` : 'Members can open the drive; admins also manage people and settings.'}</span><button class="btn btn-dark"${full || !enrolled ? ' disabled' : ''}>Send invites</button></div></form></div></section>`
   const leave = role !== 'owner' ? `<form method="post" action="/t/${esc(t.slug)}/leave" data-confirm="Leave ${esc(t.name)}? You lose access to its drive.">${csrfField(s.csrf)}<button class="btn btn-sm btn-ghost danger-link">Leave team</button></form>` : ''
   const body = `${syncLine}${inviteCard}<section class="section"><div class="card"><div class="sec-head"><div><h2>Members</h2><p>${members.length} ${members.length === 1 ? 'person' : 'people'}${invites.length ? ` · ${invites.length} invited` : ''}</p></div><span class="grow"></span>${leave}</div>
-<table class="table stack"><thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Added</th><th></th></tr></thead><tbody>${rows}${inviteRows}</tbody></table></div></section>
+<table class="table stack"><thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Added</th><th></th></tr></thead><tbody>${rows}${inviteRows}${goneRows}</tbody></table></div></section>
 <p class="hint">Owner and admins manage members and settings and are admins in the drive. Removing someone ends their sessions, tokens, AI connections and app passwords on the drive.</p>`
   return teamShell(c, s, t, role, 'members', 'Members', body)
 }

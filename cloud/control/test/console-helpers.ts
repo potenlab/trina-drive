@@ -155,7 +155,7 @@ export async function enrollTotp(b: Browser): Promise<string> {
 
 /** a complimentary team for this owner, provisioned (the fake driver) and its first member sync applied */
 export async function opsTeam(env: ConsoleEnv, owner: string, slug: string, plan: 'team' | 'business' | 'free' = 'team'): Promise<TeamRow> {
-  await env.cloud.adminCreateTeam({ email: owner, slug, name: slug[0]!.toUpperCase() + slug.slice(1), plan, actor: 'admin:test' })
+  await env.cloud.adminCreateTeam({ email: owner, slug, name: slug[0]!.toUpperCase() + slug.slice(1), plan, actor: 'admin:test', allowReserved: true })
   await runJobs(env)
   return teamBySlug(env.cloud.db, slug)!
 }
