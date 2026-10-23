@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { canSellOnline, checkoutItems, extraSeatsFor, readPaddleConfig } from '../src/paddle'
-import { checkoutMailto, usesPaddle } from '../src/checkout'
-import { CLOUD_LIVE, earlyAccessMailto } from '../src/site'
+import { checkoutMailto, earlyAccessUrl, usesPaddle } from '../src/checkout'
+import { CLOUD_LIVE } from '../src/site'
 
 const full = {
   PUBLIC_PADDLE_CLIENT_TOKEN: 'test_abc123',
@@ -99,11 +99,11 @@ describe('Trina Cloud early access (CLOUD_LIVE)', () => {
       expect(usesPaddle(id, { currency: 'USD', lang: 'en' })).toBe(false)
     }
   })
-  test('early-access email names the plan when there is one', () => {
-    const url = earlyAccessMailto('en', 'Cloud Team')
-    expect(url.startsWith('mailto:contact@trina.app?')).toBe(true)
-    expect(decodeURIComponent(url.split('subject=')[1]!.split('&')[0]!)).toBe('Trina Cloud early access')
-    expect(decodeURIComponent(url.split('body=')[1]!)).toContain('Plan: Cloud Team')
-    expect(decodeURIComponent(earlyAccessMailto('en').split('body=')[1]!)).not.toContain('Plan:')
+  test('while the cloud is not live, Cloud plans go to the console sign-up (early-access request) with the plan', () => {
+    if (CLOUD_LIVE) return
+    expect(earlyAccessUrl('team')).toBe('https://cloud.trina.app/signup?plan=team')
+    expect(earlyAccessUrl('business')).toBe('https://cloud.trina.app/signup?plan=business')
+    expect(earlyAccessUrl('setup')).toBeNull() // Enterprise on-site stays an email
+    expect(earlyAccessUrl('community')).toBeNull()
   })
 })

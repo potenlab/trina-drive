@@ -3,15 +3,14 @@
 // them. Plans and limits: research/trina-drive/PRICING.md. USD only (Paddle is Merchant of Record). Both billing
 // periods are in the HTML; the toggle flips data-billing on the section.
 //
-// Buttons with data-plan call startCheckout() (src/checkout.ts) from scripts/main.ts: Team and Business open the
-// Paddle checkout once CLOUD_LIVE is true (src/site.ts) and ask for early access by email while it is false;
-// Enterprise ('setup') always emails. Free is a link: early access by email.
-// TODO(launch): point Free at the Trina Cloud sign-up page when it opens.
+// While CLOUD_LIVE is false (src/site.ts) Free, Team and Business are links to the console sign-up (early-access
+// request). Once true, Team and Business are buttons with data-plan that call startCheckout() (src/checkout.ts) from
+// scripts/main.ts to open the Paddle checkout. Enterprise ('setup') always emails.
 import Lines from './Lines.astro'
 import type { Copy } from '../content/en'
 import { canSellOnline } from '../paddle'
 import { PADDLE } from '../paddle-env'
-import { CLOUD_LIVE, LINKS, earlyAccessMailto } from '../site'
+import { CLOUD_LIVE, LINKS } from '../site'
 import Icon from './Icon.astro'
 interface Props { t: Pick<Copy, 'pricing' | 'lang'>; tint?: boolean }
 const { t, tint = false } = Astro.props
@@ -78,8 +77,8 @@ const label = (plan: (typeof p.plans)[number]) =>
               <input type="number" inputmode="numeric" min="1" max="10000" step="1" value={plan.seats} data-seats={plan.id} />
             </label>
           )}
-          {plan.id === 'free'
-            ? <a class="btn btn-block btn-secondary" data-cta={CTA.free} href={earlyAccessMailto(t.lang, plan.name)}>{label(plan)}</a>
+          {plan.id !== 'setup' && (plan.id === 'free' || !CLOUD_LIVE)
+            ? <a class={`btn btn-block ${plan.featured ? 'btn-primary' : 'btn-secondary'}`} data-cta={CTA[plan.id]} href={LINKS.signUp(plan.id === 'free' ? undefined : plan.id)}>{label(plan)}</a>
             : <button type="button" class={`btn btn-block ${plan.featured ? 'btn-primary' : 'btn-secondary'}`} data-plan={plan.id} data-cta={CTA[plan.id]}>
                 {label(plan)}
               </button>}

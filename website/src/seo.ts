@@ -174,6 +174,7 @@ function pricingLines(t: Copy) {
 const links = (t: Copy) => [
   `- [Home](${abs('/')}): product, pricing and FAQ`,
   `- [Pricing](${abs('/#pricing')}): Free, Team, Business, Enterprise and free self-hosting`,
+  `- [Trina Cloud console](${LINKS.signUp()}): request early access; existing teams sign in at ${LINKS.signIn}`,
   `- [Security](${abs('/security')}): ${t.securityPage.description}`,
   `- [Trina Drive vs Google Drive](${abs('/compare/google-drive')}): ${t.compareGd.description}`,
   `- [Source code on GitHub](${LINKS.github}): Apache-2.0`,

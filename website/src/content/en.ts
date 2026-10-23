@@ -27,7 +27,8 @@ const en = {
     pricing: 'Pricing',
     security: 'Security',
     faq: 'FAQ',
-    start: 'Get started',
+    signIn: 'Sign in',
+    start: 'Request access',
     theme: 'Toggle dark mode',
     menu: 'Menu',
   },
@@ -37,7 +38,8 @@ const en = {
     title: 'The team drive',
     titleAccent: 'your AI can read.',
     sub: 'Keep your team’s files in one drive. Ask Claude or ChatGPT about them. Everyone’s AI sees only what they may.',
-    // primary is the same words either way; while CLOUD_LIVE is false (src/site.ts) it asks for early access by email.
+    // primary is the same words either way; while CLOUD_LIVE is false (src/site.ts) it opens the console's
+    // early-access request (cloud.trina.app/signup).
     primary: 'Start your team drive',
     note: 'Early access: we’re onboarding the first teams now.',
     noteLive: 'Start free. Upgrade when your team grows.',
@@ -277,7 +279,7 @@ const en = {
         price: '$0',
         unit: '/ month',
         features: ['1 GB storage', 'Up to 3 people', 'Pauses after 7 days without activity', 'Community support'],
-        cta: 'Join early access',
+        cta: 'Request access',
         ctaLive: 'Start free',
       },
       {
@@ -290,7 +292,7 @@ const en = {
         features: ['100 GB storage', 'Up to 10 people', 'Extra people: {extra} each', '14-day free trial', 'Email support'],
         extra: { monthly: '$9 / month', yearly: '$90 / year' },
         seats: 10,
-        cta: 'Join early access',
+        cta: 'Request access',
         ctaLive: 'Start a 14-day trial',
         featured: true,
       },
@@ -304,7 +306,7 @@ const en = {
         features: ['1 TB storage', 'Up to 40 people', 'Extra people: {extra} each', 'Priority support', 'Everything in Team'],
         extra: { monthly: '$7 / month', yearly: '$70 / year' },
         seats: 40,
-        cta: 'Join early access',
+        cta: 'Request access',
         ctaLive: 'Get Business',
       },
       {
@@ -414,6 +416,7 @@ const en = {
       refund: 'Refund Policy',
     },
     copyright: '© 2026 Trina Inc.',
+    trust: 'Status & trust',
   },
   legal: {
     back: 'Back to home',

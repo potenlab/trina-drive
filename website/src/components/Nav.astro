@@ -25,7 +25,8 @@ const securityPage = '/security'
       <button class="icon-btn" type="button" data-theme-toggle aria-label={n.theme} title={n.theme}>
         <Icon name="moon" class="theme-icon-light" /><Icon name="sun" class="theme-icon-dark" />
       </button>
-      <a class="btn btn-primary btn-sm nav-start" data-cta="get-started" href={a('pricing')}>{n.start}</a>
+      <a class="nav-signin" data-cta="sign-in" href={LINKS.signIn}>{n.signIn}</a>
+      <a class="btn btn-primary btn-sm nav-start" data-cta="get-started" href={LINKS.signUp()}>{n.start}</a>
       <button class="icon-btn menu-btn" type="button" data-menu-toggle aria-expanded="false" aria-controls="mobile-menu" aria-label={n.menu}>
         <Icon name="menu" />
       </button>
@@ -38,6 +39,6 @@ const securityPage = '/security'
     <a href={securityPage}>{n.security}</a>
     <a href={LINKS.docs} rel="noopener">{n.docs}</a>
     <a href={a('faq')}>{n.faq}</a>
-    <a class="btn btn-primary" data-cta="get-started" href={a('pricing')}>{n.start}</a>
+    <a class="btn btn-primary" data-cta="get-started" href={LINKS.signUp()}>{n.start}</a>
   </div>
 </header>

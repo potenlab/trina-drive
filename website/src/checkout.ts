@@ -1,7 +1,8 @@
 // The one entry point for buying a plan. Every pricing button calls startCheckout(planId, options).
 //
 // Routing (decision: research/trina-drive/payments/README.md):
-//   - Cloud Team/Business while CLOUD_LIVE is false (src/site.ts) → early-access email (no checkout before provisioning).
+//   - Cloud Team/Business while CLOUD_LIVE is false (src/site.ts) → console sign-up / early-access request (no checkout
+//     before provisioning).
 //   - Cloud Team/Business, Paddle configured at build time → Paddle overlay checkout (Paddle.com is Merchant of Record) in
 //     both currencies: Korean cards are charged in KRW through the prices' KR overrides. Paddle.js is loaded from
 //     cdn.paddle.com only when a price button is clicked.
@@ -11,7 +12,7 @@
 
 import { PADDLE } from './paddle-env'
 import { PADDLE_JS_URL, checkoutItems, extraSeatsFor, isPaidPlan, type Billing, type PaddleConfig } from './paddle'
-import { CLOUD_LIVE, CONTACT_EMAIL, earlyAccessMailto } from './site'
+import { CLOUD_LIVE, CONTACT_EMAIL, LINKS } from './site'
 
 export type PlanId = 'community' | 'team' | 'business' | 'setup'
 export type Currency = 'USD' | 'KRW'
@@ -125,10 +126,16 @@ export function usesPaddle(planId: PlanId, { billing = 'monthly', people }: Chec
   return !!checkoutItems(PADDLE, planId, billing, extraSeatsFor(planId, people))
 }
 
+/** While Trina Cloud is not live, a Cloud plan goes to the console sign-up (the early-access request) instead. */
+export function earlyAccessUrl(planId: PlanId): string | null {
+  return !CLOUD_LIVE && isPaidPlan(planId) ? LINKS.signUp(planId) : null
+}
+
 export async function startCheckout(planId: PlanId, options: CheckoutOptions): Promise<void> {
   const { lang, billing = 'monthly', people } = options
-  if (!CLOUD_LIVE && isPaidPlan(planId)) {
-    window.location.href = earlyAccessMailto(lang, PLAN_NAMES[planId][lang])
+  const early = earlyAccessUrl(planId)
+  if (early) {
+    window.location.href = early
     return
   }
   if (!usesPaddle(planId, options) || !PADDLE || !isPaidPlan(planId)) {
