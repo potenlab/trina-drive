@@ -221,7 +221,7 @@ replaces it.)
 ## 11. Tests
 
 ```sh
-bun test                        # includes the backup tests and the installer dry-run
+bun run test                    # includes the backup tests and the installer dry-run
 bash test/install-dryrun.sh     # the installer test alone: builds a test release, installs into a temp folder
 ```
 

@@ -1,3 +1,4 @@
 [test]
-# bun 1.3 ignores a `timeout` key here; the per-test default timeout is set in the preload (test/setup.ts)
-preload = ["./test/setup.ts"]
+# The per-test timeout (30 s: suites run many shell commands in isolated workers) is passed on the command line by
+# `bun run test` and scripts/docker-test.sh. bun 1.3 has no bunfig key for it, and setDefaultTimeout() in a preload only
+# reaches the first test file of a run (the rest fall back to 5 s).

@@ -15,9 +15,11 @@ CREATE TABLE IF NOT EXISTS memberships (
   group_id INTEGER NOT NULL REFERENCES groups(id), person_id INTEGER NOT NULL REFERENCES people(id),
   PRIMARY KEY (group_id, person_id));
 -- Every folder the server knows, keyed by filesystem identity; path is only where it was last seen.
+-- birth_ns: the folder's birth time ('' = not recorded yet, '0' = the file system has none). ext4 and other Linux file
+-- systems give a deleted folder's inode number to the next new one; the birth time tells the two apart.
 -- registered = an admin registered it (a mount at / unless it sits inside another registered folder).
 CREATE TABLE IF NOT EXISTS folders (
-  id INTEGER PRIMARY KEY, dev TEXT NOT NULL, ino TEXT NOT NULL, path TEXT NOT NULL,
+  id INTEGER PRIMARY KEY, dev TEXT NOT NULL, ino TEXT NOT NULL, birth_ns TEXT NOT NULL DEFAULT '', path TEXT NOT NULL,
   registered INTEGER NOT NULL DEFAULT 0, mount_name TEXT,
   inherit_break INTEGER NOT NULL DEFAULT 0,
   no_ai INTEGER NOT NULL DEFAULT 0, quarantine INTEGER NOT NULL DEFAULT 0, widened_pending INTEGER NOT NULL DEFAULT 0,
@@ -70,6 +72,11 @@ export function openDb(dataDir: string): DB {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
   const db = new Database(file, { create: true, strict: true })
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
+  // folders.birth_ns came after the first databases: add it before SCHEMA (CREATE TABLE IF NOT EXISTS keeps old tables)
+  const hasFolders = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'folders'").get()
+  if (hasFolders && !db.query<{ name: string }, []>('PRAGMA table_info(folders)').all().some((c) => c.name === 'birth_ns')) {
+    db.exec("ALTER TABLE folders ADD COLUMN birth_ns TEXT NOT NULL DEFAULT ''")
+  }
   db.exec(SCHEMA)
   db.exec(INPLACE_SCHEMA)
   ensureOAuthSchema(db)

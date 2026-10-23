@@ -28,7 +28,9 @@ AI provider that person chose.
 `src/policy.ts` is the only place that decides reads; shell, read tool, grep, mirror and drafts all go through it,
 and the token's scope is computed inside it.
 
-- **R0 effective rule**: folders are keyed by filesystem identity (dev+ino, path is only where it was last seen).
+- **R0 effective rule**: folders are keyed by filesystem identity (dev+ino and birth time; path is only where it was
+  last seen). The birth time matters on Linux: ext4 gives a deleted folder's inode number to the next new folder, which
+  must not get the old folder's rules, flags or registration (a row whose birth time differs is another folder).
   Rule for person P on folder F = max over P and P's groups of `none < read < write` rules from F up to the nearest
   break (inclusive); registered folders, personal folders and `--break` folders are breaks. Personal folders: owner
   only. Flags (`no_ai`, `quarantine`, `widened_pending`) come down from every ancestor and cannot be cleared below.

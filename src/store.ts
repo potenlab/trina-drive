@@ -8,7 +8,7 @@ import { nfc } from './names'
 
 export interface Person { id: number; name: string; admin: number; active: number }
 export interface FolderRow {
-  id: number; dev: string; ino: string; path: string; registered: number; mount_name: string | null
+  id: number; dev: string; ino: string; birth_ns: string; path: string; registered: number; mount_name: string | null
   inherit_break: number; no_ai: number; quarantine: number; widened_pending: number
   personal_owner: number | null; nas_readers: string | null
 }
@@ -25,6 +25,18 @@ export type LevelName = keyof typeof LEVELS
 
 export const sha256 = (data: string | Uint8Array) => crypto.createHash('sha256').update(data).digest('hex')
 export const identityKey = (dev: bigint | string, ino: bigint | string) => `${dev}:${ino}`
+/**
+ * Same birth time, where both are known ('' = not recorded, '0' = the file system has none). Linux file systems (ext4)
+ * give a deleted folder's inode number to the next new folder, often at once: dev + ino alone would hand the new folder
+ * the old one's rules, flags and registration. Folder rows match a folder on disk only when this holds too.
+ */
+export const sameBirth = (a: bigint | string, b: bigint | string) => {
+  const x = String(a), y = String(b)
+  return x === '' || y === '' || x === '0' || y === '0' || x === y
+}
+/** A folder row is this folder on disk: same identity and birth time. */
+export const isFolder = (row: { dev: string; ino: string; birth_ns: string }, dev: bigint | string, ino: bigint | string, birth: bigint | string) =>
+  row.dev === String(dev) && row.ino === String(ino) && sameBirth(row.birth_ns, birth)
 
 export class StoreError extends Error {}
 
@@ -58,11 +70,18 @@ function dirIdentity(p: string) {
   return st
 }
 
-/** The folder row for a directory (created if new); the stored path is refreshed. */
-export function ensureFolder(db: DB, realPath: string, dev: bigint, ino: bigint): number {
-  db.query('INSERT INTO folders (dev, ino, path) VALUES (?, ?, ?) ON CONFLICT (dev, ino) DO UPDATE SET path = excluded.path')
-    .run(String(dev), String(ino), realPath)
-  return db.query<{ id: number }, [string, string]>('SELECT id FROM folders WHERE dev = ? AND ino = ?').get(String(dev), String(ino))!.id
+/**
+ * The folder row for a directory (created if new); the stored path is refreshed, a missing birth time recorded. A row
+ * with the same dev + ino but another birth time belonged to a deleted folder whose inode number was reused: it is
+ * retired (its ino no longer matches anything on disk, as on file systems that never reuse one) and a new row is made.
+ */
+export function ensureFolder(db: DB, realPath: string, dev: bigint | string, ino: bigint | string, birth: bigint | string): number {
+  const d = String(dev), i = String(ino), b = String(birth)
+  const old = db.query<{ id: number; birth_ns: string }, [string, string]>('SELECT id, birth_ns FROM folders WHERE dev = ? AND ino = ?').get(d, i)
+  if (old && !sameBirth(old.birth_ns, b)) db.query("UPDATE folders SET ino = ino || '@' || birth_ns WHERE id = ?").run(old.id)
+  db.query(`INSERT INTO folders (dev, ino, birth_ns, path) VALUES (?, ?, ?, ?) ON CONFLICT (dev, ino) DO UPDATE SET path = excluded.path,
+    birth_ns = CASE WHEN birth_ns IN ('', '0') THEN excluded.birth_ns ELSE birth_ns END`).run(d, i, b, realPath)
+  return db.query<{ id: number }, [string, string]>('SELECT id FROM folders WHERE dev = ? AND ino = ?').get(d, i)!.id
 }
 
 export const allFolders = (db: DB) => db.query<FolderRow, []>('SELECT * FROM folders').all()
@@ -90,7 +109,7 @@ export function registerFolder(db: DB, dir: string, opts: { name?: string; perso
   if (opts.nasReaders === undefined) nas = owner != null ? JSON.stringify([owner]) : 'unknown'
   else if (Array.isArray(opts.nasReaders)) nas = JSON.stringify(opts.nasReaders.map((n) => person(db, n).id))
   else nas = opts.nasReaders
-  const id = ensureFolder(db, real, st.dev, st.ino)
+  const id = ensureFolder(db, real, st.dev, st.ino, st.birthtimeNs)
   db.query('UPDATE folders SET registered = 1, mount_name = ?, personal_owner = ?, nas_readers = ? WHERE id = ?')
     .run(nfc(opts.name ?? path.basename(real)), owner, nas, id)
   return folderById(db, id)!
@@ -101,7 +120,7 @@ export function folderAt(db: DB, dir: string): FolderRow {
   const real = fs.realpathSync(dir)
   if (!containingRegistered(db, real)) throw new StoreError(`${dir} is not inside a registered folder`)
   const st = dirIdentity(real)
-  return folderById(db, ensureFolder(db, real, st.dev, st.ino))!
+  return folderById(db, ensureFolder(db, real, st.dev, st.ino, st.birthtimeNs))!
 }
 
 export function setFlag(db: DB, dir: string, flag: 'no_ai' | 'quarantine' | 'widened_pending' | 'inherit_break', on: boolean) {

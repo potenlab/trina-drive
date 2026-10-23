@@ -6,16 +6,17 @@ import { identityKey } from '../store'
 export interface Closures {
   /** identities closed to agents: R1 ⑤ index findings, R10 widening moves, R6 pending copies */
   identities: Set<string>
-  /** last path of a lost rule-bearing folder -> its identity; any other identity at that path is closed */
-  lostPaths: Map<string, string>
+  /** last path of a lost rule-bearing folder -> its identity and birth time; any other folder at that path is closed */
+  lostPaths: Map<string, { key: string; birth: string }>
 }
 
 export function loadClosures(db: DB): Closures {
   const identities = new Set<string>()
   for (const r of db.query<{ dev: string; ino: string }, []>('SELECT dev, ino FROM fs_index WHERE closed IS NOT NULL').all()) identities.add(identityKey(r.dev, r.ino))
-  const lostPaths = new Map<string, string>()
-  for (const r of db.query<{ kind: string; dev: string; ino: string; path: string }, []>('SELECT kind, dev, ino, path FROM quarantine WHERE released_at IS NULL').all()) {
-    if (r.kind === 'lost') lostPaths.set(r.path, identityKey(r.dev, r.ino))
+  const lostPaths = new Map<string, { key: string; birth: string }>()
+  for (const r of db.query<{ kind: string; dev: string; ino: string; path: string; birth: string | null }, []>(
+    'SELECT q.kind, q.dev, q.ino, q.path, f.birth_ns AS birth FROM quarantine q LEFT JOIN folders f ON f.id = q.folder_id WHERE q.released_at IS NULL').all()) {
+    if (r.kind === 'lost') lostPaths.set(r.path, { key: identityKey(r.dev, r.ino), birth: r.birth ?? '' })
     else identities.add(identityKey(r.dev, r.ino))
   }
   return { identities, lostPaths }

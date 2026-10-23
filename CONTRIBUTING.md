@@ -33,14 +33,15 @@ come from [`src/brand.ts`](src/brand.ts); never hard-code them.
 
 ```sh
 bun run typecheck                    # server and web (tsc --noEmit, twice)
-bun test                             # everything (~4 min); shell commands run in sandboxed workers
-TDRIVE_SHELL=inprocess bun test      # the same with just-bash in the server process (the hidden-path suites run both)
+bun run test                         # everything (~4 min); shell commands run in sandboxed workers
+TDRIVE_SHELL=inprocess bun run test  # the same with just-bash in the server process (the hidden-path suites run both)
 bun run test:fuzz                    # path/argument fuzzer, 60 s; --seconds N --seed S for long runs
 scripts/docker-test.sh               # the Docker image end to end, then the suite inside it (Linux Docker host)
 ```
 
 `TDRIVE_TEST_HWP=/path/to/real.hwp bun test` also checks a file saved by Hangul. Tests that need macOS (installer dry
-run, vendored pdftotext) skip themselves elsewhere. CI runs typecheck, the web build and `bun test` on Ubuntu and macOS.
+run, vendored pdftotext) skip themselves elsewhere. CI runs typecheck, the web build and `bun run test` on Ubuntu and macOS.
+`bun run test` is `bun test --timeout 30000`: a plain `bun test` gives every file but the first bun's 5 s per test.
 
 `test/security/` is the heart of the suite (threat model in [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md)):
 

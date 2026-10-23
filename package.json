@@ -8,7 +8,7 @@
   "homepage": "https://drive.trina.app",
   "repository": { "type": "git", "url": "https://github.com/potenlab/trina-drive.git" },
   "scripts": {
-    "test": "bun test",
+    "test": "bun test --timeout 30000",
     "test:fuzz": "bun run test/security/fuzz.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "cli": "bun run src/cli.ts",

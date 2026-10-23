@@ -9,7 +9,7 @@ import { reconcile } from '../src/inplace/reconcile'
 import { realFs, type FsOps } from '../src/inplace/walk'
 import { listWidened, rejudgeWidened } from '../src/inplace/widened'
 import { sampleDocx } from '../src/samples'
-import { person, registerFolder, setRule } from '../src/store'
+import { ensureFolder, person, registerFolder, setRule } from '../src/store'
 import { setup, type Env } from './helpers'
 
 const envs: Env[] = []
@@ -107,6 +107,33 @@ describe('lost folders fail closed', () => {
     expect((await e.sh('park', 'cat /영업/고객목록.csv')).exitCode).toBe(1)
     expect(listEvents(e.db, { kind: 'lost' }).length).toBe(1) // reported once
     expect(listQuarantine(e.db).map((q) => [q.kind, q.folder_id])).toEqual([['lost', e.folderId('영업')]])
+  })
+
+  test('a new folder that got a deleted one\'s inode number (ext4 hands it out again) is told apart by its birth time', async () => {
+    const e = fresh()
+    e.addToken('park', 'park')
+    await rec(e)
+    const id = e.folderId('영업')
+    expect((await e.sh('park', 'cat /영업/고객목록.csv')).exitCode).toBe(0)
+    // what `rm -r 영업 && mkdir 영업` leaves on ext4 between two passes: the row and the index describe a folder born
+    // earlier, the folder on disk has the same dev + ino (APFS never reuses one, so this is set up by hand)
+    e.db.query("UPDATE folders SET birth_ns = '1' WHERE id = ?").run(id)
+    e.db.query("UPDATE fs_index SET birth_ns = '1' WHERE path = ?").run(p(e, '영업'))
+    expect((await e.sh('park', 'ls /')).stdout).not.toContain('영업')
+    expect((await e.sh('park', 'cat /영업/고객목록.csv')).exitCode).toBe(1)
+    const r = await rec(e)
+    expect(r.lost).toBe(1)
+    expect(r.found).toBe(0)
+    expect((await e.sh('park', 'cat /영업/고객목록.csv')).exitCode).toBe(1)
+    expect(listQuarantine(e.db).map((q) => [q.kind, q.folder_id])).toEqual([['lost', id]])
+    await rec(e)
+    expect(listQuarantine(e.db).map((q) => q.released_at)).toEqual([null]) // not "found again"
+    // a rule set on the new folder starts from nothing: the old row is retired, not taken over
+    const st = fs.lstatSync(p(e, '영업'), { bigint: true })
+    const now = ensureFolder(e.db, p(e, '영업'), st.dev, st.ino, st.birthtimeNs)
+    expect(now).not.toBe(id)
+    expect(e.db.query('SELECT count(*) AS n FROM rules WHERE folder_id = ?').get(now)).toEqual({ n: 0 })
+    expect(e.db.query<{ ino: string }, [number]>('SELECT ino FROM folders WHERE id = ?').get(id)!.ino).toBe(`${st.ino}@1`)
   })
 
   test('a narrowed sub-folder deleted and recreated does not silently inherit the wider parent rule', async () => {

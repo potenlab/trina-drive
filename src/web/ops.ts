@@ -363,7 +363,7 @@ export function ensureSubfolder(op: Op, id: unknown, body: { rel?: unknown }) {
     cur = next
   }
   const st = fs.lstatSync(cur, { bigint: true })
-  const sub = ensureFolder(op.w.db, cur, st.dev, st.ino)
+  const sub = ensureFolder(op.w.db, cur, st.dev, st.ino, st.birthtimeNs)
   return { id: sub }
 }
 

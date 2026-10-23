@@ -7,7 +7,7 @@ import path from 'node:path'
 import { defaultCodePaths, Executor, extractIsolated, runShellIsolated, setBackendErrorHandler, type CommandResult, type FsBackend, type RunOptions } from '../src/worker'
 import { FairScheduler } from '../src/worker/scheduler'
 import { encodeFrame, FrameDecoder, ProtocolError } from '../src/worker/protocol'
-import { bwrapArgs, detectIsolation, macProfile } from '../src/worker/sandbox'
+import { bwrapArgs, detectIsolation, isolationProblem, LINUX_SYSTEM_READ, macProfile } from '../src/worker/sandbox'
 import { sampleDocx, samplePdf } from '../src/samples'
 
 const FIXTURES = path.join(import.meta.dir, 'fixtures')
@@ -56,6 +56,12 @@ describe('platform', () => {
     console.log(`[worker] isolation=${info.isolation} user=${info.user ?? '(server user)'} memProbe=${info.memProbe} warnings=${JSON.stringify(info.warnings)}`)
     if (EXPECTED) expect(info.isolation).toBe(EXPECTED as never)
     expect(info.refusal).toBeNull()
+  })
+
+  test('the sandbox this run expects works (TDRIVE_EXPECT_ISOLATION: a missing one fails here, the sandbox suite is not skipped quietly)', () => {
+    if (!process.env.TDRIVE_EXPECT_ISOLATION) return
+    expect({ sandboxed: SANDBOXED, isolation: detectIsolation(), problem: isolationProblem() })
+      .toEqual({ sandboxed: true, isolation: process.env.TDRIVE_EXPECT_ISOLATION as never, problem: null })
   })
 
   test('refuses when isolation is required but unavailable', async () => {
@@ -205,11 +211,23 @@ describe.if(SANDBOXED)(`sandbox (${MAC_SANDBOX ? 'macOS sandbox-exec' : 'Linux b
     expect((await extract('readFrom', secret)).text).toContain('READ-BLOCKED')
     expect((await extract('listDir', outside)).text).toContain('LIST-BLOCKED')
     const home = (await extract('listDir', os.homedir())).text!
-    // bwrap: a folder above the worker code or the job dir exists in the sandbox, holding only the next folder on the
-    // way to them (here HOME may be /tmp, which holds the job dirs)
-    const onTheWay = [path.resolve(import.meta.dir, '..'), tmpRoot].map((p) => path.relative(os.homedir(), p)).filter((r) => !r.startsWith('..')).map((r) => r.split(path.sep)[0]!)
-    if (BWRAP && onTheWay.length) expect(home.replace(/^LIST-OK /, '').split(',').every((n) => onTheWay.includes(n))).toBe(true)
-    else expect(home).toContain('LIST-BLOCKED')
+    if (BWRAP) {
+      // bwrap: the root is empty and a folder above a bind exists only as the way to it (bwrap makes the mount points),
+      // so it holds exactly the next names toward the binds: system libraries, worker code, job dirs and the runtime
+      // binary (on GitHub's runner that is ~/.bun/bin/bun, so HOME holds .bun and work). Every such folder is listed and
+      // compared: nothing else of the host (dotfiles, ~/.bun/install, the repo's .git, the other test dirs) may show.
+      const exists = (p: string) => { try { fs.lstatSync(p); return true } catch { return false } }
+      const binds = [...LINUX_SYSTEM_READ.filter(exists), ...[...defaultCodePaths(), FIXTURES, tmpRoot, process.execPath].map((p) => fs.realpathSync(p))]
+      const inBind = (d: string) => binds.some((b) => d === b || d.startsWith(b + '/'))
+      const above = new Set<string>()
+      for (const b of binds) for (let d = path.dirname(b); d !== '/'; d = path.dirname(d)) if (!inBind(d)) above.add(d)
+      for (const d of [...above].sort()) {
+        const want = [...new Set(binds.filter((b) => b.startsWith(d + '/')).map((b) => b.slice(d.length + 1).split('/')[0]!))].sort()
+        const got = (await extract('listDir', d)).text!
+        expect({ d, got: got.startsWith('LIST-OK ') ? got.slice(8).split(',').filter(Boolean).sort() : got }).toEqual({ d, got: want })
+      }
+      if (!above.has(os.homedir()) && !inBind(os.homedir())) expect(home).toContain('LIST-BLOCKED')
+    } else expect(home).toContain('LIST-BLOCKED')
     expect((await extract('readFrom', path.join(os.homedir(), '.zshrc'))).text).toContain('READ-BLOCKED')
     // the worker's own code is readable (that is how it runs)
     expect((await extract('readFrom', HOSTILE)).text).toContain('READ-OK')
