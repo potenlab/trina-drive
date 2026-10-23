@@ -24,7 +24,7 @@ const en = {
   // drafts: promote
   promote: 'Promote', promote_title: 'Put this draft in a team folder', promote_help: 'It becomes a new file there (nothing is overwritten). If the folder is read by people who cannot read where the draft came from, it waits for approval.',
   promote_folder: 'Folder', promote_sub: 'Subfolder (optional, e.g. 2026/quotes)', promote_name: 'New file name', promote_note: 'Note for the approver (optional)',
-  promote_go: 'Promote', promote_no_targets: 'No folder takes promoted drafts from you yet (the admin turns promote on per folder; you need write there).',
+  ap_overwrite: 'Replaces the file (new version)', promote_go: 'Promote', promote_overwrite: 'Replace a file of that name (managed storage only: the current one is kept as an earlier version)', promote_no_targets: 'No folder takes promoted drafts from you yet (the admin turns promote on per folder; you need write there).',
   promote_written: 'Written to {path}.', promote_pending: 'Waiting for approval: {n} more people would read it.', promote_closed: 'Not written: no one can approve this (nobody both reads every source folder and manages the folder). Ask your admin.',
   promote_open: 'Open the request',
   // folder page
@@ -70,7 +70,7 @@ const ko: Record<ApKey, string> = {
   mfa_warn_admin_none: '이제 2단계 인증이 없습니다. 관리자는 공개 주소를 쓰려면 하나가 있어야 합니다.',
   promote: '반영', promote_title: '이 초안을 팀 폴더에 넣기', promote_help: '그 폴더에 새 파일로 들어갑니다(덮어쓰지 않음). 초안이 나온 폴더를 못 읽는 사람이 그 폴더를 읽으면 승인을 기다립니다.',
   promote_folder: '폴더', promote_sub: '하위 폴더(선택, 예: 2026/견적)', promote_name: '새 파일 이름', promote_note: '승인자에게 남길 말(선택)',
-  promote_go: '반영', promote_no_targets: '아직 내 초안을 받는 폴더가 없습니다(관리자가 폴더마다 반영을 켜고, 그 폴더에 쓰기 권한이 있어야 합니다).',
+  ap_overwrite: '파일을 바꿈(새 버전)', promote_go: '반영', promote_overwrite: '같은 이름의 파일을 바꾸기(관리형 저장소만: 지금 파일은 이전 버전으로 남음)', promote_no_targets: '아직 내 초안을 받는 폴더가 없습니다(관리자가 폴더마다 반영을 켜고, 그 폴더에 쓰기 권한이 있어야 합니다).',
   promote_written: '{path}에 썼습니다.', promote_pending: '승인 대기: {n}명이 더 읽게 됩니다.', promote_closed: '쓰지 않았습니다: 승인할 사람이 없습니다(출처 폴더를 모두 읽으면서 그 폴더를 관리하는 사람이 없음). 관리자에게 물어보세요.',
   promote_open: '요청 열기',
   folder_promote: '여기로 초안 반영 허용', folder_promote_help: '여기에 "쓰기"가 있는 사람은 자기 초안을 이 폴더와 아래에 새 파일로 넣을 수 있습니다. 넓어지는 반영은 승인을 기다립니다. 서버의 NAS 계정에 이 폴더 쓰기 권한이 있어야 합니다.',

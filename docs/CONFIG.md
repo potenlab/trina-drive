@@ -29,7 +29,8 @@ and make new tokens (old `shelf_pat_` tokens no longer match the token format).
 
 `--data DIR`, else `$TDRIVE_HOME`, else `~/.trina-drive`. It must not be inside a registered folder. Two layouts:
 **flat** (development: everything in one folder) and **installed** (`db/`, `drafts/`, `mirror/`, `logs/`, `config/`,
-used by the macOS installer and the Docker image). See [INSTALL.md](INSTALL.md) for who owns what on a Mac.
+used by the macOS installer and the Docker image). Both keep managed storage in `files/` (team folders, and
+`files/.trina-drive/` for the trash, earlier versions and upload staging). See [INSTALL.md](INSTALL.md) for who owns what on a Mac.
 
 ## Environment variables
 
@@ -45,6 +46,10 @@ used by the macOS installer and the Docker image). See [INSTALL.md](INSTALL.md) 
 | `TDRIVE_WORKERS_WARM`, `TDRIVE_WORKER_REUSE` | see worker.md, on | pre-started shell workers; `0` turns reuse per token off |
 | `TDRIVE_EXTRACT_WARM`, `TDRIVE_EXTRACT_GLOBAL`, `_PER_TOKEN`, `_PER_PERSON`, `_QUEUE` | 1, … | document extraction workers |
 | `TDRIVE_DRAFT_MAX_FILES`, `TDRIVE_DRAFT_MAX_BYTES`, `TDRIVE_DRAFT_PERSON_MAX_BYTES` | 500, 200 MB, 1 GB | draft quota per token and per person |
+| `TDRIVE_STORAGE` | `inplace` | `managed`: the web makes team folders in managed storage and offers uploads (also `tdrive init --managed` / `storage mode`) |
+| `TDRIVE_FILES_DIR` | `<data>/files` | the managed root |
+| `TDRIVE_STORAGE_QUOTA` | none | the team's total (files, trash, earlier versions, unfinished uploads), e.g. `50GB` (also `tdrive storage quota`) |
+| `TDRIVE_MAX_FILE_BYTES`, `TDRIVE_VERSIONS_KEPT`, `TDRIVE_TRASH_DAYS` | 10 GB, 10, 30 | largest file, earlier versions kept per file, days in the trash |
 | `TDRIVE_SMTP_PASS` | — | overrides the SMTP password stored in `notify.json` |
 | `TDRIVE_BACKUP_KEY` | — | backup secret key for `backup verify` / `restore` (or `--key-file`) |
 | `TDRIVE_CONTAINER` | — | `docker` in the image (start-up errors then point to the compose security settings) |
@@ -73,11 +78,13 @@ for the extractor test), `TDRIVE_TIMING_RUNS`, `TDRIVE_EXPECT_ISOLATION`, `TDRIV
 ```
 usage: tdrive [--data DIR] <command>
 
-  init                                   create the data directory; prints the one-time web setup token
+  init [--managed]                       create the data directory; prints the one-time web setup token
+                                         (--managed: managed storage, the server owns the team folders; see storage)
   person add <name> [--admin]
   group add <name>
   group member <group> <person>
   folder register <path> [--name N] [--personal-owner P] [--nas-readers all|unknown|p1,p2]
+  folder create <name> [--personal-owner P]   a team folder in managed storage (the server makes and owns it)
   folder flag <path> no-ai|quarantine|widened-pending|inherit-break [--off]
   rule set <path> <person|@group> none|read|write [--break]
   manage grant <path> <person>
@@ -112,6 +119,12 @@ on your own computer (talks to the server; writes only user-scope client setting
         [--name trina-drive] [--token-name N] [--ttl 8h|1d|7d|30d|90d] [--scope folder1,folder2 | --all-folders] [--read-only]
         [--store keychain|file|inline] [--auto-approve] [--force] [--dry-run]
                                          connect an AI client on this computer (user scope; token in the Keychain)
+
+managed storage (people upload, rename, move, delete to the trash, versions; src/managed):
+  storage show                           mode, root, quota and what is used (files, trash, versions, uploads)
+  storage mode managed|inplace           what the web offers new folders as (env TDRIVE_STORAGE wins)
+  storage quota <size|none>              the team's total (e.g. 50GB; env TDRIVE_STORAGE_QUOTA wins)
+  storage rescan                         file rows in line with the disk (files put in by hand, restored databases)
 
 in-place reconciler (outside changes, R1 ⑤–⑦, R6, R10):
   share add <path> | share list          also index this whole share (identity + hash only), not just registered folders

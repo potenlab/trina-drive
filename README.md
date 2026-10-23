@@ -87,6 +87,14 @@ updated, backed up and monitored. From **$99/month**; every security feature is 
 
 **[Book a setup call →](mailto:contact@trina.app?subject=Trina%20Drive%20setup%20call)** &nbsp;·&nbsp; [See plans](https://drive.trina.app/#pricing)
 
+### Managed storage: Trina Cloud
+
+No NAS? Let Trina Drive own the folders. In **managed storage** your team uploads, renames, moves and deletes files in
+the web app (drag and drop, folders, large files, version history, trash), with the same per-person rules and the same
+audit, and agents read it exactly like a NAS folder. We host it per team in Trina Cloud, or run it yourself:
+`tdrive init --managed`, then make team folders on the Folders page (or `tdrive folder create <name>`). Details:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#managed-storage-cloud-mode).
+
 ### Self-host on a Mac mini
 
 The v0.1 path: a release folder and an installer that sets up service accounts, LaunchDaemons, pinned tools and
@@ -210,8 +218,10 @@ Based on public documentation as of October 2026. Something out of date? [Open a
   and Cursor, `tdrive mcp add`, web admin, alerts, macOS installer with encrypted backups.
 - [x] **v0.2: any AI, approved promotion** (built, rolling out). OAuth 2.1 connectors for the Claude app, claude.ai
   and ChatGPT; passkeys and TOTP; draft promotion with approvals; web file browser; Linux Docker image.
-- [ ] **v0.3 (shaped with users):** Google Drive as a source · OCR for scanned PDFs · semantic search · upload from the
-  web app · OIDC sign-in · more extractors. Tell us what you need in
+- [x] **Managed storage** (built): the server owns the team folders; upload, folders, rename, move, trash, versions and
+  quota from the web app; promote may overwrite there as a new version.
+- [ ] **v0.3 (shaped with users):** Google Drive as a source · OCR for scanned PDFs · semantic search · WebDAV ·
+  OIDC sign-in · more extractors. Tell us what you need in
   [Discussions](https://github.com/potenlab/trina-drive/discussions/categories/ideas).
 
 ## FAQ

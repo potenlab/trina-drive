@@ -24,16 +24,21 @@ import { readPublicSettings } from './oauth/settings'
 import { PUBLIC_HELP, publicCommand } from './web/public-cli'
 import { publicBanner, startPublicListener } from './web/public'
 import { mfaCommand, MFA_HELP, mfaServeNotice } from './web/mfa-cli'
+import { createManagedFolder } from './managed/folders'
+import { purgeExpired, rescan, usage } from './managed/ops'
+import { ensureRoot, metaSet, parseBytes, storageSettings } from './managed/settings'
 
 const HELP = `${PRODUCT} ${VERSION} — your team's files for AI agents, permission-aware (${CLI})
 
 usage: ${CLI} [--data DIR] <command>
 
-  init                                   create the data directory; prints the one-time web setup token
+  init [--managed]                       create the data directory; prints the one-time web setup token
+                                         (--managed: managed storage, the server owns the team folders; see storage)
   person add <name> [--admin]
   group add <name>
   group member <group> <person>
   folder register <path> [--name N] [--personal-owner P] [--nas-readers all|unknown|p1,p2]
+  folder create <name> [--personal-owner P]   a team folder in managed storage (the server makes and owns it)
   folder flag <path> no-ai|quarantine|widened-pending|inherit-break [--off]
   rule set <path> <person|@group> none|read|write [--break]
   manage grant <path> <person>
@@ -50,6 +55,12 @@ ${PUBLIC_HELP}
 
 on your own computer (talks to the server; writes only user-scope client settings):
 ${MCP_HELP}
+
+managed storage (people upload, rename, move, delete to the trash, versions; src/managed):
+  storage show                           mode, root, quota and what is used (files, trash, versions, uploads)
+  storage mode managed|inplace           what the web offers new folders as (env TDRIVE_STORAGE wins)
+  storage quota <size|none>              the team's total (e.g. 50GB; env TDRIVE_STORAGE_QUOTA wins)
+  storage rescan                         file rows in line with the disk (files put in by hand, restored databases)
 
 in-place reconciler (outside changes, R1 ⑤–⑦, R6, R10):
   share add <path> | share list          also index this whole share (identity + hash only), not just registered folders
@@ -92,7 +103,8 @@ async function main(argv: string[]) {
   switch (single ? cmd : `${cmd} ${sub ?? ''}`.trim()) {
     case 'init': {
       attachNotify(makeCtx(db, dataDir))
-      console.log(`data directory ready: ${dataDir}`)
+      if (takeBool(rest, '--managed')) { metaSet(db, 'storage_mode', 'managed'); ensureRoot(storageSettings(db, dataDir).root) }
+      console.log(`data directory ready: ${dataDir}${storageSettings(db, dataDir).mode === 'managed' ? ` (managed storage in ${storageSettings(db, dataDir).root})` : ''}`)
       const setup = issueSetupToken(db)
       if (setup) console.log(`web setup token (one use, 7 days; paste it on the first web page to create the admin):\n${setup}`)
       else console.log('web setup is already done (an admin can sign in)')
@@ -107,6 +119,33 @@ async function main(argv: string[]) {
       const f = registerFolder(db, need(rest[0], 'path'), { name, personalOwner: owner, nasReaders })
       return console.log(`registered /${f.mount_name} -> ${f.path} (id ${f.id}, NAS readers: ${f.nas_readers})`)
     }
+    case 'folder create': {
+      const owner = takeFlag(rest, '--personal-owner')
+      const f = createManagedFolder(db, dataDir, { name: need(rest[0], 'name'), personalOwner: owner })
+      return console.log(`created /${f.mount_name} in managed storage (id ${f.id}${owner ? `, personal folder of ${owner}` : ''}); give it rules with: rule set ${f.path} @group write`)
+    }
+    case 'storage show': {
+      const st = storageSettings(db, dataDir)
+      const u = usage(db)
+      const mb = (n: number) => `${(n / 1024 ** 2).toFixed(1)} MB`
+      console.log(`mode: ${st.mode}\nroot: ${st.root}\nquota: ${st.quotaBytes === null ? 'none' : mb(st.quotaBytes)}\nused: ${mb(u.total)} (files ${mb(u.files)} in ${u.count} files incl. trash, trash ${mb(u.trash)}, earlier versions ${mb(u.versions)}, unfinished uploads ${mb(u.uploads)})\nversions kept: ${st.versionsKept}, trash days: ${st.trashDays}, largest file: ${mb(st.maxFileBytes)}`)
+      return
+    }
+    case 'storage mode': {
+      const m = need(rest[0], 'managed or inplace')
+      if (m !== 'managed' && m !== 'inplace') throw new StoreError('storage mode: managed or inplace')
+      metaSet(db, 'storage_mode', m)
+      if (m === 'managed') ensureRoot(storageSettings(db, dataDir).root)
+      return console.log(`storage mode: ${m}`)
+    }
+    case 'storage quota': {
+      const v = need(rest[0], 'size (e.g. 50GB) or none')
+      let b: number | null
+      try { b = parseBytes(v) } catch (e) { throw new StoreError((e as Error).message) }
+      metaSet(db, 'storage_quota', b === null ? null : String(b))
+      return console.log(`team storage quota: ${b === null ? 'none' : `${b} bytes`}`)
+    }
+    case 'storage rescan': { const r = rescan({ db, dataDir }); return console.log(`file rows: ${r.added} added, ${r.dropped} dropped`) }
     case 'folder flag': {
       const off = takeBool(rest, '--off')
       const flag = need(rest[1], 'flag').replace(/-/g, '_') as 'no_ai' | 'quarantine' | 'widened_pending' | 'inherit_break'
@@ -230,6 +269,12 @@ async function main(argv: string[]) {
       console.log(`worker isolation: ${iso.isolation}${iso.required ? '' : ' (not required)'}`)
       if (iso.problem) console.error(`ERROR: ${iso.problem}`)
       if (!noReconcile) startReconciler(db, { dataDir, intervalMs: every ? parseDuration(every) : undefined })
+      // managed storage: rows in line with the disk once, then the trash and stale uploads are emptied every hour
+      if (storageSettings(db, dataDir).mode === 'managed' || db.query('SELECT 1 FROM managed_mounts LIMIT 1').get()) {
+        const r = rescan(ctx)
+        console.log(`managed storage: ${storageSettings(db, dataDir).root}${r.added || r.dropped ? ` (file rows: ${r.added} added, ${r.dropped} dropped)` : ''}`)
+        setInterval(() => { try { purgeExpired(ctx) } catch (e) { console.error('[managed] purge failed:', e) } }, 3600_000)
+      }
       return new Promise(() => {})
     }
     default:

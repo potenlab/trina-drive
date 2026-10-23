@@ -63,13 +63,14 @@ function PromoteForm({ d, targets }: { d: Draft; targets: { id: number; vpath: s
   const [sub, setSub] = useState('')
   const [name, setName] = useState(d.path.slice(d.path.lastIndexOf('/') + 1))
   const [note, setNote] = useState('')
+  const [overwrite, setOverwrite] = useState(false)
   const [result, setResult] = useState<{ status: string; path?: string; approval_id?: number; gain?: number } | null>(null)
   if (!targets.length) return <p className="muted small">{at('promote_no_targets')}</p>
   return (
     <form className="card promote-form" onSubmit={async (e) => {
       e.preventDefault()
       const target = sub.trim() ? `${folder}/${sub.trim().replace(/^\/+|\/+$/g, '')}` : folder
-      const r = await a.run(() => api('POST', `/drafts/${d.id}/promote`, { folder: target, name, expected_sha256: d.sha256, note: note || undefined }))
+      const r = await a.run(() => api('POST', `/drafts/${d.id}/promote`, { folder: target, name, expected_sha256: d.sha256, note: note || undefined, ...(overwrite ? { overwrite: true } : {}) }))
       if (r) setResult(r)
     }}>
       <strong>{at('promote_title')}</strong>
@@ -78,6 +79,7 @@ function PromoteForm({ d, targets }: { d: Draft; targets: { id: number; vpath: s
       <label>{at('promote_sub')}<input value={sub} onChange={(e) => setSub(e.target.value)} /></label>
       <label>{at('promote_name')}<input value={name} onChange={(e) => setName(e.target.value)} required maxLength={255} /></label>
       <label>{at('promote_note')}<input value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} /></label>
+      <label className="check"><input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} /> {at('promote_overwrite')}</label>
       <ErrorLine error={a.error} />
       {result?.status === 'written' && <p className="ok">{at('promote_written', { path: result.path ?? '' })}</p>}
       {result?.status === 'pending' && <p>{at('promote_pending', { n: result.gain ?? 0 })} <a href={`#/approvals/${result.approval_id}`}>{at('promote_open')}</a></p>}

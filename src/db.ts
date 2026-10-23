@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { detectLayout } from './layout'
 import { INPLACE_SCHEMA } from './inplace/schema'
+import { MANAGED_SCHEMA } from './managed/schema'
 import { ensureOAuthSchema } from './oauth/schema'
 
 const SCHEMA = `
@@ -79,6 +80,7 @@ export function openDb(dataDir: string): DB {
   }
   db.exec(SCHEMA)
   db.exec(INPLACE_SCHEMA)
+  db.exec(MANAGED_SCHEMA)
   ensureOAuthSchema(db)
   return db
 }

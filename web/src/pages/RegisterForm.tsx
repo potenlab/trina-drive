@@ -18,7 +18,8 @@ export const NAS_MODES: { id: NasMode; key: Key }[] = [
   { id: 'all', key: 'nas_all' }, { id: 'same-as-ai', key: 'nas_same' }, { id: 'chosen', key: 'nas_chosen' }, { id: 'unknown', key: 'nas_unknown' },
 ]
 
-export function RegisterForm({ onDone }: { onDone: (id: number) => void }) {
+/** managed: managed storage (the server makes the folder; no path, no NAS question) */
+export function RegisterForm({ onDone, managed }: { onDone: (id: number) => void; managed?: boolean }) {
   const [people, setPeople] = useState<Person[]>([])
   const [groups, setGroups] = useState<Group[]>([])
   const [path, setPath] = useState('')
@@ -38,22 +39,23 @@ export function RegisterForm({ onDone }: { onDone: (id: number) => void }) {
     <form className="register" onSubmit={async (e) => {
       e.preventDefault()
       const body = {
-        path, name: name || undefined, template, no_ai: noAi,
+        ...(managed ? {} : { path }), name: name || undefined, template, no_ai: noAi,
         ...(template === 'team' || template === 'management' ? { group } : {}),
-        ...(template === 'personal' ? { owner } : { nas: { mode: nas, people: chosen } }),
+        ...(template === 'personal' ? { owner } : managed ? {} : { nas: { mode: nas, people: chosen } }),
       }
       const r = await a.run(() => api<{ id: number; warnings: string[] }>('POST', '/folders', body))
       if (r) { setWarnings(r.warnings); setPath(''); setName(''); onDone(r.id) }
     }}>
-      <label>{t('reg_path')}<input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/Volumes/office/경영" required spellCheck={false} /></label>
-      <label>{t('reg_name')}<input value={name} onChange={(e) => setName(e.target.value)} /></label>
+      {managed ? <p className="muted small">{t('reg_managed_help')}</p>
+        : <label>{t('reg_path')}<input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/Volumes/office/경영" required spellCheck={false} /></label>}
+      <label>{t(managed ? 'reg_name_managed' : 'reg_name')}<input value={name} onChange={(e) => setName(e.target.value)} required={managed} /></label>
       <fieldset>
         <legend>{t('reg_template')}</legend>
         <div className="templates">
           {TEMPLATES.map((x) => (
             <label key={x.id} className={`tpl ${template === x.id ? 'on' : ''}`}>
               <input type="radio" name="tpl" checked={template === x.id} onChange={() => pick(x.id)} />
-              <strong>{t(x.name)}</strong><span className="muted">{t(x.desc)}</span>
+              <strong>{t(x.name)}</strong><span className="muted">{t(managed && x.id === 'team' ? 'tpl_team_managed_d' : x.desc)}</span>
             </label>
           ))}
         </div>
@@ -76,7 +78,7 @@ export function RegisterForm({ onDone }: { onDone: (id: number) => void }) {
       )}
       {template !== 'personal' && <>
         <label className="check"><input type="checkbox" checked={noAi} onChange={(e) => setNoAi(e.target.checked)} /> {t('reg_no_ai')}</label>
-        <fieldset>
+        {!managed && <fieldset>
           <legend>{t('nas_question')}</legend>
           <div className="seg">
             {NAS_MODES.map((m) => <label key={m.id} className={nas === m.id ? 'on' : ''}><input type="radio" name="nas" checked={nas === m.id} onChange={() => setNas(m.id)} />{t(m.key)}</label>)}
@@ -91,7 +93,7 @@ export function RegisterForm({ onDone }: { onDone: (id: number) => void }) {
               ))}
             </div>
           )}
-        </fieldset>
+        </fieldset>}
       </>}
       <ErrorLine error={a.error} />
       {warnings.includes('former_personal') && <p className="warn">{t('reg_warn_former_personal')}</p>}

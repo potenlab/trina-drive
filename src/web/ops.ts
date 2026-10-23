@@ -11,6 +11,9 @@ import { accountOf, checkPasswordRules, createLink, freshLogin, FRESH_LOGIN_MS, 
 import { ApiError, bad, forbidden, notFound, rateLimited, type WebCtx } from './http'
 import { notify, type NoticeKind } from './notices'
 import { ensureWebSchema, metaGet, metaSet } from './schema'
+import { ManagedError } from '../managed/core'
+import { isManagedFolder, makeMountDir, registerManaged, removeManagedMount } from '../managed/folders'
+import { storageSettings } from '../managed/settings'
 
 export interface Op { w: WebCtx; actor: Actor; base: string }
 
@@ -253,22 +256,28 @@ function upsertRule(op: Op, f: FolderRow, type: 'person' | 'group', id: number, 
   else op.w.db.query('INSERT INTO rules (folder_id, subject_type, subject_id, level) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET level = excluded.level').run(f.id, type, id, level)
 }
 
-export async function registerFolder(op: Op, body: { path?: unknown; name?: unknown; template?: unknown; group?: unknown; owner?: unknown; nas?: { mode?: unknown; people?: unknown }; no_ai?: unknown }) {
+export async function registerFolder(op: Op, body: { path?: unknown; name?: unknown; template?: unknown; group?: unknown; owner?: unknown; nas?: { mode?: unknown; people?: unknown }; no_ai?: unknown; managed?: unknown; read_only?: unknown }) {
   requireAdmin(op)
   const db = op.w.db
   const template = (body.template ?? 'custom') as Template
   if (!['public', 'team', 'management', 'personal', 'custom'].includes(template)) throw bad('bad_template')
-  if (typeof body.path !== 'string' || !path.isAbsolute(body.path)) throw bad('bad_path', 'give the folder\'s full path on the server')
+  // managed storage (src/managed): the server makes the folder in its own data area; there is no path and no NAS
+  const managed = body.managed === true || (storageSettings(db, op.w.dataDir).mode === 'managed' && (body.path === undefined || body.path === null || body.path === ''))
+  if (managed && (typeof body.name !== 'string' || !body.name.trim())) throw bad('bad_name', 'give the team folder a name')
   let real: string
-  try { real = fs.realpathSync(body.path); if (!fs.statSync(real).isDirectory()) throw new Error() } catch { throw bad('bad_path', 'no folder at that path on the server') }
-  const data = fs.realpathSync(op.w.dataDir)
-  if (data === real || data.startsWith(real + '/')) throw bad('bad_path', 'that folder holds the server\'s own data directory')
+  if (managed) real = ''
+  else {
+    if (typeof body.path !== 'string' || !path.isAbsolute(body.path)) throw bad('bad_path', 'give the folder\'s full path on the server')
+    try { real = fs.realpathSync(body.path); if (!fs.statSync(real).isDirectory()) throw new Error() } catch { throw bad('bad_path', 'no folder at that path on the server') }
+    const data = fs.realpathSync(op.w.dataDir)
+    if (data === real || data.startsWith(real + '/')) throw bad('bad_path', 'that folder holds the server\'s own data directory')
+  }
   const name = body.name === undefined || body.name === '' ? undefined : checkName(body.name)
   const r0 = new Rights(db)
   const mountName = nfc(name ?? path.basename(real))
-  const existing = [...r0.folders.values()].find((f) => f.path === real && f.registered)
+  const existing = managed ? undefined : [...r0.folders.values()].find((f) => f.path === real && f.registered)
   if (existing) throw new ApiError(409, 'exists', 'this folder is already registered')
-  const insideOther = [...r0.folders.values()].some((f) => f.registered && real.startsWith(f.path + '/'))
+  const insideOther = !managed && [...r0.folders.values()].some((f) => f.registered && real.startsWith(f.path + '/'))
   if (!insideOther && [...r0.folders.values()].some((f) => f.registered && r0.top(f)?.id === f.id && nfc(f.mount_name ?? '') === mountName))
     throw new ApiError(409, 'name_taken', 'another top folder already has this name; choose a different name')
   const groupId = template === 'team' || template === 'management' ? groupRow(op, body.group).id : template === 'public' ? everyoneGroup(op.w) : null
@@ -277,27 +286,30 @@ export async function registerFolder(op: Op, body: { path?: unknown; name?: unkn
   const nasMode = body.nas?.mode ?? (template === 'public' ? 'all' : template === 'team' ? 'same-as-ai' : template === 'personal' ? undefined : 'unknown')
 
   let f!: FolderRow
-  db.transaction(() => {
+  if (managed) real = makeMountDir(db, op.w.dataDir)
+  try { db.transaction(() => {
     try {
-      f = storeRegister(db, real, { name, personalOwner: owner?.name, nasReaders: 'unknown' })
+      f = managed ? registerManaged(db, real, { name: mountName, personalOwner: owner?.name, by: op.actor.personId })
+        : storeRegister(db, real, { name, personalOwner: owner?.name, nasReaders: 'unknown' })
     } catch (e) { if (e instanceof StoreError) throw bad('bad_path', e.message); throw e }
-    if (owner) db.query('UPDATE folders SET nas_readers = ? WHERE id = ?').run(JSON.stringify([owner.id]), f.id)
-    if (groupId != null) upsertRule(op, f, 'group', groupId, LEVELS.read)
+    if (owner && !managed) db.query('UPDATE folders SET nas_readers = ? WHERE id = ?').run(JSON.stringify([owner.id]), f.id)
+    // managed team folders: the template's group gets write (people put files in here); read elsewhere (agents' rule)
+    if (groupId != null) upsertRule(op, f, 'group', groupId, managed && body.read_only !== true ? LEVELS.write : LEVELS.read)
     if (noAi) db.query('UPDATE folders SET no_ai = 1 WHERE id = ?').run(f.id)
-    if (!owner && nasMode !== undefined) {
+    if (!owner && !managed && nasMode !== undefined) {
       const v = nasValue(new Rights(db), f, nasMode, body.nas?.people)
       db.query('UPDATE folders SET nas_readers = ? WHERE id = ?').run(v, f.id)
     }
     f = db.query<FolderRow, [number]>('SELECT * FROM folders WHERE id = ?').get(f.id)!
     db.query('INSERT INTO folder_history (folder_id, at, by_person, field, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?)')
       .run(f.id, now(), op.actor.personId, 'registered', null, JSON.stringify({ template, nas: f.nas_readers, owner: f.personal_owner }))
-    record(op, `folder register ${real} as /${f.mount_name} (${template})`, [new Rights(db).vpath(f) ?? real])
-  })()
+    record(op, `folder ${managed ? 'create (managed)' : 'register ' + real} as /${f.mount_name} (${template})`, [new Rights(db).vpath(f) ?? real])
+  })() } catch (e) { if (managed) try { fs.rmdirSync(real) } catch {} throw e }
 
   const warnings: string[] = []
   const r = new Rights(db)
   // R9: a folder that was someone's personal folder, now registered as a regular one, tells that person
-  if (!owner) {
+  if (!owner && !managed) {
     const former = db.query<{ old_value: string }, [number]>(`SELECT old_value FROM folder_history WHERE folder_id = ? AND field = 'personal_owner' AND old_value IS NOT NULL`).all(f.id)
       .map((h) => Number(h.old_value)).filter((id) => Number.isFinite(id))
     if (former.length) { warnings.push('former_personal'); await tell(op, former, 'former_personal_registered', folderLink(f)) }
@@ -317,7 +329,9 @@ export async function unregisterFolder(op: Op, id: unknown) {
   if (!f.registered) throw bad('not_registered', 'only registered folders can be unregistered')
   const db = op.w.db
   const vp = label(r, f)
+  const managed = isManagedFolder(db, f.id)
   db.transaction(() => {
+    if (managed) try { removeManagedMount(db, f) } catch (e) { if (e instanceof ManagedError) throw new ApiError(e.status, e.code, e.message); throw e }
     if (f.personal_owner != null) db.query('INSERT INTO folder_history (folder_id, at, by_person, field, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?)').run(f.id, now(), op.actor.personId, 'personal_owner', String(f.personal_owner), null)
     db.query('INSERT INTO folder_history (folder_id, at, by_person, field, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?)').run(f.id, now(), op.actor.personId, 'nas_readers', f.nas_readers, null)
     db.query('UPDATE folders SET registered = 0, mount_name = NULL, personal_owner = NULL, nas_readers = NULL WHERE id = ?').run(f.id)
@@ -422,6 +436,7 @@ export async function setNas(op: Op, id: unknown, body: { mode?: unknown; people
   const db = op.w.db
   const r = new Rights(db)
   const f = visibleFolder(op, r, id)
+  if (isManagedFolder(db, f.id)) throw bad('managed', 'managed storage has no NAS: who reads it is set by the rules')
   if (!r.canEditNas(op.actor, f)) throw forbidden(f.personal_owner != null ? 'only the owner sets who opens a personal folder' : 'only an admin changes NAS readers')
   const v = nasValue(r, f, body.mode, body.people)
   const vp = label(r, f)

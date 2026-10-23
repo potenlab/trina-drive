@@ -4,6 +4,10 @@ let csrf = ''
 let onSignedOut: () => void = () => {}
 
 export const setCsrf = (v: string) => { csrf = v }
+/** For requests that are not JSON (uploads): the session's CSRF token. */
+export const csrfToken = () => csrf
+/** Tell the app the session ended (an upload request got 401). */
+export const signedOut = () => onSignedOut()
 export const whenSignedOut = (f: () => void) => { onSignedOut = f }
 
 export class ApiError extends Error {
@@ -25,8 +29,10 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
 export const get = <T = any>(path: string) => api<T>('GET', path)
 
 // shapes the server returns (src/web/views.ts)
-export interface Me { id: number; name: string; admin: boolean; email: string | null; unread_notices: number; approvals?: number; second_factor?: boolean }
+export interface Me { id: number; name: string; admin: boolean; email: string | null; unread_notices: number; approvals?: number; second_factor?: boolean; storage?: 'managed' | 'inplace' }
 export interface FolderSummary {
+  /** in managed storage (the server owns it): no NAS, rules decide who views and who edits */
+  managed?: boolean
   id: number; name: string; vpath: string | null; registered: boolean; path?: string; personal_owner: number | null
   no_ai: boolean; quarantine: boolean; widened_pending: boolean; inherit_break: boolean; blocked: boolean
   nas_mode: 'all' | 'unknown' | 'chosen' | null; status: 'ok' | 'missing'; promote?: boolean; promote_here?: boolean

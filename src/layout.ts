@@ -8,6 +8,8 @@
 //   backup-staging/      short-lived plaintext snapshot of the DB while a backup runs
 //   logs/                launchd stdout/stderr of the daemons
 //   config/              root-owned: backup-recipient (public key), server.json
+//   files/               managed storage (cloud mode): team folders the server owns; trash, versions and upload
+//                        staging live in files/.trina-drive/ (same disk, so moves are renames). See src/managed/.
 // "flat" is the development layout the prototype uses today (~/.<name>/store.db, blobs/, mirror/).
 import fs from 'node:fs'
 import path from 'node:path'
@@ -22,6 +24,8 @@ export interface Layout {
   mirrorDir: string
   stagingDir: string
   logsDir: string
+  /** managed storage root (src/managed): team folders live here, one directory per registered folder */
+  filesDir: string
   /** backup target and retention (written by `backup target set`, server-owned) */
   backupConfig: string
   /** the backup public key (recipient); root-owned in the installed layout */
@@ -38,6 +42,7 @@ export function layoutFor(dataDir: string, kind: LayoutKind): Layout {
       mirrorDir: path.join(d, 'mirror'),
       stagingDir: path.join(d, 'backup-staging'),
       logsDir: path.join(d, 'logs'),
+      filesDir: path.join(d, 'files'),
       backupConfig: path.join(d, 'db', 'backup.json'),
       backupRecipient: path.join(d, 'config', 'backup-recipient'),
     }
@@ -49,6 +54,7 @@ export function layoutFor(dataDir: string, kind: LayoutKind): Layout {
     mirrorDir: path.join(d, 'mirror'),
     stagingDir: path.join(d, 'backup-staging'),
     logsDir: path.join(d, 'logs'),
+    filesDir: path.join(d, 'files'),
     backupConfig: path.join(d, 'backup.json'),
     backupRecipient: path.join(d, 'backup-recipient'),
   }

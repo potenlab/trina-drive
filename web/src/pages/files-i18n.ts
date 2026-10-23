@@ -26,6 +26,24 @@ const en = {
   who_restricted: 'You cannot open this folder’s own files, so its readers are not shown.',
   who_help: 'AI reads = what this server lets agents read. NAS = what the admin wrote down about the NAS itself.',
   keyboard_help: 'Arrow keys move, Enter opens, Backspace goes up.', up: 'Up',
+  // managed storage: changing files (src/managed)
+  new: 'New', new_folder: 'New folder', upload_files: 'Upload files', upload_folder: 'Upload folder', folder_name: 'Folder name', name: 'Name',
+  create: 'Create', cancel: 'Cancel', save: 'Save', rename: 'Rename', move_to: 'Move to…', copy_to: 'Copy to…', delete: 'Delete', more: 'More actions',
+  versions: 'Version history', share_settings: 'Share settings', drop_here: 'Drop to upload to {folder}', drop_no: 'You cannot add files here',
+  uploads_title: 'Uploads', uploading_n: 'Uploading {n}…', uploads_done: 'Uploads done', up_exists: 'already exists', replace: 'Replace', keep_both: 'Keep both',
+  skip: 'Skip', exists_n: '{n} already exist here:', retry_up: 'Retry', clear_done: 'Clear', close_panel: 'Hide', n_selected: '{n} selected',
+  deleted_n: 'Moved {n} to the trash', undo: 'Undo', moved_n: 'Moved {n}', copied_n: 'Copied {n}', trash: 'Trash',
+  trash_help: 'Deleted items stay here for {days} days, then they are gone for good. You see what you could open where it was.',
+  trash_empty: 'The trash is empty.', restore: 'Restore', delete_forever: 'Delete forever', empty_trash: 'Empty trash',
+  confirm_forever: 'Delete “{name}” forever? This cannot be undone.', confirm_empty: 'Delete everything you may restore from the trash forever? This cannot be undone.',
+  deleted_by: 'deleted by {name}', from_folder: 'from {folder}', gone_after: 'gone after {date}', restored_to: 'Restored to {path}',
+  pick_folder: 'Choose a folder', move_here: 'Move here', copy_here: 'Copy here', cannot_drop_here: 'You cannot add to this folder',
+  read_only_here: 'You can open this folder but not change it.', not_managed_here: 'Files here live on the NAS and are changed there.',
+  version_current: 'Current', version_n: 'Version {n}', restore_version: 'Restore', new_version: 'Upload a new version', versions_kept: 'The last {n} earlier versions are kept.',
+  version_restored: 'Restored as version {n}', confirm_delete: 'Move {n} to the trash?', errors_n: '{n} could not be done: {why}', items_n: '{n} items',
+  who_managed: 'People see what the folder’s rules allow: “can view” or “can edit”. Managers change it in Share settings.',
+  keyboard_help_edit: 'Arrows move, Shift extends, Ctrl/⌘ picks several, Enter opens, F2 renames, Delete moves to the trash, Backspace goes up. Right-click for more.',
+  empty_writable: 'Nothing here yet. Drop files here, or use New.', done: 'Done', drag_n: '{n} items',
 }
 
 type Key = keyof typeof en
@@ -54,6 +72,23 @@ const ko: Record<Key, string> = {
   who_restricted: '이 폴더의 파일은 열 수 없어서 독자를 보여 주지 않습니다.',
   who_help: 'AI가 읽음 = 이 서버가 에이전트에게 허락한 것. NAS = 관리자가 NAS 권한에 대해 적어 둔 것.',
   keyboard_help: '화살표로 움직이고, Enter로 열고, Backspace로 위로 갑니다.', up: '위로',
+  new: '새로 만들기', new_folder: '새 폴더', upload_files: '파일 올리기', upload_folder: '폴더 올리기', folder_name: '폴더 이름', name: '이름',
+  create: '만들기', cancel: '취소', save: '저장', rename: '이름 바꾸기', move_to: '옮기기…', copy_to: '사본 만들기…', delete: '삭제', more: '더 보기',
+  versions: '버전 기록', share_settings: '공유 설정', drop_here: '{folder}에 올리려면 놓으세요', drop_no: '여기에는 올릴 수 없습니다',
+  uploads_title: '올리기', uploading_n: '{n}개 올리는 중…', uploads_done: '다 올렸습니다', up_exists: '이미 있음', replace: '바꾸기', keep_both: '둘 다 두기',
+  skip: '건너뛰기', exists_n: '{n}개가 이미 있습니다:', retry_up: '다시', clear_done: '지우기', close_panel: '숨기기', n_selected: '{n}개 선택',
+  deleted_n: '{n}개를 휴지통으로 옮겼습니다', undo: '되돌리기', moved_n: '{n}개를 옮겼습니다', copied_n: '{n}개 사본을 만들었습니다', trash: '휴지통',
+  trash_help: '지운 항목은 {days}일 동안 여기 있다가 완전히 지워집니다. 원래 자리에서 열 수 있던 것만 보입니다.',
+  trash_empty: '휴지통이 비어 있습니다.', restore: '되살리기', delete_forever: '완전히 지우기', empty_trash: '휴지통 비우기',
+  confirm_forever: '“{name}”을(를) 완전히 지울까요? 되돌릴 수 없습니다.', confirm_empty: '되살릴 수 있는 항목을 모두 완전히 지울까요? 되돌릴 수 없습니다.',
+  deleted_by: '{name}이(가) 지움', from_folder: '{folder}에서', gone_after: '{date} 뒤 사라짐', restored_to: '{path}에 되살렸습니다',
+  pick_folder: '폴더 고르기', move_here: '여기로 옮기기', copy_here: '여기에 사본 만들기', cannot_drop_here: '이 폴더에는 넣을 수 없습니다',
+  read_only_here: '이 폴더는 열 수만 있고 바꿀 수 없습니다.', not_managed_here: '여기 파일은 NAS에 있고 NAS에서 바꿉니다.',
+  version_current: '현재', version_n: '버전 {n}', restore_version: '되살리기', new_version: '새 버전 올리기', versions_kept: '이전 버전은 최근 {n}개까지 남습니다.',
+  version_restored: '버전 {n}으로 되살렸습니다', confirm_delete: '{n}개를 휴지통으로 옮길까요?', errors_n: '{n}개는 하지 못했습니다: {why}', items_n: '{n}개',
+  who_managed: '폴더 규칙이 허락한 사람이 봅니다(“보기” 또는 “편집”). 관리자는 공유 설정에서 바꿉니다.',
+  keyboard_help_edit: '화살표로 움직이고 Shift로 넓히고 Ctrl/⌘로 여러 개를 고릅니다. Enter 열기, F2 이름 바꾸기, Delete 휴지통, Backspace 위로. 오른쪽 클릭으로 더 보기.',
+  empty_writable: '아직 아무것도 없습니다. 파일을 끌어다 놓거나 새로 만들기를 누르세요.', done: '완료', drag_n: '{n}개',
 }
 
 export type FilesKey = Key

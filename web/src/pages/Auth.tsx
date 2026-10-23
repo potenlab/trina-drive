@@ -66,6 +66,7 @@ export function Setup({ pending, onDone }: { pending: boolean; onDone: () => voi
 }
 
 function SetupFolders() {
+  const { me } = useSession()
   const [folders, setFolders] = useState<FolderSummary[]>([])
   const load = () => get<{ folders: FolderSummary[] }>('/folders').then((r) => setFolders(r.folders.filter((f) => f.registered)), () => {})
   useEffect(() => { load() }, [])
@@ -73,7 +74,7 @@ function SetupFolders() {
     <div className="card">
       <h1>{t('setup_step_folders')}</h1>
       <p className="muted">{t('setup_folders_intro')}</p>
-      <RegisterForm onDone={load} />
+      <RegisterForm onDone={load} managed={me?.storage === 'managed'} />
       {folders.length > 0 && <>
         <h2>{t('setup_registered')}</h2>
         <ul className="plain">{folders.map((f) => <li key={f.id}><strong>{f.vpath}</strong> <span className="muted">{f.path}</span></li>)}</ul>
