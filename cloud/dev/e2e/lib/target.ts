@@ -53,7 +53,7 @@ export interface Target {
 export interface Sh { code: number; out: string; err: string }
 
 export function sh(argv: string[], input?: string): Sh {
-  const p = Bun.spawnSync(argv, { stdin: input !== undefined ? new TextEncoder().encode(input) : 'ignore', stdout: 'pipe', stderr: 'pipe' })
+  const p = Bun.spawnSync(argv, { stdin: input !== undefined ? new TextEncoder().encode(input) : 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: 15 * 60_000 })
   return { code: p.exitCode ?? -1, out: p.stdout.toString(), err: p.stderr.toString() }
 }
 

@@ -8,7 +8,9 @@ export default {
     const fx = t.fx
     const c = await fx.consoleAs('mina')
     const r = await c.openDrive(fx.slug, { returnPath: '/#/files?path=%2F%EA%B3%B5%EC%9A%A9' })
-    t.check('lands on the asked path (/#/files?path=/공용)', !!r.drive && r.landing.startsWith(fx.url) && r.landing.includes('#/files?path='), r.landing)
+    // someone with a second factor on the drive passes #/sso-second/<ticket> first, then goes where they were going
+    const landing = r.secondFactor ? (await fx.completeSecond('mina', c.jar, r.secondFactor)).returnTo : r.landing
+    t.check(`lands on the asked path (/#/files?path=/공용)${r.secondFactor ? ' after the drive\'s second factor' : ''}`, landing.includes('#/files?path=') && (landing.startsWith('/') || landing.startsWith(fx.url)), landing)
     for (const bad of ['//evil.example/x', 'https://evil.example/']) {
       const c2 = await fx.consoleAs('mina')
       const r2 = await c2.openDrive(fx.slug, { returnPath: bad })

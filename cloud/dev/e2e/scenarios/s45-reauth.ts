@@ -26,8 +26,10 @@ export default {
     const r = await c.openDrive(fx.slug, { returnPath: '/#/settings', reauth: true })
     const auth = r.authorize?.url ?? ''
     t.check('?reauth=1 → the console is asked for max_age=0', r.hops.some((h) => /max_age=0/.test(h)), r.hops)
-    if (r.drive) {
-      const ap = await r.drive.api('POST', '/me/app-passwords', { name: `s45-${Date.now().toString(36)}` })
+    const fresh = r.drive ?? (r.secondFactor ? (await fx.completeSecond('mina', c.jar, r.secondFactor)).drive : null)
+    t.check('the console asked for the password again (max_age=0) before signing', !!r.reauthAsked, r.hops)
+    if (fresh) {
+      const ap = await fresh.api('POST', '/me/app-passwords', { name: `s45-${Date.now().toString(36)}` })
       t.check('after re-authenticating: an app password can be made', ap.status === 200, ap.text)
     } else t.check('the console asked for the password again (a login page, not a silent pass)', /\/login/.test(auth) || /password/i.test(r.authorize?.text ?? ''), { error: r.error, auth })
     if (await t.has('console', 'mina made admin mid-session: every admin and mina are told')) {

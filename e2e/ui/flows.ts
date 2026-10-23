@@ -83,15 +83,17 @@ async function consoleLogin(t: Any, page: Any, who: string) {
   const c = t.fx.creds(who)
   await page.goto(`${t.target.control}/login`); await settle(page)
   await page.locator('input[type=email]').first().fill(c.email)
-  await page.locator('input[type=password]').first().fill(c.password)
-  await page.locator('button[type=submit], form button').first().click()
+  const pw = page.locator('input[type=password]').first()
+  await pw.fill(c.password)
+  await pw.press('Enter') // the page has other forms (email me a link): submit the one with the password
   await settle(page)
-  const code = page.locator('input[autocomplete=one-time-code], input[name=code], input[inputmode=numeric]').first()
+  if (/cross-site request refused/.test(await page.locator('body').innerText())) throw new Error('the console refused its own sign-in form (the browser sent Origin: null: Referrer-Policy no-referrer)')
+  const code = page.locator('input[autocomplete=one-time-code], input[name=code]').first()
   if (await code.count()) {
     if (!c.consoleTotp) throw new Error(`${who}: the console asks for a code and the fixture has no console TOTP`)
     const { freshTotp } = await import(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../cloud/dev/e2e/lib/totp.ts'))
     await code.fill(await freshTotp(c.consoleTotp))
-    await page.locator('button[type=submit], form button').first().click()
+    await code.press('Enter')
     await settle(page)
   }
 }
@@ -108,7 +110,7 @@ export async function ownerOpensDrive(t: Any) {
     await settle(p)
     const ok = new URL(p.url()).origin === new URL(t.fx.url).origin
     return { ok, url: p.url(), shot: await shot(p, 's02-drive-after-sso') }
-  } catch (e) { return { ok: false, error: (e as Error).message } } finally { await b.close() }
+  } catch (e) { return { ok: false, error: (e as Error).message.slice(0, 200), shot: await shot((b.context.pages())[0], 's02-failed').catch(() => '') } } finally { await b.close() }
 }
 
 export async function deepLinkSignIn(t: Any) {
@@ -124,7 +126,7 @@ export async function deepLinkSignIn(t: Any) {
     const text = await p.locator('body').innerText()
     const ok = !!had && (text.includes('notice.md') || /공용/.test(text)) && !/sign in with trina cloud/i.test(text)
     return { ok, url: p.url(), shot: await shot(p, 's04-deep-link') }
-  } catch (e) { return { ok: false, error: (e as Error).message } } finally { await b.close() }
+  } catch (e) { return { ok: false, error: (e as Error).message.slice(0, 200), shot: await shot((b.context.pages())[0], 's04-failed').catch(() => '') } } finally { await b.close() }
 }
 
 /** S37: screenshots of the console, the drive and (if built) the landing, light/dark × 1440/390; horizontal overflow */

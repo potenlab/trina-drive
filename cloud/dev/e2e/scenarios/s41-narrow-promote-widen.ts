@@ -25,10 +25,19 @@ export default {
     t.check('the promote lands (the folder is as narrow as /재무)', !pr.isError && (await (await fx.drive('sam')).stat(`/${name}/copy.md`)).status === 200, pr.text)
     t.step('sam (Editor) widens it to everyone')
     const sam = await fx.drive('sam')
-    const w = await share(sam, { path: `/${name}`, general: { mode: 'team', role: 'viewer' } })
-    t.check('409 widening, with how many sources the Editor cannot see', w.status === 409 && w.json().code === 'widening' || /widening/.test(w.text), w.text)
+    // an Editor opening a folder to the whole team proves it with a passkey first (O1)
+    const general = { mode: 'team', role: 'viewer' }
+    const pk = await fx.ensurePasskey('sam')
+    const stepUp = async () => {
+      const o = await sam.api('POST', '/share/step-up/options', { path: `/${name}`, general })
+      const su = o.status === 200 ? await sam.api('POST', '/share/step-up', { path: `/${name}`, general, response: pk.assert(o.json().options) }) : o
+      fx.keepPasskey('sam', pk)
+      return su.status === 200 ? su.json().assertion as string : ''
+    }
+    const w = await share(sam, { path: `/${name}`, general, step_up: await stepUp() })
+    t.check('409 widening, with how many sources the Editor cannot see', w.status === 409 && /widening/.test(w.text), w.text)
     t.check('…and the Editor may not confirm it (can_confirm: false)', w.status === 409 && w.json().can_confirm === false, w.text)
-    const wc = await share(sam, { path: `/${name}`, general: { mode: 'team', role: 'viewer' }, confirm_widening: true })
+    const wc = await share(sam, { path: `/${name}`, general, confirm_widening: true, step_up: await stepUp() })
     t.check('an Editor\'s confirm_widening only asks for approval → 202 approval_pending', wc.status === 202 && /approval_pending|closed/.test(wc.json().status ?? '') && !!wc.json().approval_id, wc.text)
     t.check('mina still does not see the copy', (await (await fx.drive('mina')).stat(`/${name}/copy.md`)).status === 404)
     t.step('the admin confirms')

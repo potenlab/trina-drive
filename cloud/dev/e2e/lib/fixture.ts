@@ -280,19 +280,29 @@ export class Fixture {
 
   private async ssoDrive(who: Who, c: Console, o: { reauth?: boolean } = {}): Promise<Drive> {
     const r = await c.openDrive(this.slug, o.reauth ? { reauth: true, returnPath: '/' } : {})
-    if (r.secondFactor) {
-      const cr = this.creds(who)
-      if (!cr.totp) throw new Error(`${who}: the drive asks for its own second factor after SSO and the fixture has none`)
-      const d = new Drive(this.http, this.slug, who, c.jar)
-      const s = await d.api('POST', '/login/second', { ticket: r.secondFactor, method: 'totp', code: await freshTotp(cr.totp) })
-      if (s.status !== 200) throw new Error(`${who}: second factor after SSO ${s.status} ${s.text}`)
-      await d.session()
-      return d
-    }
+    if (r.secondFactor) return (await this.completeSecond(who, c.jar, r.secondFactor)).drive
     if (!r.drive && r.error === 'reauth_asked') throw new Error(`${who}: the console asks for the password again and no credentials were given`)
     if (!r.drive) throw new Error(`${who}: Open drive (SSO) ended with ${r.error} after ${r.hops.join(' → ')}`)
     r.drive.who = who
     return r.drive
+  }
+
+  /** the drive's own second factor after an SSO pass (#/sso-second/<ticket>): authenticator code or kept passkey */
+  async completeSecond(who: Who, jar: Jar, ticket: string): Promise<{ drive: Drive; returnTo: string }> {
+    const cr = this.creds(who)
+    const d = new Drive(this.http, this.slug, who, jar)
+    let s: Res
+    if (cr.totp) s = await d.api('POST', '/login/second', { ticket, method: 'totp', code: await freshTotp(cr.totp) })
+    else if (this.s.passkeys?.[who]) {
+      const pk = SoftPasskey.fromJSON(this.s.passkeys[who]!)
+      const ch = await d.api('POST', '/sso/second', { ticket })
+      const opts = ch.status === 200 ? ch.json().second_factor?.passkey : null
+      s = opts ? await d.api('POST', '/login/second', { ticket, method: 'passkey', response: pk.assert(opts) }) : ch
+      this.keepPasskey(who, pk)
+    } else throw new Error(`${who}: the drive asks for its own second factor after SSO and the fixture has none`)
+    if (s.status !== 200) throw new Error(`${who}: second factor after SSO ${s.status} ${s.text}`)
+    await d.session()
+    return { drive: d, returnTo: s.json().return_to ?? '' }
   }
 
   private keep(who: string, d: Drive) {

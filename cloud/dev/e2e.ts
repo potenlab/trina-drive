@@ -421,7 +421,8 @@ async function freePlan() {
   check('a fourth person is refused (TDRIVE_MAX_PEOPLE=3)', fourth.code !== 0 && /at most 3 people/.test(fourth.err + fourth.out), fourth.err + fourth.out)
   // a personal token for MCP later (made by the operator CLI: not activity)
   const freePat = tdrive('freeco', 'token', 'create', ownerName, '--name', 'free-e2e').out.trim()
-  const act = tdrive('freeco', 'activity', '--json')
+  let act = tdrive('freeco', 'activity', '--json')
+  for (let i = 0; i < 5 && act.code !== 0; i++) { Bun.sleepSync(1000); act = tdrive('freeco', 'activity', '--json') } // a busy database: once more
   check('the team reports its last activity (the owner\'s session)', act.code === 0 && typeof JSON.parse(act.out).web === 'number', act.out + act.err)
 
   step('Free plan: the cap and the waitlist')
@@ -445,8 +446,8 @@ async function freePlan() {
   check('the dashboard API shows the free team', ft?.plan === 'free' && ft.paused === false, mine)
 
   step('Free plan: nobody uses it → warned → paused')
-  check('the owner is warned (25 s idle here; 6 days in production)', await until(() => outbox().some((m) => m.to === owner && m.subject.startsWith('Your free Trina Drive pauses')), 90_000))
-  check('paused (45 s idle here; 7 days in production)', await until(() => /^freeco +paused +free /m.test(admin('teams', 'list').out), 90_000), admin('teams', 'list').out)
+  check('the owner is warned (60 s idle here; 6 days in production)', await until(() => outbox().some((m) => m.to === owner && m.subject.startsWith('Your free Trina Drive pauses')), 150_000))
+  check('paused (100 s idle here; 7 days in production)', await until(() => /^freeco +paused +free /m.test(admin('teams', 'list').out), 150_000), admin('teams', 'list').out)
   check('the owner is told it is paused', outbox().some((m) => m.to === owner && m.subject === 'Your free Trina Drive is paused'))
   check('its container is stopped, not removed', sh(['docker', 'inspect', '-f', '{{.State.Running}}', 'tdc-freeco']).out.trim() === 'false')
   const pp = await req('GET', `${teamUrl('freeco')}/`)

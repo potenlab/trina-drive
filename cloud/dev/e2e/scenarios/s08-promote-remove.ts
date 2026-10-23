@@ -14,6 +14,7 @@ export default {
     const name = `tmp${run}`.slice(0, 20), email = `${name}@${fx.slug}.test`, pw = `${name}-correct-horse-1`
     let d: Drive
     let consoleUser: { c: Console; teamId: string; userId: string } | null = null
+    let creds: { pat: string; ap: string } | null = null
     if ((await t.features.get('console')).ok && (await t.features.get('sso')).ok) {
       const owner = await fx.consoleAs('admin')
       const teamId = await owner.teamId(fx.slug)
@@ -25,6 +26,8 @@ export default {
       const r = await c.openDrive(fx.slug)
       if (!r.drive) { t.check('the new member opens the drive', false, r.error); return }
       d = r.drive
+      // credentials first: once an admin, the hosted drive wants a second factor before it makes tokens
+      creds = { pat: await d.token(`e2e-s08-${run}`), ap: await (await (async () => { const f = await c.openDrive(fx.slug, { reauth: true, returnPath: '/' }); return f.drive ?? d })()).appPassword('s08').catch(() => '') }
       const m = (await owner.members(teamId)).json().members as { user: { id: string; email: string } }[]
       consoleUser = { c, teamId, userId: m.find((x) => x.user.email === email)?.user.id ?? '' }
       t.step('console: member → admin')
@@ -43,8 +46,8 @@ export default {
       t.check('a temporary person joins', add.status === 200 && acc.status === 200, acc.text)
       d = await new Drive(t.http, fx.slug, name).login({ name, email, password: pw })
     }
-    const pat = await d.token(`e2e-s08-${run}`, { password: pw })
-    const ap = await d.appPassword('s08', pw).catch(() => '')
+    if (!creds) creds = { pat: await d.token(`e2e-s08-${run}`, { password: pw }), ap: await d.appPassword('s08', pw).catch(() => '') }
+    const { pat, ap } = creds
     t.check('they have a session, a token and an app password', !!pat && !!ap)
     t.step('remove')
     const pid = ((await admin.get('/people')).json().people as { id: number; email?: string }[]).find((p) => p.email === email)?.id

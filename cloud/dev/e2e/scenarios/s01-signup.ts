@@ -22,6 +22,11 @@ export default {
     const cookie = c.jar.seen.find((x) => /session/i.test(x)) ?? ''
     t.check('console session cookie: HttpOnly, Secure, host-only (no Domain)', /HttpOnly/i.test(cookie) && /Secure/i.test(cookie) && !/Domain=/i.test(cookie), cookie.replace(/=[^;]+/, '=…'))
 
+    // what a browser sends for the console's own sign-in form: with Referrer-Policy no-referrer, Chromium posts
+    // Origin: null (plus Sec-Fetch-Site: same-origin) — the console must still take it
+    const form = await t.http.req('POST', `${t.target.control}/login`, { form: { email, password: pw }, origin: 'null', headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate' } })
+    t.check('the console takes its own sign-in form as a browser posts it (Origin: null, Sec-Fetch-Site: same-origin)', !/cross-site request refused/.test(form.text) && form.status !== 403, `${form.status} ${form.text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160)}`)
+
     t.step('an unconfirmed account')
     const u = new Console(t.http)
     await u.api('POST', '/api/signup', { email: `s01u-${run}@signup.test`, password: pw })

@@ -64,7 +64,7 @@ async function runOne(s: Scenario, c: Ctx, verbose: boolean): Promise<Result> {
   resetLocalLimits(c)
   try { await s.run(t) } catch (e) {
     if (e instanceof SkipScenario) return res('SKIP', e.message)
-    t.failures.push(`threw: ${(e as Error).stack?.split('\n').slice(0, 4).join(' | ') ?? e}`)
+    t.failures.push(`threw: ${(e as Error)?.stack?.split('\n').slice(0, 4).join(' | ') || String(e) || typeof e}`)
     if (verbose) console.log(`    ERROR ${(e as Error).stack ?? e}`)
     return res('ERROR')
   }
