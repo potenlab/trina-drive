@@ -25,11 +25,24 @@
 	rate_limit {
 		zone signin {
 			match {
-				path /api/login /api/login/second /api/setup /api/links/* /api/me/reauth /api/sso/* /oauth/token /oauth/register /oauth/authorize
+				path /api/login /api/login/second /api/setup /api/links/* /api/me/reauth /oauth/token /oauth/register /oauth/authorize
 				not client_ip {$TDCLOUD_TRUSTED_OFFICE_CIDRS:192.0.2.0/32}
 			}
 			key {client_ip}
 			events 30
+			window 1m
+		}
+		# Sign in with Trina Cloud: every "Open drive" is 2–3 of these (start, the console's callback, the second
+		# factor's challenge) and nothing here takes a password. A team behind one NAT that is not an office range
+		# (every customer's office) opening the drive at 9:00 must not hit the 30 above. The product limits starts
+		# (300 / 15 min) and refused passes (50 / 15 min) per address on its own.
+		zone sso {
+			match {
+				path /api/sso/*
+				not client_ip {$TDCLOUD_TRUSTED_OFFICE_CIDRS:192.0.2.0/32}
+			}
+			key {client_ip}
+			events 120
 			window 1m
 		}
 		zone signin_office {

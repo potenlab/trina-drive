@@ -68,6 +68,8 @@ services:
       TDCLOUD_DOMAIN: ${TDCLOUD_DOMAIN}
       TDCLOUD_SLUG_LABEL: ${TDCLOUD_SLUG_LABEL}
       TDCLOUD_ASK_URL: http://tdc-control:8790/internal/caddy/ask?key=${TDCLOUD_CADDY_ASK_KEY}
+      # this machine (Docker's port forwarder, 10.250.250.1) is an office range: up.sh
+      TDCLOUD_TRUSTED_OFFICE_CIDRS: ${TDCLOUD_TRUSTED_OFFICE_CIDRS}
     ports:
       - "127.0.0.1:${TDCLOUD_PUBLIC_PORT}:443"
     volumes:

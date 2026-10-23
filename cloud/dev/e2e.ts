@@ -327,6 +327,31 @@ const post = (path, body, headers) => new Promise((res, rej) => { const q = http
   void a
 }
 
+/**
+ * Caddy's rate-limit zones per client address (caddy/team_routes.caddy): this machine is an office range here (up.sh:
+ * TDCLOUD_TRUSTED_OFFICE_CIDRS=10.250.250.1/32, as Terraform office_cidrs for a real office) and gets the office limits;
+ * a container at 10.250.250.50 is an ordinary client: 30 sign-in requests a minute, yet Sign in with Trina Cloud
+ * (/api/sso/*, its own zone) still works from there — a team behind one NAT opening the drive at once.
+ */
+async function officeZones() {
+  const here: number[] = []
+  for (let i = 0; i < 40; i++) here.push((await req('GET', `${teamUrl('globex')}/api/login`)).status)
+  check('this machine is an office range: 40 sign-in requests in a minute, no 429', here.length === 40 && !here.includes(429), here.join(' '))
+  const inside = (n: number, p: string) => {
+    const script = `const https = require('node:https');
+const get = (path) => new Promise((res) => { const q = https.request({ host: '10.250.250.10', port: 443, servername: process.env.H, ca: process.env.CA, method: 'GET', path,
+  headers: { host: process.env.H + ':' + process.env.P } }, (s) => { s.resume(); s.on('end', () => res(s.statusCode)) }); q.on('error', () => res(0)); q.end() });
+(async () => { const out = []; for (let i = 0; i < ${n}; i++) out.push(await get(${JSON.stringify(p)})); console.log(out.join(' ')) })()`
+    const r = sh(['docker', 'run', '--rm', '--network', 'tdc-control', '--ip', '10.250.250.50', '-e', `CA=${CA}`, '-e', `H=globex.${DOMAIN}`, '-e', `P=${PORT}`,
+      '--entrypoint', 'bun', 'tdcloud-control:dev', '-e', script])
+    return r.out.trim().split(/\s+/).filter(Boolean).map(Number)
+  }
+  const signin = inside(35, '/api/login')
+  check('10.250.250.50 (not an office): the sign-in zone answers 429 after 30 a minute', signin.length === 35 && !signin.slice(0, 25).includes(429) && signin.includes(429), signin.join(' '))
+  const sso = inside(40, '/api/sso/start?return=%2F')
+  check('…while 40 Sign in with Trina Cloud starts from it pass (their own zone, 120 a minute): 303 to the console', sso.length === 40 && sso.every((x) => x === 303), sso.join(' '))
+}
+
 const showTeam = (slug: string) => { const r = admin('teams', 'show', slug); return (r.code === 0 ? JSON.parse(r.out) : {}) as { host?: string; status?: string; waiting_since?: number | null } }
 /** the `hosts list --all` line of one host ('' when not listed) */
 const hostLine = (id: string | undefined) => (id ? admin('hosts', 'list', '--all').out.split('\n').find((l) => l.startsWith(`${id} `)) ?? '' : '')
@@ -535,6 +560,7 @@ async function main() {
   check('no certificate for a name that is not a team', !(await tlsOk('nope')))
   const hostSwap = await fetch(`${teamUrl('acme')}/api/state`, { headers: { host: `globex.${DOMAIN}:${PORT}` }, tls: { ca: CA } } as RequestInit).then((r) => r.status, () => 0)
   check('Host that does not match the TLS name is refused (strict SNI)', hostSwap !== 200, hostSwap)
+  await officeZones()
 
   step('operator: suspend, resume, backup, export, audit')
   check('suspend globex', admin('teams', 'suspend', 'globex').code === 0)

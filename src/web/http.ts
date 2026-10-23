@@ -46,6 +46,8 @@ export interface WebCtx extends Ctx {
   loginByAddr: RateLimiter
   /** uses of one-time links and the setup token per client address */
   linkByAddr: RateLimiter
+  /** Trina Cloud sign-ins started (GET /api/sso/start) per client address: one office NAT carries the whole team */
+  ssoByAddr: RateLimiter
   mcpLimiter: McpLimiter
   opts: WebOptions
   /** null when no public HTTPS address is configured */

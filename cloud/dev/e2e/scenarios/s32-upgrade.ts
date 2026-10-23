@@ -36,7 +36,10 @@ export default {
     if (await t.has('sso', 'SSO sign-in after the upgrade')) {
       const c = await fx.consoleAs('mina')
       const r = await c.openDrive(fx.slug)
-      t.check('mina opens the drive from the console after the upgrade', !!r.drive, r.error)
+      // the drive's own second factor first (mina has a passkey once S42 ran on this team): answered with the kept one
+      let d = r.drive, err = r.error
+      if (r.secondFactor) { try { d = (await fx.completeSecond('mina', c.jar, r.secondFactor)).drive } catch (e) { err = (e as Error).message } }
+      t.check('mina opens the drive from the console after the upgrade', !!d, err)
     }
     t.skipPart('upgrade from the previous release\'s data (0.2)', 'run with the rollback image first: TDCLOUD_IMAGE=<rollback tag> cloud/dev/up.sh --no-teams, make the fixture, then rebuild and run S32')
   },

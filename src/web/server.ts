@@ -47,6 +47,9 @@ export function makeWebCtx(ctx: Ctx, opts: WebOptions = {}): WebCtx {
     loginByName: new RateLimiter(5, 15 * 60_000, { db: ctx.db, scope: 'login_name' }),
     loginByAddr: new RateLimiter(50, 15 * 60_000, { db: ctx.db, scope: 'login_addr' }),
     linkByAddr: new RateLimiter(30, 15 * 60_000, { db: ctx.db, scope: 'link_addr' }),
+    // every "Open drive" starts here (a state row, then the console): a 20-person office behind one address opens the
+    // drive, re-authenticates, uses a second browser — 300 per 15 minutes, not the one-time links' 30
+    ssoByAddr: new RateLimiter(300, 15 * 60_000, { db: ctx.db, scope: 'sso_addr' }),
     mcpLimiter: opts.mcpLimiter ?? new McpLimiter(),
     oauth: oauthRuntime(ctx, opts),
   }

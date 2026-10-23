@@ -127,38 +127,75 @@ export async function deepLinkSignIn(t: Any) {
     const btn = p.getByRole('button', { name: /sign in with trina cloud/i }).or(p.getByRole('link', { name: /sign in with trina cloud/i })).first()
     const had = await btn.count()
     if (had) { await btn.click(); await p.waitForURL((u: URL) => u.origin === new URL(t.fx.url).origin && !u.pathname.startsWith('/api/'), { timeout: 30_000 }); await settle(p) }
+    // mina may have the drive's own second factor by now (S42 gives her a passkey on this shared team): the console
+    // pass then lands on #/sso-second/<ticket>. The fixture answers it with her kept passkey and the browser takes
+    // that session; the return path is the ticket's own (what S04 is about), not something this test supplies
+    const second = /#\/sso-second\/([A-Za-z0-9_-]+)/.exec(p.url())
+    if (second) {
+      const { Jar } = await import(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../cloud/dev/e2e/lib/http.ts'))
+      const r = await t.fx.completeSecond('mina', new Jar(), second[1])
+      const host = new URL(t.fx.url).host
+      const cookies = ['tdrive_session', '__Host-tdrive_session'].map((name) => ({ name, value: r.drive.jar.get(host, name) })).filter((c) => c.value)
+      await b.context.addCookies(cookies.map((c) => ({ ...c, url: t.fx.url, secure: true, httpOnly: true, sameSite: 'Lax' })))
+      // a hash-only change is no new page load: reload so the app reads its new session
+      await p.goto(new URL(r.returnTo || '/', t.fx.url).toString()); await p.reload(); await settle(p)
+    }
     const text = await p.locator('body').innerText()
     const ok = !!had && (text.includes('notice.md') || /공용/.test(text)) && !/sign in with trina cloud/i.test(text)
-    return { ok, url: p.url(), shot: await shot(p, 's04-deep-link') }
+    return { ok, url: p.url(), second: !!second, shot: await shot(p, 's04-deep-link') }
   } catch (e) { return { ok: false, error: (e as Error).message.slice(0, 200), shot: await shot((b.context.pages())[0], 's04-failed').catch(() => '') } } finally { await b.close() }
+}
+
+/**
+ * The built landing (website/dist) over HTTP on 127.0.0.1, as it is deployed: its pages load /_astro/*.css by absolute
+ * path, so a file:// URL shows it without any styles (one 6,000 px line of the demo transcript at 390).
+ */
+async function serveDist(root: string): Promise<{ url: string; close: () => void }> {
+  const http = await import('node:http')
+  const types: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json',
+    '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.avif': 'image/avif', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff' }
+  const srv = http.createServer((req, res) => {
+    let f = path.join(root, path.normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)))
+    if (f !== root && !f.startsWith(root + path.sep)) { res.writeHead(403).end(); return }
+    if (fs.existsSync(f) && fs.statSync(f).isDirectory()) f = path.join(f, 'index.html')
+    else if (!fs.existsSync(f) && fs.existsSync(f + '.html')) f += '.html'
+    if (!fs.existsSync(f)) { res.writeHead(404).end(); return }
+    res.writeHead(200, { 'content-type': types[path.extname(f)] ?? 'application/octet-stream' })
+    fs.createReadStream(f).pipe(res)
+  })
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()))
+  return { url: `http://127.0.0.1:${(srv.address() as { port: number }).port}/`, close: () => srv.close() }
 }
 
 /** S37: screenshots of the console, the drive and (if built) the landing, light/dark × 1440/390; horizontal overflow */
 export async function design(t: Any) {
   const out: { shots: string[]; overflow: string[]; errors: string[] } = { shots: [], overflow: [], errors: [] }
-  const landing = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../website/dist/index.html')
-  for (const dark of [false, true]) for (const width of [1440, 390]) {
-    const tag = `${width}-${dark ? 'dark' : 'light'}`
-    const pages: [string, string, string | null][] = [
-      ['console-login', `${t.target.control}/login`, null], ['console-signup', `${t.target.control}/signup`, null],
-      ['drive-files', filesUrl(t, '/'), 'mina'], ['drive-folder', filesUrl(t, '/공용'), 'mina'], ['drive-admin', `${t.fx.url}/#/folders`, 'admin'],
-      ...(fs.existsSync(landing) ? [['landing', `file://${landing}`, null] as [string, string, null]] : []),
-    ]
-    for (const [name, url, who] of pages) {
-      const b = who ? await asPerson(t, who, { width, dark }) : { ...(await open({ width, dark })), page: null as Any }
-      try {
-        await withTimeout(60_000, `${name} ${tag}`, async () => {
-          const page = b.page ?? await b.context.newPage()
-          await page.goto(url, { timeout: 30_000 }); await settle(page)
-          out.shots.push(await shot(page, `s37-${name}-${tag}`))
-          if (width === 390) {
-            const sw = await page.evaluate(() => document.documentElement.scrollWidth)
-            if (sw > 392) out.overflow.push(`${name} ${tag}: page is ${sw}px wide at 390`)
-          }
-        })
-      } catch (e) { out.errors.push(`${name} ${tag}: ${(e as Error).message.slice(0, 120)}`) } finally { await withTimeout(15_000, 'close', () => b.close()).catch(() => {}) }
+  const dist = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../website/dist')
+  const site = fs.existsSync(path.join(dist, 'index.html')) ? await serveDist(dist) : null
+  try {
+    for (const dark of [false, true]) for (const width of [1440, 390]) {
+      const tag = `${width}-${dark ? 'dark' : 'light'}`
+      const pages: [string, string, string | null][] = [
+        ['console-login', `${t.target.control}/login`, null], ['console-signup', `${t.target.control}/signup`, null],
+        ['drive-files', filesUrl(t, '/'), 'mina'], ['drive-folder', filesUrl(t, '/공용'), 'mina'], ['drive-admin', `${t.fx.url}/#/folders`, 'admin'],
+        ...(site ? [['landing', site.url, null] as [string, string, null]] : []),
+      ]
+      for (const [name, url, who] of pages) {
+        const b = who ? await asPerson(t, who, { width, dark }) : { ...(await open({ width, dark })), page: null as Any }
+        try {
+          await withTimeout(90_000, `${name} ${tag}`, async () => {
+            const page = b.page ?? await b.context.newPage()
+            await page.goto(url, { timeout: 30_000 }); await settle(page)
+            out.shots.push(await shot(page, `s37-${name}-${tag}`))
+            if (width === 390) {
+              const sw = await page.evaluate(() => document.documentElement.scrollWidth)
+              if (sw > 392) out.overflow.push(`${name} ${tag}: page is ${sw}px wide at 390`)
+            }
+          })
+        } catch (e) { out.errors.push(`${name} ${tag}: ${(e as Error).message.slice(0, 120)}`) } finally { await withTimeout(15_000, 'close', () => b.close()).catch(() => {}) }
+      }
     }
-  }
+  } finally { site?.close() }
   return out
 }
 

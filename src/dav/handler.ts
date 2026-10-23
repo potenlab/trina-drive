@@ -204,7 +204,27 @@ function mustUnlocked(c: Ctx, vpath: string, deep = false) {
   const l = locksOf(c.w.db).blocking(vpath, c.personId, c.tokens, deep)
   if (l) answer(davError(423, 'lock-token-submitted', el(DAV, 'href', esc(hrefOf(l.path, false)))))
 }
-function preconditions(c: Ctx) { if (!ifHolds(c)) answer(plain(412, 'Precondition failed')) }
+/**
+ * RFC 7232 on a change (PUT, DELETE, MOVE/COPY source, MKCOL, LOCK, PROPPATCH): If-Match (strong comparison; `*` = the
+ * resource exists) and If-None-Match (weak; `*` = it must not exist yet) against the request's resource. Only files have
+ * an ETag (getetag), so a folder matches `*` and nothing else. Hidden is the same as not there. A client that read a
+ * file, then saves with If-Match after someone else changed it, gets 412 instead of overwriting their version.
+ */
+function conditional(c: Ctx) {
+  const im = c.req.headers.get('if-match'), inm = c.req.headers.get('if-none-match')
+  if (im === null && inm === null) return
+  const r = find(c.m, c.vpath)
+  const etag = r?.kind === 'file' ? etagOf(r.f) : null
+  const tags = (h: string) => h.split(',').map((x) => x.trim()).filter(Boolean)
+  if (im !== null && !tags(im).some((x) => (x === '*' ? !!r : etag !== null && x === etag)))
+    answer(plain(412, 'Precondition failed: the file changed or is not there (If-Match)', etag ? { etag } : {}))
+  if (inm !== null && tags(inm).some((x) => (x === '*' ? !!r : etag !== null && x.replace(/^W\//, '') === etag)))
+    answer(plain(412, 'Precondition failed: it is there already (If-None-Match)', etag ? { etag } : {}))
+}
+function preconditions(c: Ctx) {
+  if (!ifHolds(c)) answer(plain(412, 'Precondition failed'))
+  conditional(c)
+}
 
 // ---------- PROPFIND ----------
 const LIVE = ['resourcetype', 'displayname', 'getcontentlength', 'getlastmodified', 'creationdate', 'getetag', 'getcontenttype', 'supportedlock', 'lockdiscovery'] as const

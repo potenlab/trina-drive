@@ -19,8 +19,8 @@ export default {
       return { jar: c.jar as Jar, assertion: f?.fields.assertion ?? '', state: f?.fields.state ?? '', action: f ? new URL(f.action, last.url).toString() : `${fx.url}/api/sso/callback` }
     }
     const err = (loc: string) => /#\/sso-error\/([a-z_]+)/.exec(loc)?.[1] ?? `(no error: ${loc})`
-    // Caddy allows 30 sign-in requests a minute per address (/api/sso/* included): a 429 from it never reached the
-    // drive, so wait the minute out and send the same request again
+    // Caddy limits /api/sso/* per address (120 a minute; 300 for an office range, as this machine is locally): a 429
+    // from it never reached the drive, so wait the minute out and send the same request again
     const post = async (x: { jar: Jar; action: string }, assertion: string, state: string) => {
       let r = await postCallback(t.http, x.jar, x.action, { assertion, state })
       if (r.status === 429) { t.log('    (Caddy sign-in zone: 429, waiting 61 s)'); await Bun.sleep(61_000); r = await postCallback(t.http, x.jar, x.action, { assertion, state }) }

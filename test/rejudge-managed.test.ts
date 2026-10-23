@@ -141,6 +141,28 @@ describe('S41: narrow → promote → widen', () => {
     expect((await e.share(await e.as('lee'), { path: '/Scratch', general: { mode: 'team', role: 'viewer' } })).status).toBe(200)
   })
 
+  test('taking access away never widens: a reader of the copy loses a source (S17)', async () => {
+    await narrowAndPromote()
+    const boss = await e.as('boss'), lee = await e.as('lee')
+    // kim reads 재무 (boss gives it), then Scratch (lee manages it): no excess reader, nothing to judge
+    const kim = e.person('kim')
+    expect((await e.share(boss, { path: '/재무', add: [{ subject: kim, role: 'viewer' }] })).status).toBe(200)
+    expect((await e.share(lee, { path: '/Scratch', add: [{ subject: kim, role: 'viewer' }] })).status).toBe(200)
+    expect(await e.agent('kim', 'cat /Scratch/summary.md')).toContain('CANARY-FIN-7731')
+    // boss takes 재무 away from kim: kim reads nothing new (she already read the copy), so no 409 widening
+    const r = await e.share(boss, { path: '/재무', set: [{ subject: kim, role: 'remove' }] })
+    expect([r.status, r.data.error]).toEqual([200, undefined])
+    expect(e.widened()[0]!.status).toBe('tracked')
+    // the same through the folder-page rule route, and a membership change (park leaves 재무 but keeps Scratch)
+    expect((await e.share(boss, { path: '/재무', add: [{ subject: kim, role: 'viewer' }] })).status).toBe(200)
+    expect((await boss.call('PUT', `/api/folders/${e.fin.id}/rules`, { subject_type: 'person', subject_id: e.pid('kim'), level: 'none' })).status).toBe(200)
+    expect((await (await e.as('dion')).call('DELETE', `/api/groups/${e.gid('재무')}/members/${e.pid('park')}`)).status).toBe(200)
+    expect(e.widened()[0]!.status).toBe('tracked')
+    // someone new reading the copy is still judged: Scratch opened to the team
+    const again = await e.share(lee, { path: '/Scratch', general: { mode: 'team', role: 'viewer' } })
+    expect([again.status, again.data.error]).toEqual([409, 'widening'])
+  })
+
   test('membership changes re-check in their own transaction: someone joining the copy\'s audience but not the sources', async () => {
     addGroup(e.db, 'scratchers'); addMember(e.db, 'scratchers', 'park')
     const park = await e.as('park')
