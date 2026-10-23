@@ -27,7 +27,13 @@ export default {
     t.check('kim\'s folder audit covers /프로젝트 (the folder he manages)', kj.folders.includes('/프로젝트'), kj.folders)
     t.check('…with his AI\'s read of /프로젝트/plan.md', kj.entries.some((e) => e.files.includes('/프로젝트/plan.md') && e.connection !== 'web'), kj.entries.slice(0, 5))
     t.check('…and the sharing changes on /프로젝트', kj.entries.some((e) => /rule|share/.test(e.command ?? '') || (e.tool === 'web' && e.files.includes('/프로젝트'))), kj.entries.slice(0, 5))
-    t.check('…and nothing from folders he does not manage (/재무 he only reads)', !files.some((f) => !f.startsWith('/프로젝트')), files.filter((f) => !f.startsWith('/프로젝트')).slice(0, 5))
+    // the team is shared by every scenario and run: S42 makes kim the Manager of its own /S42-<run> folders, so those
+    // are his too. What he only reads (/재무, which his AI just read) must never show.
+    const under = (file: string, d: string) => { const f = file.startsWith('/.raw/') ? file.slice(5) : file; return f === d || f.startsWith(d + '/') }
+    const others = kj.folders.filter((d) => d !== '/프로젝트' && !/^\/S42-[a-z0-9]+$/.test(d))
+    t.check('kim manages /프로젝트 (and only S42\'s folders besides)', !others.length, kj.folders)
+    t.check('…and nothing from folders he does not manage (/재무 he only reads)', !files.some((f) => !kj.folders.some((d) => under(f, d)) || under(f, '/재무')),
+      files.filter((f) => !kj.folders.some((d) => under(f, d)) || under(f, '/재무')).slice(0, 5))
     const mf = await (await fx.drive('mina')).get('/audit?view=folders')
     t.check('mina (manages nothing) sees no folder rows', mf.status === 200 && mf.json().entries.length === 0, mf.text.slice(0, 200))
     if (t.target.tdrive) {
