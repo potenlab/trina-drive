@@ -127,9 +127,22 @@ export async function deepLinkSignIn(t: Any) {
     const btn = p.getByRole('button', { name: /sign in with trina cloud/i }).or(p.getByRole('link', { name: /sign in with trina cloud/i })).first()
     const had = await btn.count()
     if (had) { await btn.click(); await p.waitForURL((u: URL) => u.origin === new URL(t.fx.url).origin && !u.pathname.startsWith('/api/'), { timeout: 30_000 }); await settle(p) }
+    // mina may have the drive's own second factor by now (S42 gives her a passkey on this shared team): the console
+    // pass then lands on #/sso-second/<ticket>. The fixture answers it with her kept passkey and the browser takes
+    // that session; the return path is the ticket's own (what S04 is about), not something this test supplies
+    const second = /#\/sso-second\/([A-Za-z0-9_-]+)/.exec(p.url())
+    if (second) {
+      const { Jar } = await import(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../cloud/dev/e2e/lib/http.ts'))
+      const r = await t.fx.completeSecond('mina', new Jar(), second[1])
+      const host = new URL(t.fx.url).host
+      const cookies = ['tdrive_session', '__Host-tdrive_session'].map((name) => ({ name, value: r.drive.jar.get(host, name) })).filter((c) => c.value)
+      await b.context.addCookies(cookies.map((c) => ({ ...c, url: t.fx.url, secure: true, httpOnly: true, sameSite: 'Lax' })))
+      // a hash-only change is no new page load: reload so the app reads its new session
+      await p.goto(new URL(r.returnTo || '/', t.fx.url).toString()); await p.reload(); await settle(p)
+    }
     const text = await p.locator('body').innerText()
     const ok = !!had && (text.includes('notice.md') || /공용/.test(text)) && !/sign in with trina cloud/i.test(text)
-    return { ok, url: p.url(), shot: await shot(p, 's04-deep-link') }
+    return { ok, url: p.url(), second: !!second, shot: await shot(p, 's04-deep-link') }
   } catch (e) { return { ok: false, error: (e as Error).message.slice(0, 200), shot: await shot((b.context.pages())[0], 's04-failed').catch(() => '') } } finally { await b.close() }
 }
 
