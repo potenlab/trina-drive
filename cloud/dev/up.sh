@@ -6,6 +6,8 @@
 #   cloud/dev/up.sh                 clean start: build images if missing, start, provision two teams, run the checks
 #   cloud/dev/up.sh --no-teams      only the control plane and Caddy
 #   cloud/dev/up.sh --rebuild       rebuild the three images first
+#   cloud/dev/up.sh --phase1        then the Trina Cloud v1 Phase 1 scenarios (cloud/dev/e2e/run.ts --phase 1; with
+#                                   --no-teams they run on a fresh stack without the legacy checks)
 #   cloud/dev/down.sh               remove everything (teams, volumes, state)
 #
 # Then: https://cloud.localhost:8443 (sign up; mail goes to cloud/dev/.state/outbox.log, the teams' own mail to
@@ -16,12 +18,13 @@ cd "$(dirname "$0")/../.."
 ROOT=$PWD
 DEV=$ROOT/cloud/dev
 STATE=$DEV/.state
-TEAMS=1 REBUILD=0
+TEAMS=1 REBUILD=0 PHASE1=0
 for a in "$@"; do
   case $a in
     --no-teams) TEAMS=0 ;;
     --rebuild) REBUILD=1 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    --phase1) PHASE1=1 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "unknown option $a" >&2; exit 2 ;;
   esac
 done
@@ -89,6 +92,14 @@ for _ in $(seq 30); do
   docker exec tdc-mail bun -e "fetch('http://127.0.0.1:8025/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))" 2>/dev/null && break
   sleep 1
 done
+# colima (virtiofs) can hand a container started right after .state was removed and made again a stale, empty view of
+# it: the relay then cannot write team-mail.log ("ENOENT … open"). Check from inside, restart the container if so.
+touch "$STATE/.mount-check"
+for c in tdc-mail; do
+  if ! docker exec "$c" test -e "$STATE/.mount-check" 2>/dev/null; then
+    say "$c sees a stale $STATE: restarting it"; docker restart "$c" >/dev/null; sleep 2
+  fi
+done
 # Caddy's local CA (made when it issued https://cloud.localhost's certificate)
 for _ in $(seq 30); do
   docker exec tdc-caddy cat /data/caddy/pki/authorities/local/root.crt > "$STATE/caddy-root.crt" 2>/dev/null && [ -s "$STATE/caddy-root.crt" ] && break
@@ -100,9 +111,14 @@ for _ in $(seq 30); do
 done
 curl -sS --cacert "$STATE/caddy-root.crt" --resolve "$TDCLOUD_DOMAIN:$TDCLOUD_PUBLIC_PORT:127.0.0.1" -o /dev/null -w '  control plane: https://%{url.host}:%{url.port} → %{http_code}\n' "https://$TDCLOUD_DOMAIN:$TDCLOUD_PUBLIC_PORT/healthz"
 
+FAILED=0
 if [ $TEAMS = 1 ]; then
   say "provision two teams and run the end-to-end checks"
-  bun "$DEV/e2e.ts"
+  bun "$DEV/e2e.ts" || FAILED=1
+fi
+if [ $PHASE1 = 1 ]; then
+  say "Trina Cloud v1 Phase 1 scenarios"
+  bun "$DEV/e2e/run.ts" --phase 1 ${E2E_JSON:+--json "$E2E_JSON"} || FAILED=1
 fi
 
 cat <<EOF
@@ -115,3 +131,4 @@ Trina Cloud (local) is up.
   admin CLI       docker exec tdc-control bun /app/src/main.ts teams list
   stop            cloud/dev/down.sh
 EOF
+[ $FAILED = 0 ]

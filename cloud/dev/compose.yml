@@ -31,12 +31,13 @@ services:
       TDCLOUD_EMPTY_HOST_GRACE: 20s
       TDCLOUD_SCALER_EVERY: 5s
       # the Free plan with short timers (README "Free plan"): one free team at most (the second confirmed sign-up waits),
-      # free teams may launch the last host here, activity read every 3 s, warned after 25 s idle, paused after 45 s
+      # free teams may launch the last host here, activity read every 3 s, warned after 60 s idle, paused after 100 s (the SSO sign-in steps, authenticator codes
+      # included, must fit before the pause)
       TDCLOUD_MAX_FREE_TEAMS: "1"
       TDCLOUD_FREE_RESERVE_HOSTS: "0"
       TDCLOUD_FREE_ACTIVITY_EVERY: 3s
-      TDCLOUD_FREE_IDLE_WARN: 25s
-      TDCLOUD_FREE_IDLE_PAUSE: 45s
+      TDCLOUD_FREE_IDLE_WARN: 60s
+      TDCLOUD_FREE_IDLE_PAUSE: 100s
       TDCLOUD_FREE_WAKE_GRACE: 5m
       TDCLOUD_OPS_EMAIL: ops@trina.test
       TDCLOUD_MAIL_FROM: Trina Cloud (dev) <cloud@trina.test>

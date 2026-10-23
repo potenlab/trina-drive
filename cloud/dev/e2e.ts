@@ -4,10 +4,13 @@
 //
 //  1. two buyers sign up, confirm their email (outbox), create teams acme and globex
 //  2. a Paddle subscription.created (signed with the dev webhook secret) for each → provisioned
-//  3. the emailed one-time setup link creates each team's admin; the link works once; the token is not in the control DB
-//  4. hosted mode: the admin enrols an authenticator app (codes computed here, RFC 6238) before anything else, then
-//     makes a personal access token on the web; MCP initialize / tools/list / bash work over HTTPS; an invite mail goes
-//     from the team through the host's mail relay into the dev mail sink, and its link sets dana's password
+//  3. Trina Cloud SSO (docs/SSO-CONTRACT.md): the "ready" mail carries no setup token, only the console's Open drive
+//     link; /api/setup is gone; the owner sets up the console authenticator (owners must), opens the drive (form_post
+//     assertion → a drive admin session)
+//  4. hosted mode: the admin enrols the drive's authenticator app (codes computed here, RFC 6238) before anything else,
+//     the next Open drive asks for it, then makes a personal access token on the web; MCP initialize / tools/list /
+//     bash work over HTTPS; the drive's "someone became an admin" mail goes through the host's mail relay into the dev
+//     mail sink; dana is invited in the console, accepts with her own account and opens the drive as a member
 //  5. kim/boss in each team: kim cannot see 경영, boss can
 //  6. isolation: no token, session or network path from one team reaches the other; the containers' settings
 //  7. client addresses: fixed team network addresses; Caddy overwrites X-Forwarded-For, so the team records (and
@@ -25,6 +28,10 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { paddleHeader } from '../control/src/paddle'
+import { Console } from './e2e/lib/console'
+import { Http } from './e2e/lib/http'
+import { localTarget } from './e2e/lib/target'
+import { freshTotp } from './e2e/lib/totp'
 
 const DEV = import.meta.dir
 const STATE = path.join(DEV, '.state')
@@ -37,6 +44,7 @@ const OUTBOX = path.join(STATE, 'outbox.log')
 /** the dev mail sink (relay upstream outbox:<file>): what the host's mail relay would have handed to Resend (cloud/control/src/relay.ts) */
 const TEAM_MAIL = path.join(STATE, 'team-mail.log')
 const RELAY_PORT = 8025
+const HTTP = new Http(localTarget('acme'))
 
 let failed = 0, passed = 0
 const t0 = Date.now()
@@ -46,12 +54,21 @@ function check(what: string, ok: boolean, detail?: unknown) {
 const step = (s: string) => console.log(`\n== ${s} (${Math.round((Date.now() - t0) / 1000)}s)`)
 
 interface Res { status: number; headers: Headers; text: string; json: () => any }
+/** a certificate Caddy just issued can be "not yet valid" for a second when the Docker VM's clock runs ahead: wait, retry */
+async function fetchTls(url: string, init: RequestInit): Promise<Response> {
+  for (let i = 0; ; i++) {
+    try { return await fetch(url, init) } catch (e) {
+      if (i >= 5 || (e as { code?: string }).code !== 'CERT_NOT_YET_VALID') throw e
+      await Bun.sleep(1500)
+    }
+  }
+}
 async function req(method: string, url: string, o: { body?: unknown; raw?: string; headers?: Record<string, string>; cookie?: string; origin?: boolean } = {}): Promise<Res> {
   const u = new URL(url)
   const headers: Record<string, string> = { ...(o.body !== undefined ? { 'content-type': 'application/json' } : {}), ...o.headers }
   if (o.cookie) headers.cookie = o.cookie
   if (o.origin !== false && method !== 'GET') headers.origin = u.origin
-  const r = await fetch(url, { method, headers, body: o.raw ?? (o.body !== undefined ? JSON.stringify(o.body) : undefined), redirect: 'manual', tls: { ca: CA }, signal: AbortSignal.timeout(60_000) } as RequestInit)
+  const r = await fetchTls(url, { method, headers, body: o.raw ?? (o.body !== undefined ? JSON.stringify(o.body) : undefined), redirect: 'manual', tls: { ca: CA }, signal: AbortSignal.timeout(60_000) } as RequestInit)
   const text = await r.text()
   return { status: r.status, headers: r.headers, text, json: () => JSON.parse(text) }
 }
@@ -82,7 +99,16 @@ function sh(argv: string[], input?: string): { code: number; out: string; err: s
   const p = Bun.spawnSync(argv, { stdin: input !== undefined ? new TextEncoder().encode(input) : 'ignore', stdout: 'pipe', stderr: 'pipe' })
   return { code: p.exitCode ?? -1, out: p.stdout.toString(), err: p.stderr.toString() }
 }
-const admin = (...args: string[]) => sh(['docker', 'exec', 'tdc-control', 'bun', '/app/src/main.ts', ...args])
+/** the admin CLI; a second process on the control database can meet "database is locked" while the server writes:
+ * that attempt changed nothing, so it is tried again (a few times, briefly) */
+function admin(...args: string[]) {
+  let r = sh(['docker', 'exec', 'tdc-control', 'bun', '/app/src/main.ts', ...args])
+  for (let i = 0; i < 5 && r.code !== 0 && /database is locked/.test(r.err + r.out); i++) {
+    Bun.sleepSync(400 * (i + 1))
+    r = sh(['docker', 'exec', 'tdc-control', 'bun', '/app/src/main.ts', ...args])
+  }
+  return r
+}
 const tdrive = (slug: string, ...args: string[]) => sh(['docker', 'exec', `tdc-${slug}`, '/usr/local/bin/tdrive', ...args])
 
 let rpcId = 1
@@ -107,7 +133,7 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   const token = verify!.text.match(/verify\?token=(\S+)/)![1]
   check('confirm email', (await req('POST', `${CONTROL}/api/verify`, { body: { token } })).status === 200)
   const login = await req('POST', `${CONTROL}/api/login`, { body: { email: buyer, password: pw } })
-  check('sign in', login.status === 200 && cookieOf(login).startsWith('tdcloud_session='))
+  check('sign in', login.status === 200 && /^(__Host-)?tdcloud_session=/.test(cookieOf(login)))
   const cookie = cookieOf(login), csrf = login.json().csrf
   check('cookie is HttpOnly + Secure', /HttpOnly/.test(login.headers.get('set-cookie') ?? '') && /Secure/.test(login.headers.get('set-cookie') ?? ''))
   const mk = await req('POST', `${CONTROL}/api/teams`, { cookie, headers: { 'x-csrf-token': csrf }, body: { name, slug } })
@@ -126,8 +152,8 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   const again = await req('POST', `${CONTROL}/paddle/webhook`, { raw, origin: false, headers: { 'content-type': 'application/json', 'paddle-signature': paddleHeader(env.PADDLE_WEBHOOK_SECRET!, raw) } })
   check('replayed event is a no-op', again.text === 'duplicate')
   let status = ''
-  const until = Date.now() + 240_000
-  while (Date.now() < until) {
+  const deadline = Date.now() + 240_000
+  while (Date.now() < deadline) {
     const r = await req('GET', `${CONTROL}/api/teams`, { cookie })
     status = (r.json().teams as { slug: string; status: string }[]).find((x) => x.slug === slug)?.status ?? ''
     if (status === 'active' || status === 'failed') break
@@ -137,24 +163,29 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   const row = showTeam(slug)
   check(`${slug} runs on a host the scaler launched for it (${row.host})`, /^local-\d+$/.test(row.host ?? '') && hostLine(row.host).includes(' ready '), admin('hosts', 'list').out)
 
-  step(`${slug}: one-time setup link from the mail`)
+  step(`${slug}: the ready mail opens the drive through the console (SSO; no setup token)`)
   const ready = outbox().filter((m) => m.to === buyer && m.subject.startsWith('Your Trina Drive is ready')).at(-1)
-  check('setup mail sent to the buyer', !!ready)
-  const link = ready!.text.match(/(https:\/\/\S+\/#token=(\S+))/)!
-  const setupToken = link[2]!
-  check(`link points at ${teamUrl(slug)}`, link[1]!.startsWith(`${teamUrl(slug)}/#token=`))
-  const db = Buffer.concat(['control.db', 'control.db-wal'].map((f) => path.join(STATE, f)).filter((f) => fs.existsSync(f)).map((f) => fs.readFileSync(f)))
-  check('setup token is not in the control plane database', !db.includes(Buffer.from(setupToken)))
+  check('ready mail sent to the buyer', !!ready)
+  check('no setup token in it (review finding 6)', !!ready && !/#token=/.test(ready.text), ready?.text)
+  check(`it links ${CONTROL}/open/${slug}`, !!ready && ready.text.includes(`${CONTROL}/open/${slug}`), ready?.text)
   check('team serves its web app over HTTPS', (await req('GET', `${teamUrl(slug)}/`)).status === 200)
-  const st = await req('GET', `${teamUrl(slug)}/api/state`)
-  check('setup pending', st.json().setup_pending === true, st.text)
-  const adminPw = `admin-${slug}-password`
-  const setup = await req('POST', `${teamUrl(slug)}/api/setup`, { body: { setup_token: setupToken, name: 'alex', email: buyer, password: adminPw } })
-  check('setup with the mailed token creates the admin', setup.status === 200, setup.text)
-  const adminCookie = cookieOf(setup), adminCsrf = setup.json().csrf
-  check('admin session cookie is Secure (seen as https behind Caddy)', /Secure/.test(setup.headers.get('set-cookie') ?? ''))
-  const reuse = await req('POST', `${teamUrl(slug)}/api/setup`, { body: { setup_token: setupToken, name: 'mallory', email: 'm@x.test', password: 'another-password' } })
-  check('the setup link works only once', reuse.status === 403, reuse.text)
+  const gone = await req('POST', `${teamUrl(slug)}/api/setup`, { body: { setup_token: 'tdrive_setup_wrongwrongwrongwrongwrong1', name: 'mallory', email: 'm@x.test', password: 'another-password' } })
+  check('/api/setup is gone (404) under TDRIVE_SSO_ONLY', gone.status === 404, gone.text)
+  const c = new Console(HTTP)
+  const cl = await c.login({ email: buyer, password: pw })
+  check('the owner signs in to the console', cl.status === 200, cl.text)
+  const before2fa = await c.openDrive(slug)
+  check('Open drive before the owner has a console authenticator: no assertion (set it up first, finding 3)', !before2fa.drive && !before2fa.assertion, before2fa.hops)
+  const ce = await c.enrollTotp()
+  check('console authenticator enrolled (owners must)', !!ce.secret, ce.res.text)
+  const first = await c.openDrive(slug)
+  check('Open drive: form_post → the owner is signed in to the drive', !!first.drive, { error: first.error, hops: first.hops })
+  const adminCsrf = first.drive?.csrf ?? ''
+  const sessCookie = c.jar.seen.filter((x) => /tdrive_session=/.test(x)).at(-1) ?? ''
+  const adminCookie = sessCookie.split(';')[0] ?? ''
+  check('admin session cookie is Secure (seen as https behind Caddy)', /Secure/.test(sessCookie), sessCookie.replace(/=[^;]+/, '=…'))
+  const me = first.drive ? (await first.drive.session()).me : {}
+  check('…as a drive admin (role owner → admin)', me.admin === true, me)
   const asAdmin = { cookie: adminCookie, headers: { 'x-csrf-token': adminCsrf } }
 
   step(`${slug}: hosted mode — the admin enrols an authenticator app before anything else`)
@@ -167,34 +198,38 @@ async function buyAndSetUp(slug: string, name: string, buyer: string): Promise<T
   if (secret) fs.writeFileSync(path.join(STATE, `admin-${slug}.otpauth`), `${ts.json().uri}\n`, { mode: 0o600 })
   const conf = await req('POST', `${teamUrl(slug)}/api/me/totp/confirm`, { ...asAdmin, body: { code: totp(secret) } })
   check('enrolled with a code computed by this test (RFC 6238); recovery codes issued', conf.status === 200 && (conf.json().recovery_codes?.length ?? 0) > 0, conf.text)
-  const l1 = await req('POST', `${teamUrl(slug)}/api/login`, { body: { login: 'alex', password: adminPw } })
-  const ticket = l1.status === 200 ? l1.json().second_factor?.ticket : undefined
-  check('signing in again asks for the second factor', !!ticket && l1.json().second_factor.methods.includes('totp') && !cookieOf(l1), l1.text)
-  const l2 = await req('POST', `${teamUrl(slug)}/api/login/second`, { body: { ticket, method: 'totp', code: totp(secret, Date.now() + 30_000) } })
-  check('the next code completes the sign-in', l2.status === 200 && cookieOf(l2).startsWith('tdrive_session='), l2.text)
+  const reopen = await c.openDrive(slug)
+  check('opening the drive again asks for the drive\'s second factor (#/sso-second/<ticket>)', !!reopen.secondFactor && !reopen.drive, reopen.landing)
+  const l2 = await req('POST', `${teamUrl(slug)}/api/login/second`, { body: { ticket: reopen.secondFactor, method: 'totp', code: totp(secret, Date.now() + 30_000) } })
+  check('the next code completes the sign-in', l2.status === 200 && /tdrive_session=/.test(cookieOf(l2)), l2.text)
   const pat = await req('POST', `${teamUrl(slug)}/api/tokens`, { ...asAdmin, body: { name: 'e2e', ttl: '1d' } })
   check('admin creates a personal access token on the web', pat.status === 200, pat.text)
   const adminPat = pat.json().token as string
 
-  step(`${slug}: an invite mail through the host's mail relay`)
-  const before = teamMail().length
-  const dana = `dana@${slug}.test`
-  const inv = await req('POST', `${teamUrl(slug)}/api/people`, { ...asAdmin, body: { name: 'dana', email: dana } })
-  check('admin invites dana (the mail is sent before the answer)', inv.status === 200, inv.text)
-  const mail = teamMail().slice(before).find((m) => m.to === dana)
-  check('the invite arrived in the dev mail sink (team SES mailer → relay on the team gateway)', !!mail && mail.subject === 'You are invited', teamMail().slice(before))
+  step(`${slug}: the drive's mail through the host's mail relay; dana joins through the console`)
+  // the notice mail goes out after the sign-in answered: give the relay a moment
+  await until(() => teamMail().some((m) => m.to === buyer && /became an admin/.test(m.subject)), 20_000)
+  const mail = teamMail().find((m) => m.to === buyer && /became an admin/.test(m.subject))
+  check('"someone became an admin" arrived in the dev mail sink (team SES mailer → relay on the team gateway)', !!mail, teamMail().slice(-5))
   check('sent with the configured team From', mail?.from === env.TDCLOUD_TEAM_MAIL_FROM, mail?.from)
-  const inviteLink = mail?.text.match(/(https:\/\/\S+)\/#\/invite\/(\S+)/)
-  check(`the invite link points at ${teamUrl(slug)}`, inviteLink?.[1] === teamUrl(slug), mail?.text)
-  const inviteToken = inviteLink?.[2] ?? ''
-  const lc = await req('POST', `${teamUrl(slug)}/api/links/check`, { body: { kind: 'invite', token: inviteToken } })
-  check('the link is valid and names dana', lc.status === 200 && lc.json().name === 'dana', lc.text)
-  const la = await req('POST', `${teamUrl(slug)}/api/links/accept`, { body: { kind: 'invite', token: inviteToken, password: `dana-${slug}-password` } })
-  check('dana sets her password through the link and is signed in', la.status === 200 && cookieOf(la).startsWith('tdrive_session='), la.text)
-  const ds = await req('GET', `${teamUrl(slug)}/api/session`, { cookie: cookieOf(la) })
-  check('…as dana', ds.status === 200 && ds.json().me?.name === 'dana', ds.text)
-  const la2 = await req('POST', `${teamUrl(slug)}/api/links/accept`, { body: { kind: 'invite', token: inviteToken, password: 'another-password-9' } })
-  check('the invite link works only once', la2.status === 404, la2.text)
+  check('it names no one and no file (R11): a link to sign in', !!mail && mail.text.includes(teamUrl(slug)), mail?.text)
+  const teamId = await c.teamId(slug)
+  const dana = `dana@${slug}.test`, danaPw = `dana-${slug}-password`
+  const inv = await c.invite(teamId, [dana])
+  check('the owner invites dana in the console', inv.status === 201, inv.text)
+  const invToken = c.inviteToken(dana)
+  check('the invite mail is in the outbox with its link', !!invToken)
+  const d = new Console(HTTP)
+  await d.signupConfirmed(dana, danaPw)
+  await d.login({ email: dana, password: danaPw })
+  const acc = await d.accept(invToken)
+  check('dana accepts with her own confirmed account', acc.status === 200, acc.text)
+  check('the invite works only once', (await d.accept(invToken)).status >= 400)
+  const dr = await d.openDrive(slug)
+  const dme = dr.drive ? (await dr.drive.session()).me : {}
+  check('dana opens the drive: a member, not an admin', !!dr.drive && dme.admin === false, { error: dr.error, me: dme })
+  const pw2 = await req('POST', `${teamUrl(slug)}/api/login`, { body: { login: dana, password: danaPw } })
+  check('a console person has no drive password (409 use_sso)', pw2.status === 409 && pw2.text.includes('use_sso'), pw2.text)
 
   step(`${slug}: MCP over HTTPS`)
   const init = await mcp(slug, adminPat, 'initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'tdcloud-e2e', version: '1' } })
@@ -253,21 +288,22 @@ async function clientAddresses(a: Team) {
   const xtok = tdrive('acme', 'token', 'create', 'kim', '--name', 'xff-test').out.trim()
   const spoofs = ['203.0.113.7', '198.51.100.23', '192.0.2.99']
   const init = (n: string) => ({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: n, version: '1' } } })
-  const badSetup = { setup_token: 'tdrive_setup_wrongwrongwrongwrongwrong1', name: 'x', email: 'x@x.test', password: 'some-password-1' }
+  // a wrong invite link: answered 404 after the per-address link limiter counted it (SSO mode has no /api/setup)
+  const badLink = { kind: 'invite', token: 'wrongwrongwrongwrongwrongwrongwrong1', password: 'some-password-1' }
   for (const [i, spoof] of spoofs.slice(0, 2).entries()) {
     const r = await req('POST', `${teamUrl('acme')}/mcp`, { origin: false, headers: { authorization: `Bearer ${xtok}`, accept: 'application/json, text/event-stream', 'x-forwarded-for': spoof }, body: init(`xff-outside-${i}`) })
-    const s = await req('POST', `${teamUrl('acme')}/api/setup`, { headers: { 'x-forwarded-for': spoof }, body: badSetup })
-    if (r.status !== 200 || s.status !== 403) check(`outside request ${i}`, false, `${r.status} ${s.status} ${s.text}`)
+    const s = await req('POST', `${teamUrl('acme')}/api/links/accept`, { headers: { 'x-forwarded-for': spoof }, body: badLink })
+    if (r.status !== 200 || s.status !== 404) check(`outside request ${i}`, false, `${r.status} ${s.status} ${s.text}`)
   }
   // a second client: a container on the Docker network in front of Caddy, at 10.250.250.50, also forging the header
   const script = `const https = require('node:https');
 const post = (path, body, headers) => new Promise((res, rej) => { const q = https.request({ host: '10.250.250.10', port: 443, servername: process.env.H, ca: process.env.CA, method: 'POST', path,
   headers: { host: process.env.H + ':' + process.env.P, origin: 'https://' + process.env.H + ':' + process.env.P, 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-forwarded-for': '${spoofs[2]}', ...headers } },
   (s) => { let d = ''; s.on('data', (c) => d += c); s.on('end', () => res(s.statusCode)) }); q.on('error', rej); q.end(JSON.stringify(body)) });
-(async () => { console.log(await post('/mcp', ${JSON.stringify(init('xff-inside'))}, { authorization: 'Bearer ' + process.env.T }), await post('/api/setup', ${JSON.stringify(badSetup)}, {})) })().catch((e) => { console.log('error', e.message); process.exit(1) })`
+(async () => { console.log(await post('/mcp', ${JSON.stringify(init('xff-inside'))}, { authorization: 'Bearer ' + process.env.T }), await post('/api/links/accept', ${JSON.stringify(badLink)}, {})) })().catch((e) => { console.log('error', e.message); process.exit(1) })`
   const inside = sh(['docker', 'run', '--rm', '--network', 'tdc-control', '--ip', '10.250.250.50', '-e', `CA=${CA}`, '-e', `T=${xtok}`, '-e', `H=acme.${DOMAIN}`, '-e', `P=${PORT}`,
     '--entrypoint', 'bun', 'tdcloud-control:dev', '-e', script])
-  check('a client at 10.250.250.50 reaches acme through Caddy', inside.out.trim() === '200 403', inside.out + inside.err)
+  check('a client at 10.250.250.50 reaches acme through Caddy', inside.out.trim() === '200 404', inside.out + inside.err)
 
   const conns = tdrive('acme', 'connections', 'list').out.split('\n').map((l) => l.split('\t')).filter((c) => / xff-test$/.test(c[0] ?? ''))
   const ips = [...new Set(conns.map((c) => c[3]!))]
@@ -277,8 +313,8 @@ const post = (path, body, headers) => new Promise((res, rej) => { const q = http
   check(`the recorded address is the client's, not Caddy's (${caddyIp})`, !ips.includes(caddyIp) && !ips.includes(gateway))
   const rows = JSON.parse(sh(['docker', 'exec', 'tdc-acme', '/usr/local/bin/bun', '-e',
     `const { Database } = require('bun:sqlite'); console.log(JSON.stringify(new Database('/data/db/store.db').query("SELECT key_hash, n FROM rate_limits WHERE scope = 'link_addr'").all()))`]).out || '[]') as { key_hash: string; n: number }[]
-  const hits = (ip: string) => rows.find((r) => r.key_hash === sha256(`setup:${ip}`))?.n ?? 0
-  check('setup rate-limit keys are client addresses: this machine (all its tries in one bucket) and 10.250.250.50 (one)', hits(outsideIp) >= 4 && hits('10.250.250.50') === 1, { outside: hits(outsideIp), inside: hits('10.250.250.50') })
+  const hits = (ip: string) => rows.find((r) => r.key_hash === sha256(`link:${ip}`))?.n ?? 0
+  check('link rate-limit keys are client addresses: this machine (all its tries in one bucket) and 10.250.250.50 (one)', hits(outsideIp) >= 2 && hits('10.250.250.50') === 1, { outside: hits(outsideIp), inside: hits('10.250.250.50') })
   check("…and never a forged address or Caddy's", [...spoofs, caddyIp].every((ip) => hits(ip) === 0), [...spoofs, caddyIp].map(hits))
 
   // the relay takes mail only from a team container, only with the team From
@@ -366,19 +402,28 @@ async function freePlan() {
   check('free limits: 0.5 vCPU, 768 MiB, 256 processes', i.HostConfig.NanoCpus === 5e8 && i.HostConfig.Memory === 768 * 1024 * 1024 && i.HostConfig.PidsLimit === 256, { cpu: i.HostConfig.NanoCpus, mem: i.HostConfig.Memory, pids: i.HostConfig.PidsLimit })
   check('free env: 1 GB storage quota, at most 3 people', envs.includes('TDRIVE_STORAGE_QUOTA=1GB') && envs.includes('TDRIVE_MAX_PEOPLE=3'))
   const ready = outbox().filter((m) => m.to === owner && m.subject.startsWith('Your Trina Drive is ready')).at(-1)
-  const token = ready?.text.match(/\/#token=(\S+)/)?.[1]
-  check('setup mail with #token= and the free plan explained', !!token && ready!.text.includes('Free plan: 1 GB'))
-  const setup = await req('POST', `${teamUrl('freeco')}/api/setup`, { body: { setup_token: token, name: 'alex', email: owner, password: 'admin-freeco-password' } })
-  check('setup creates the admin', setup.status === 200, setup.text)
-  const adminCookie = cookieOf(setup)
+  check('ready mail without a setup token, the free plan explained', !!ready && !/#token=/.test(ready.text) && ready.text.includes('Free plan: 1 GB'), ready?.text)
+  // the free owner has no password: an email link, the console authenticator (owners must), then Open drive
+  const fc = new Console(HTTP)
+  await fc.api('POST', '/api/login/link', { email: owner })
+  const flt = outbox().filter((m) => m.to === owner && /login\/link\?token=/.test(m.text)).at(-1)?.text.match(/login\/link\?token=(\S+)/)?.[1]
+  const flc = await fc.api('POST', '/api/login/link/confirm', { token: flt })
+  fc.csrf = flc.status === 200 ? flc.json().csrf ?? '' : ''
+  const fce = await fc.enrollTotp()
+  check('the free owner signs in with a link and sets up the console authenticator', flc.status === 200 && !!fce.secret, flc.text + fce.res.text)
+  const fo = await fc.openDrive('freeco')
+  check('Open drive: the free owner is the drive admin', !!fo.drive && (await fo.drive.session()).me.admin === true, { error: fo.error, hops: fo.hops })
+  const adminCookie = (fc.jar.seen.filter((x) => /tdrive_session=/.test(x)).at(-1) ?? '').split(';')[0] ?? ''
+  const ownerName = fo.drive ? (await fo.drive.session()).me.name as string : 'founder'
   sh(['docker', 'exec', 'tdc-freeco', 'sh', '-c', 'mkdir -p /data/keep && echo "freeco keeps this" > /data/keep/note.md'])
   check('two more people fit', tdrive('freeco', 'person', 'add', 'pat').code === 0 && tdrive('freeco', 'person', 'add', 'sam').code === 0)
   const fourth = tdrive('freeco', 'person', 'add', 'kai')
   check('a fourth person is refused (TDRIVE_MAX_PEOPLE=3)', fourth.code !== 0 && /at most 3 people/.test(fourth.err + fourth.out), fourth.err + fourth.out)
   // a personal token for MCP later (made by the operator CLI: not activity)
-  const freePat = tdrive('freeco', 'token', 'create', 'alex', '--name', 'free-e2e').out.trim()
-  const act = tdrive('freeco', 'activity', '--json')
-  check('the team reports its last activity (the setup session)', act.code === 0 && typeof JSON.parse(act.out).web === 'number', act.out + act.err)
+  const freePat = tdrive('freeco', 'token', 'create', ownerName, '--name', 'free-e2e').out.trim()
+  let act = tdrive('freeco', 'activity', '--json')
+  for (let i = 0; i < 5 && act.code !== 0; i++) { Bun.sleepSync(1000); act = tdrive('freeco', 'activity', '--json') } // a busy database: once more
+  check('the team reports its last activity (the owner\'s session)', act.code === 0 && typeof JSON.parse(act.out).web === 'number', act.out + act.err)
 
   step('Free plan: the cap and the waitlist')
   await req('POST', `${CONTROL}/api/free/signup`, { body: { email: 'second@otherco.test', name: 'Other Co' } })
@@ -391,16 +436,18 @@ async function freePlan() {
   step('Free plan: the owner signs in with an email link')
   await req('POST', `${CONTROL}/api/login/link`, { body: { email: owner } })
   const lt = outbox().filter((m) => m.to === owner && /login\/link\?token=/.test(m.text)).at(-1)?.text.match(/login\/link\?token=(\S+)/)?.[1]
-  const lc = await req('POST', `${CONTROL}/api/login/link/confirm`, { body: { token: lt } })
-  check('signed in with the link', lc.status === 200 && cookieOf(lc).startsWith('tdcloud_session='), lc.text)
+  let lc = await req('POST', `${CONTROL}/api/login/link/confirm`, { body: { token: lt } })
+  // the owner has a console authenticator now: the link is the first step, the code the second
+  if (lc.status === 200 && lc.json().totp_required) lc = await req('POST', `${CONTROL}/api/login/totp`, { body: { ticket: lc.json().ticket, code: await freshTotp(fce.secret) } })
+  check('signed in with the link (and the authenticator code)', lc.status === 200 && /^(__Host-)?tdcloud_session=/.test(cookieOf(lc)), lc.text)
   const ownerCookie = cookieOf(lc)
   const mine = (await req('GET', `${CONTROL}/api/teams`, { cookie: ownerCookie })).json().teams as { id: string; slug: string; plan: string; paused?: boolean }[]
   const ft = mine.find((x) => x.slug === 'freeco')
   check('the dashboard API shows the free team', ft?.plan === 'free' && ft.paused === false, mine)
 
   step('Free plan: nobody uses it → warned → paused')
-  check('the owner is warned (25 s idle here; 6 days in production)', await until(() => outbox().some((m) => m.to === owner && m.subject.startsWith('Your free Trina Drive pauses')), 90_000))
-  check('paused (45 s idle here; 7 days in production)', await until(() => /^freeco +paused +free /m.test(admin('teams', 'list').out), 90_000), admin('teams', 'list').out)
+  check('the owner is warned (60 s idle here; 6 days in production)', await until(() => outbox().some((m) => m.to === owner && m.subject.startsWith('Your free Trina Drive pauses')), 150_000))
+  check('paused (100 s idle here; 7 days in production)', await until(() => /^freeco +paused +free /m.test(admin('teams', 'list').out), 150_000), admin('teams', 'list').out)
   check('the owner is told it is paused', outbox().some((m) => m.to === owner && m.subject === 'Your free Trina Drive is paused'))
   check('its container is stopped, not removed', sh(['docker', 'inspect', '-f', '{{.State.Running}}', 'tdc-freeco']).out.trim() === 'false')
   const pp = await req('GET', `${teamUrl('freeco')}/`)
@@ -433,7 +480,10 @@ async function freePlan() {
   const envAfter = JSON.parse(sh(['docker', 'inspect', 'tdc-freeco']).out)[0].Config.Env as string[]
   check('Team env: 100 GB, no people limit', envAfter.includes('TDRIVE_STORAGE_QUOTA=100GB') && !envAfter.some((e) => e.startsWith('TDRIVE_MAX_PEOPLE=')))
   check('the data survived (a file, the people)', sh(['docker', 'exec', 'tdc-freeco', 'cat', '/data/keep/note.md']).out.includes('freeco keeps this') && tdrive('freeco', 'person', 'add', 'kai').code === 0)
-  check('the same address serves it, the admin session still works', (await req('GET', `${teamUrl('freeco')}/api/session`, { cookie: adminCookie })).status === 200)
+  // the recreated container serves once its member sync ran (the last step of a recreate): give it that moment
+  let sess = 0
+  for (let i = 0; i < 30 && sess !== 200; i++) { sess = (await req('GET', `${teamUrl('freeco')}/api/session`, { cookie: adminCookie })).status; if (sess !== 200) await Bun.sleep(2000) }
+  check('the same address serves it, the admin session still works', sess === 200, sess)
   check(`its host now shows a full slot (${row.host})`, / ready +1\/1 /.test(hostLine(row.host)), hostLine(row.host))
   const stats = admin('free', 'stats')
   check('free stats', stats.code === 0 && /free teams +0 of 1/.test(stats.out) && /1 upgraded/.test(stats.out) && /1 on the waitlist/.test(stats.out), stats.out + stats.err)
@@ -509,7 +559,7 @@ async function main() {
   const audit = admin('audit', 'verify')
   check('control-plane audit chain verifies', audit.code === 0 && audit.out.includes('audit chain ok'), audit.out)
   const log = admin('audit', 'list', '--limit', '200').out
-  for (const action of ['user.signup', 'team.create', 'billing.subscription.created', 'team.provisioned', 'team.setup_link_sent', 'team.suspend', 'team.resume', 'team.backup.manual', 'team.exported', 'team.upgrade']) check(`audit has ${action}`, log.includes(action))
+  for (const action of ['user.signup', 'team.create', 'billing.subscription.created', 'team.provisioned', 'team.ready_mail_sent', 'team.suspend', 'team.resume', 'team.backup.manual', 'team.exported', 'team.upgrade']) check(`audit has ${action}`, log.includes(action))
   const afterUpgrade = JSON.parse(sh(['docker', 'inspect', 'tdc-acme']).out)[0]
   const acmeNet = JSON.parse(sh(['docker', 'network', 'inspect', 'tdc-net-acme']).out)[0].IPAM.Config[0].Subnet as string
   const [o1, o2, o3, o4] = acmeNet.split('/')[0]!.split('.').map(Number) as [number, number, number, number]
