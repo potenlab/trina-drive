@@ -10,6 +10,7 @@ import { revokeSessionsOf } from '../web/auth'
 import type { Mailer } from '../web/mail'
 import { ensureWebSchema, metaGet, metaSet } from '../web/schema'
 import type { CloudConfig } from './config'
+import { afterReconcile, reconcileMyFiles } from './my-files'
 import {
   announceNewAdmins, byCloudUser, byInvite, closeSetupIfCloudAdmin, createCloudPerson, deactivate, inviteOnly, syncEveryone, unboundByEmail, unmanaged,
   type CloudPerson,
@@ -65,7 +66,15 @@ export function parsePayload(raw: unknown, cfg: Pick<CloudConfig, 'team'>): Sync
   return { ...p, events: p.events ?? [] }
 }
 
-export interface SyncDeps { db: DB; cfg: Pick<CloudConfig, 'team'>; mailer: Mailer; baseUrl: string; now?: () => number }
+/** dataDir: where managed storage lives — given, My files follow the membership after the sync (src/tdcloud/my-files.ts) */
+export interface SyncDeps { db: DB; cfg: Pick<CloudConfig, 'team'>; mailer: Mailer; baseUrl: string; now?: () => number; dataDir?: string }
+
+/** My files after a sync (applied or not: it only follows what the database says now). Never fails the sync. */
+async function followMyFiles(d: SyncDeps) {
+  if (!d.dataDir) return
+  try { await afterReconcile({ db: d.db, mailer: d.mailer, baseUrl: d.baseUrl }, reconcileMyFiles(d.db, d.dataDir)) }
+  catch (e) { console.error(`[tdcloud] my files after sync: ${(e as Error).message}`) }
+}
 
 /** Apply one payload (already JSON-parsed). Never throws for the contract's errors: they come back as { ok: false }. */
 export async function applySync(d: SyncDeps, raw: unknown): Promise<SyncResult> {
@@ -146,7 +155,8 @@ export async function applySync(d: SyncDeps, raw: unknown): Promise<SyncResult> 
     if (e instanceof PeopleLimitError) return { ok: false, error: 'people_limit', message: e.message }
     throw e
   }
-  if (stale !== null) return { ok: true, applied: false, seq: p.seq, current_seq: stale, reason: 'stale' }
+  if (stale !== null) { await followMyFiles(d); return { ok: true, applied: false, seq: p.seq, current_seq: stale, reason: 'stale' } }
+  await followMyFiles(d)
   await announceNewAdmins({ db, mailer: d.mailer, baseUrl: d.baseUrl }, newAdmins, `member sync ${p.seq}`)
   if (widened) await tellWidened({ db, mailer: d.mailer, baseUrl: d.baseUrl }, widened)
   const people = db.query<{ n: number }, []>('SELECT count(*) AS n FROM people p JOIN accounts a ON a.person_id = p.id WHERE p.active = 1 AND (a.cloud_user IS NOT NULL OR a.cloud_invite IS NOT NULL)').get()!.n

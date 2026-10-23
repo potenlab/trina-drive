@@ -17,6 +17,7 @@ import * as approve from '../web/approve'
 import { ensureWebSchema, metaGet } from '../web/schema'
 import { stateHash, verifyAssertion, type Claims } from './assertion'
 import { cloudConfig, type CloudConfig } from './config'
+import { afterReconcile, reconcileMyFiles } from './my-files'
 import { announceNewAdmins, byCloudUser, closeSetupIfCloudAdmin, createCloudPerson, inviteOnly, syncEveryone, unboundByEmail } from './people'
 
 export const STATE_TTL_MS = 10 * 60_000
@@ -160,6 +161,9 @@ export async function callback(w: WebCtx, req: Request, addr: string, base: stri
   }
   if (who.newAdmin) await announceNewAdmins({ db, mailer: w.mailer, baseUrl: base }, [who.personId], 'Trina Cloud sign-in')
   if (widened) await tellWidened({ db, mailer: w.mailer, baseUrl: base }, widened)
+  // My files (B2): made on the first sign-in, back from Former members on a return; never blocks signing in
+  try { await afterReconcile({ db, mailer: w.mailer, baseUrl: base }, reconcileMyFiles(db, w.dataDir, { only: who.personId })) }
+  catch (e) { console.error(`[tdcloud] my files at sign-in: ${(e as Error).message}`) }
   const returnTo = safeReturn(stored.return_to)
   const authAt = c.auth_time * 1000
   const fresh = !!stored.reauth && nowS - c.auth_time <= REAUTH_WINDOW_S
