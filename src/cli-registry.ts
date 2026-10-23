@@ -4,6 +4,7 @@
 // A built-in command with the same words wins (a module cannot replace one by accident; test/cli-registry.test.ts).
 import type { DB } from './db'
 import { cloudCommands } from './tdcloud/cli'
+import { skillsCommands } from './skills/cli'
 
 export interface CliContext {
   db: DB
@@ -23,7 +24,7 @@ export interface CliCommand {
   run: (c: CliContext) => Promise<number | void> | number | void
 }
 
-export const CLI_COMMANDS: CliCommand[] = [...cloudCommands]
+export const CLI_COMMANDS: CliCommand[] = [...cloudCommands, ...skillsCommands]
 
 /** The registered command these arguments name (two words first, then one), with the arguments after its words. */
 export function findCommand(args: string[], list: CliCommand[] = CLI_COMMANDS): { command: CliCommand; rest: string[] } | null {
