@@ -17,6 +17,11 @@ or `--all-folders`, plan 5.1), signs out, and connects the client **in user scop
 a terminal, pasted at a prompt that does not echo it (a token argument is refused: shell history). `--dry-run` prints every command and file it would write, with `<token>` in place of the secret, and contacts
 nothing.
 
+**Trina Cloud teams** (`https://<team>.cloud.trina.app`) sign in through the console, so people there have no drive
+password and `--login` cannot work: make a token on the web (**My tokens**, or Connect AI) and pass it with
+`--token-stdin`, or connect claude.ai / ChatGPT with OAuth. Removing someone from the team in the console cuts their
+tokens, OAuth connections and app passwords at once; inviting them back later does not bring any of them back.
+
 The token is kept in the macOS login Keychain (`security -i` on stdin, so it never appears in a process list; service
 `trina-drive-mcp`, account `<client>:<name>`), or with `--store file` (default off macOS) in `~/.config/trina-drive/tokens/<client>-<name>`
 (0600). `--store inline` writes it into the client's file in clear text, with a warning (refused when that file is in a

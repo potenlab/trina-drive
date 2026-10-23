@@ -13,7 +13,7 @@ import { Files } from './pages/Files'
 import { ft } from './pages/files-i18n'
 import { Folder } from './pages/Folder'
 import { Folders } from './pages/Folders'
-import { LinkPage, Login, Setup } from './pages/Auth'
+import { LinkPage, Login, Setup, SsoLanding } from './pages/Auth'
 import { Consent, PublicOnly } from './pages/Consent'
 import { People } from './pages/People'
 import { Settings } from './pages/Settings'
@@ -69,6 +69,9 @@ export function App() {
           : <PublicOnly />
     return <SessionCtx.Provider value={ctx}><Bare wide={!!me && page.type !== PublicOnly}>{page}</Bare></SessionCtx.Provider>
   }
+  // Trina Cloud's answer: the drive's second factor after a console pass, or why it failed (workstream B1, pages/Auth.tsx)
+  const ssoLanding = /^\/sso-(second|error)\/([^/?#]+)$/.exec(route)
+  if (ssoLanding) return <SessionCtx.Provider value={ctx}><Bare><SsoLanding kind={ssoLanding[1] as 'second' | 'error'} value={ssoLanding[2]!} /></Bare></SessionCtx.Provider>
   const linkMatch = /^\/(invite|reset)\/(.+)$/.exec(route)
   if (linkMatch) return <SessionCtx.Provider value={ctx}><Bare><LinkPage kind={linkMatch[1] as 'invite' | 'reset'} token={linkMatch[2]!} /></Bare></SessionCtx.Provider>
   if (route.startsWith('/setup') && (setupPending || me?.admin)) return <SessionCtx.Provider value={ctx}><Bare wide><Setup pending={setupPending} token={setupToken} onDone={() => setSetupPending(false)} /></Bare></SessionCtx.Provider>

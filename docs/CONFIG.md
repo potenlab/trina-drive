@@ -50,6 +50,9 @@ used by the macOS installer and the Docker image). Both keep managed storage in 
 | `TDRIVE_FILES_DIR` | `<data>/files` | the managed root |
 | `TDRIVE_STORAGE_QUOTA` | none | the team's total (files, trash, earlier versions, unfinished uploads), e.g. `50GB` (also `tdrive storage quota`) |
 | `TDRIVE_MAX_PEOPLE` | none | most **active** people (deactivated ones do not count); one more is refused on the web (`403 people_limit`, shown on the People page), the CLI and when someone is turned back on. Trina Cloud sets it per plan (Free: 3) |
+| `TDRIVE_CLOUD_ISSUER`, `TDRIVE_CLOUD_TEAM`, `TDRIVE_CLOUD_SSO_KEYS` | — | Trina Cloud mode (all three set; written by the console, [SSO-CONTRACT.md](SSO-CONTRACT.md)): "Sign in with Trina Cloud" (`/api/sso/*`), member sync (`tdrive cloud sync-members`), Everyone kept as a system group, setup counted done once a console admin exists. Unset = self-hosted, nothing changes |
+| `TDRIVE_CLOUD_CALLBACK_TOKEN`, `TDRIVE_CLOUD_CONSOLE_URL` | —, the issuer | the drive asks the console to invite someone (`POST /api/cloud/invite`, always as a member); links to the console |
+| `TDRIVE_SSO_ONLY` | off | `1` (cloud mode): console people sign in only through the console (password sign-in `409 use_sso`), `/api/setup` is gone and no setup token is made, the people/admin/Everyone APIs answer `409 managed_by_console`. A person needing a fresh login (2FA changes, app passwords, provenance reset) confirms with a passkey, an authenticator code or the console (`/api/sso/start?reauth=1`). Emergency: `tdrive people reset-link NAME --break-glass` |
 | `TDRIVE_MAX_FILE_BYTES`, `TDRIVE_VERSIONS_KEPT`, `TDRIVE_TRASH_DAYS` | 10 GB, 10, 30 | largest file, earlier versions kept per file, days in the trash |
 | `TDRIVE_WEBDAV` | on (managed storage) | `off` turns the `/dav/` mount off ([ARCHITECTURE.md](ARCHITECTURE.md#mount-as-a-drive-webdav)) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_API_KEY` | — | Google Drive import: all three set (and managed storage) turns it on; otherwise it is hidden. `GOOGLE_APP_ID` (Cloud project number) defaults to the client id's prefix |
@@ -146,5 +149,18 @@ in-place reconciler (outside changes, R1 ⑤–⑦, R6, R10):
   quarantine list [--all] | quarantine release <id> --by <person>   (moved/lost: admin; widened: admin or source manager)
   widened list | widened rejudge         NAS copies of drafts; re-judge after rule / group / NAS-reader changes
 ```
+
+Trina Cloud mode adds (src/tdcloud, listed at the end of `tdrive help`):
+
+```
+  cloud sync-members --json B64 | --stdin   apply the console's member list (sync v2: per-team seq, whole list,
+                                            removal cuts sessions, tokens, OAuth grants and app passwords); one JSON line
+  cloud usage --json                        people, AI use in 30 days and storage, one JSON line (for the console)
+  people reset-link NAME|EMAIL [--break-glass] [--url URL]
+                                            emergency way in when the console is down: a one-time reset link printed
+                                            here (audited, every admin told); --break-glass lets a console person use
+                                            that password for 24 hours under TDRIVE_SSO_ONLY
+```
+
 
 Backups: `tdrive backup help` ([BACKUP-FORMAT.md](BACKUP-FORMAT.md), [INSTALL.md](INSTALL.md) section 6).

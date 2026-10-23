@@ -1,7 +1,7 @@
 // Second factors: the sign-in second step, and the Settings section (passkeys, authenticator app, recovery codes).
 import { useState } from 'react'
 import { api, ApiError, get, setCsrf, type Me } from '../api'
-import { go, useSession } from '../App'
+import { go, useRoute, useSession } from '../App'
 import { fmtDate, t } from '../i18n'
 import { createPasskey, getPasskey, passkeysSupported } from '../webauthn'
 import { ErrorLine, Loading, Secret, useAction, useLoad } from '../ui'
@@ -10,9 +10,10 @@ import './approve.css'
 
 export interface SecondFactorChallenge { ticket: string; methods: ('passkey' | 'totp' | 'recovery')[]; passkey: unknown | null; public_url: string | null; passkeys_elsewhere: string | null }
 
-/** After a correct password (or a reset link) for someone with a second factor. */
-/** `onDone`: where to go after the second step (default: the admin's folders or the person's files; OAuth consent stays put). */
-export function SecondFactorStep({ challenge, onDone }: { challenge: SecondFactorChallenge; onDone?: () => void }) {
+/** After a correct password (or a reset link, or a Trina Cloud pass) for someone with a second factor. */
+/** `onDone`: where to go after the second step (default: the admin's folders or the person's files; OAuth consent stays put).
+ *  It gets the answer: after a Trina Cloud pass `return_to` is where the person was going. */
+export function SecondFactorStep({ challenge, onDone }: { challenge: SecondFactorChallenge; onDone?: (r?: { me: Me; return_to?: string }) => void }) {
   const { setMe } = useSession()
   const [method, setMethod] = useState<'totp' | 'recovery'>(challenge.methods.includes('totp') ? 'totp' : 'recovery')
   const [code, setCode] = useState('')
@@ -21,9 +22,9 @@ export function SecondFactorStep({ challenge, onDone }: { challenge: SecondFacto
   const finish = async (body: Record<string, unknown>) => {
     setBusy(true); setError(null)
     try {
-      const r = await api<{ me: Me; csrf: string }>('POST', '/login/second', { ticket: challenge.ticket, ...body })
+      const r = await api<{ me: Me; csrf: string; return_to?: string }>('POST', '/login/second', { ticket: challenge.ticket, ...body })
       setCsrf(r.csrf); setMe(r.me)
-      if (onDone) onDone(); else go(r.me.admin ? '/folders' : '/files')
+      if (onDone) onDone(r); else go(r.me.admin ? '/folders' : '/files')
     } catch (e) {
       setError(e instanceof ApiError && e.status === 429 ? t('login_rate') : e instanceof ApiError && e.code === 'bad_ticket' ? t('login_bad') : at('sf_bad'))
     } finally { setBusy(false) }
@@ -68,7 +69,6 @@ export function SecondFactorSettings() {
   const f = useLoad(() => get<Factors>('/me/2fa'))
   const a = useAction()
   const [needPw, setNeedPw] = useState<null | (() => Promise<unknown>)>(null)
-  const [pw, setPw] = useState('')
   const [pkName, setPkName] = useState('')
   const [totp, setTotp] = useState<{ secret: string; uri: string } | null>(null)
   const [code, setCode] = useState('')
@@ -103,19 +103,7 @@ export function SecondFactorSettings() {
       {warn && <p className="warn">{warn}</p>}
       <ErrorLine error={a.error} />
 
-      {needPw && (
-        <form className="card" onSubmit={async (e) => {
-          e.preventDefault()
-          const ok = await a.run(() => api('POST', '/me/reauth', { password: pw }))
-          setPw('')
-          if (ok) { const fn = needPw; setNeedPw(null); await change(fn) }
-        }}>
-          <p className="small">{at('mfa_reauth')}</p>
-          <input type="text" hidden readOnly autoComplete="username" value={me?.name ?? ''} />
-          <label>{t('password')}<input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} required autoFocus /></label>
-          <button className="btn small primary" disabled={a.busy || !pw}>{at('mfa_reauth_go')}</button>
-        </form>
-      )}
+      {needPw && <ReauthBox onDone={async () => { const fn = needPw; setNeedPw(null); await change(fn) }} />}
 
       {codes && (
         <div className="card highlight">
@@ -186,6 +174,61 @@ export function EnrollSecondFactor({ onDone }: { onDone: () => void }) {
         <button type="button" className="btn primary" disabled={!me?.second_factor} onClick={onDone}>{at('mfa_enroll_continue')}</button>{' '}
         <button type="button" className="btn ghost" onClick={() => api('POST', '/logout').finally(() => { setMe(null); go('/login') })}>{t('sign_out')}</button>
       </p>
+    </div>
+  )
+}
+
+interface ReauthOptions { methods: ('password' | 'passkey' | 'totp' | 'sso')[]; passkey: unknown | null; sso_url: string | null }
+
+/**
+ * "Confirm it is you" for a change that needs a fresh login (403 reauth_required): the password, a passkey, an
+ * authenticator code, or — for people who sign in with Trina Cloud and have no password here — a round trip to the
+ * console (GET /api/sso/start?reauth=1), which comes back to this page. Shown inline; `onDone` runs the change again.
+ */
+export function ReauthBox({ intro, onDone }: { intro?: string; onDone: () => void | Promise<void> }) {
+  const { me } = useSession()
+  const route = useRoute()
+  const o = useLoad(() => api<ReauthOptions>('POST', '/me/reauth/options'))
+  const a = useAction()
+  const [pw, setPw] = useState('')
+  const [code, setCode] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const send = async (body: Record<string, unknown>) => {
+    setError(null)
+    const ok = await a.run(() => api('POST', '/me/reauth', body)).catch(() => null)
+    setPw(''); setCode('')
+    if (ok) await onDone(); else setError(t('reauth_bad'))
+  }
+  if (!o.data) return <div className="card">{o.error ? <ErrorLine error={o.error} /> : <Loading />}</div>
+  const m = o.data.methods
+  const back = encodeURIComponent('/#' + (route || '/settings'))
+  return (
+    <div className="card" role="group" aria-label={t('reauth_title')}>
+      <h3 style={{ marginTop: 0 }}>{t('reauth_title')}</h3>
+      <p className="small">{intro ?? t('reauth_intro')}</p>
+      {m.includes('sso') && o.data.sso_url && <>
+        <p><a className="btn small primary" href={`${o.data.sso_url}&return=${back}`}>{t('reauth_sso')}</a></p>
+        <p className="muted small">{t('reauth_sso_note')}</p>
+      </>}
+      {m.includes('passkey') && passkeysSupported() && (
+        <p><button type="button" className="btn small" disabled={a.busy} onClick={async () => {
+          try { await send({ method: 'passkey', response: await getPasskey(o.data!.passkey) }) } catch { setError(t('reauth_bad')) }
+        }}>{t('reauth_passkey')}</button></p>
+      )}
+      {m.includes('totp') && (
+        <form className="inline" onSubmit={(e) => { e.preventDefault(); send({ method: 'totp', code }) }}>
+          <label>{t('reauth_totp')}<input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} required /></label>
+          <button className="btn small" disabled={a.busy || !code}>{t('reauth_go')}</button>
+        </form>
+      )}
+      {m.includes('password') && (
+        <form className="inline" onSubmit={(e) => { e.preventDefault(); send({ password: pw }) }}>
+          <input type="text" hidden readOnly autoComplete="username" value={me?.name ?? ''} />
+          <label>{t('reauth_password')}<input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} required autoFocus={!m.includes('sso')} /></label>
+          <button className="btn small primary" disabled={a.busy || !pw}>{t('reauth_go')}</button>
+        </form>
+      )}
+      <ErrorLine error={error ?? a.error} />
     </div>
   )
 }
