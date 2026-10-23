@@ -178,8 +178,10 @@ Step-up for a file: the same two calls as for folders (`POST /api/share/step-up/
 file's `path` and `general`); the assertion is bound to that file.
 
 Non-members by mail (admin only) go through the invite flow; when the flow hands back the invited person's row the file
-is shared with them at once (`granted: true`), otherwise `granted: false` — applying pending file invites when the person
-joins (S16) is **not in this version** (cut, memo §12).
+is shared with them at once (`granted: true`), otherwise `granted: false` and a pending invite is kept
+(`share_invites`): it is given when that address becomes an active person — **the member sync must call
+`applyShareInvites(db, personId, email)`** from `src/share/invites.ts` (workstream B2's hook; returns how many were
+given, for one "Items were shared with you" notice). Pending invites expire after 30 days.
 
 ### Other routes
 
