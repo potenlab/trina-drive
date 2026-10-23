@@ -2,7 +2,9 @@
 import type { Copy } from '../content/en'
 import Base from '../layouts/Base.astro'
 import { LINKS, SITE_URL, CONTACT_EMAIL } from '../site'
+import Benchmark from './Benchmark.astro'
 import Bento from './Bento.astro'
+import Competitors from './Competitors.astro'
 import FilesMock from './FilesMock.astro'
 import Flow from './Flow.astro'
 import Footer from './Footer.astro'
@@ -14,7 +16,7 @@ import Terminal from './Terminal.astro'
 
 interface Props { t: Copy }
 const { t } = Astro.props
-const home = t.lang === 'ko' ? '/ko' : '/'
+const home = '/'
 const h = t.hero
 
 const jsonLd = {
@@ -24,7 +26,6 @@ const jsonLd = {
       '@type': 'Organization',
       '@id': `${SITE_URL}/#org`,
       name: 'Trina Inc.',
-      alternateName: '주식회사 트리나',
       url: SITE_URL,
       email: CONTACT_EMAIL,
       logo: `${SITE_URL}/apple-touch-icon.png`,
@@ -50,10 +51,10 @@ const jsonLd = {
   ],
 }
 ---
-<Base t={t} alternates={{ en: '/', ko: '/ko' }} jsonLd={jsonLd} preloadHero>
+<Base t={t} jsonLd={jsonLd} preloadHero>
   <Nav t={t} home={home} />
   <main id="main">
-    <!-- hero: copy centred over the key visual, then the product stage (Files view + the kim/boss terminal) -->
+    <!-- hero: copy centred over the key visual, then the product stage (Files view + the Alex/Sam terminal) -->
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-bg" aria-hidden="true"></div>
       <div class="container hero-copy">
@@ -61,7 +62,7 @@ const jsonLd = {
         <h1 id="hero-title">{h.title} <span class="accent-text">{h.titleAccent}</span></h1>
         <p class="hero-sub">{h.sub}</p>
         <div class="hero-ctas">
-          <a class="btn btn-primary btn-lg" href="#start">{h.primary}<Icon name="arrow" /></a>
+          <a class="btn btn-primary btn-lg" href="#how">{h.primary}<Icon name="arrow" /></a>
           <a class="btn btn-secondary btn-lg" href={LINKS.bookCall(t.lang)}>{h.secondary}</a>
         </div>
         <div class="install">
@@ -91,54 +92,70 @@ const jsonLd = {
       </div>
     </section>
 
-    <!-- problem -> solution -->
-    <section class="section" id="problem" aria-labelledby="problem-title">
+    <!-- knowledge base without the build: the enterprise way vs the small-team way -->
+    <section class="section" id="kb" aria-labelledby="kb-title">
       <div class="container">
         <div class="section-head" data-reveal>
-          <span class="eyebrow">{t.problem.eyebrow}</span>
-          <h2 id="problem-title">{t.problem.title}</h2>
+          <span class="eyebrow">{t.kb.eyebrow}</span>
+          <h2 id="kb-title">{t.kb.title}</h2>
+          <p>{t.kb.sub}</p>
         </div>
-        <ul class="problem-grid">
-          {t.problem.items.map((p, i) => (
-            <li data-reveal><span class="problem-num" aria-hidden="true">0{i + 1}</span><h3>{p.title}</h3><p>{p.body}</p></li>
+        <div class="ways">
+          {t.kb.cols.map((c) => (
+            <div class={`way${c.us ? ' way-us' : ''}`} data-reveal>
+              <p class="way-tag">{c.tag}</p>
+              <h3>{c.name}</h3>
+              <ul>{c.points.map((pt) => <li><Icon name={c.us ? 'check' : 'minus'} />{pt}</li>)}</ul>
+              <p class="way-foot">{c.foot}</p>
+            </div>
           ))}
-        </ul>
-        <div class="solution" data-reveal>
-          <span class="solution-icon"><Icon name="shield" /></span>
-          <p>{t.problem.solution}</p>
         </div>
       </div>
     </section>
 
-    <!-- features (bento) -->
-    <section class="section section-tint" id="features" aria-labelledby="features-title">
+    <!-- vs a drive connector -->
+    <section class="section section-tint" id="connector" aria-labelledby="gd-title">
+      <div class="container gd-grid">
+        <div class="section-head" data-reveal>
+          <span class="eyebrow">{t.gdrive.eyebrow}</span>
+          <h2 id="gd-title">{t.gdrive.title}</h2>
+          <p>{t.gdrive.sub}</p>
+        </div>
+        <div class="gd-cards" data-reveal>
+          <div class="gd-card">
+            <h3>{t.gdrive.left.name}</h3>
+            <ul>{t.gdrive.left.points.map((pt) => <li><Icon name="minus" />{pt}</li>)}</ul>
+          </div>
+          <div class="gd-card gd-us">
+            <h3>{t.gdrive.right.name}</h3>
+            <ul>{t.gdrive.right.points.map((pt) => <li><Icon name="check" />{pt}</li>)}</ul>
+            <pre class="gd-demo" aria-hidden="true">{t.gdrive.demo.map((l, i) => <span class={i === 0 ? 'gd-cmd' : ''}>{l}</span>)}</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {t.benchmark.enabled && <Benchmark t={t} />}
+
+    <!-- what you get -->
+    <section class="section" id="features" aria-labelledby="features-title">
       <div class="container">
         <div class="section-head" data-reveal>
           <span class="eyebrow">{t.features.eyebrow}</span>
           <h2 id="features-title">{t.features.title}</h2>
         </div>
-        <Bento t={t} />
+        <Bento t={t} items={t.features.items} />
       </div>
     </section>
 
-    <!-- how it works -->
-    <section class="section" id="how" aria-labelledby="how-title">
+    <!-- shared with the whole team, safely -->
+    <section class="section section-tint" id="safe" aria-labelledby="pillars-title">
       <div class="container">
         <div class="section-head" data-reveal>
-          <span class="eyebrow">{t.how.eyebrow}</span>
-          <h2 id="how-title">{t.how.title}</h2>
+          <span class="eyebrow">{t.pillars.eyebrow}</span>
+          <h2 id="pillars-title">{t.pillars.title}</h2>
         </div>
-        <ol class="steps">
-          {t.how.steps.map((s, i) => (
-            <li class="step" data-reveal>
-              <span class="step-num">{i + 1}</span>
-              <h3>{s.title}</h3>
-              <p>{s.body}</p>
-              {s.code && <pre><span class="tl-prompt" aria-hidden="true">$ </span>{s.code}</pre>}
-            </li>
-          ))}
-        </ol>
-        <Flow t={t} />
+        <Bento t={t} items={t.pillars.items} variant="pillars" />
       </div>
     </section>
 
@@ -172,10 +189,33 @@ const jsonLd = {
               <ul>{t.security.limits.map((s) => <li><Icon name="minus" />{s}</li>)}</ul>
             </div>
           </div>
-          <a class="sec-link" href={LINKS.securityModel} rel="noopener">{t.security.link}<span aria-hidden="true">→</span></a>
+          <a class="sec-link" href="/security">{t.security.link}<span aria-hidden="true">→</span></a>
         </div>
       </div>
     </section>
+
+    <!-- how it works -->
+    <section class="section" id="how" aria-labelledby="how-title">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <span class="eyebrow">{t.how.eyebrow}</span>
+          <h2 id="how-title">{t.how.title}</h2>
+        </div>
+        <ol class="steps">
+          {t.how.steps.map((s, i) => (
+            <li class="step" data-reveal>
+              <span class="step-num">{i + 1}</span>
+              <h3>{s.title}</h3>
+              <p>{s.body}</p>
+              {s.code && <pre><span class="tl-prompt" aria-hidden="true">$ </span>{s.code}</pre>}
+            </li>
+          ))}
+        </ol>
+        <Flow t={t} />
+      </div>
+    </section>
+
+    {t.competitors.enabled && <Competitors t={t} />}
 
     <Pricing t={t} />
 

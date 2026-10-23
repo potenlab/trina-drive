@@ -1,0 +1,78 @@
+---
+// /security: the guarantees behind the home page's promises, the known limits, the line between
+// self-hosted and managed, and how to report a vulnerability. Copy in t.securityPage (structure from the positioning
+// report); the promise is the same word-for-word text as on the home page.
+import type { Copy } from '../content/en'
+import Base from '../layouts/Base.astro'
+import { LINKS } from '../site'
+import Footer from './Footer.astro'
+import Icon from './Icon.astro'
+import Nav from './Nav.astro'
+
+interface Props { t: Copy }
+const { t } = Astro.props
+const sp = t.securityPage
+const home = '/'
+---
+<Base t={t} title={sp.title} description={sp.description}>
+  <Nav t={t} home={home} />
+  <main id="main" class="secpage">
+    <section class="secpage-hero">
+      <div class="container">
+        <span class="eyebrow">{sp.eyebrow}</span>
+        <h1>{sp.h1}</h1>
+        <p class="secpage-lead">{sp.lead}</p>
+      </div>
+    </section>
+
+    <section class="container secpage-block" aria-labelledby="sp-guarantees">
+      <h2 id="sp-guarantees">{sp.guaranteesTitle}</h2>
+      <ol class="guarantees">
+        {sp.guarantees.map((g, i) => (
+          <li>
+            <span class="guarantee-num" aria-hidden="true">{i + 1}</span>
+            <div><h3>{g.title}</h3><p>{g.why}</p></div>
+          </li>
+        ))}
+      </ol>
+    </section>
+
+    <section class="container secpage-block" aria-labelledby="sp-promise">
+      <figure class="promise promise-light">
+        <figcaption class="promise-label" id="sp-promise">{sp.promiseTitle}</figcaption>
+        <blockquote>{t.security.promise.map((s) => <p>{s}</p>)}</blockquote>
+      </figure>
+    </section>
+
+    <section class="container secpage-block" aria-labelledby="sp-limits">
+      <h2 id="sp-limits">{sp.limitsTitle}</h2>
+      <p class="secpage-sub">{sp.limitsLead}</p>
+      <ul class="limits">
+        {sp.limits.map((l) => <li><Icon name="minus" />{l}</li>)}
+      </ul>
+    </section>
+
+    <section class="container secpage-block" aria-labelledby="sp-boundary">
+      <h2 id="sp-boundary">{sp.boundaryTitle}</h2>
+      <div class="secpage-cards">
+        {sp.boundary.map((b) => <div class="secpage-card"><h3>{b.title}</h3><p>{b.body}</p></div>)}
+      </div>
+    </section>
+
+    <section class="container secpage-block" aria-labelledby="sp-review">
+      <h2 id="sp-review">{sp.reviewTitle}</h2>
+      <div class="secpage-cards secpage-cards-3">
+        {sp.review.map((b) => <div class="secpage-card"><h3>{b.title}</h3><p>{b.body}</p></div>)}
+      </div>
+      <p class="secpage-links">
+        <a href={`mailto:${sp.reportEmail}`}>{sp.reportEmail}</a>
+        <a href={LINKS.securityModel} rel="noopener">{sp.modelLink} →</a>
+      </p>
+      <a class="back" href={home}>← {sp.back}</a>
+    </section>
+  </main>
+  <Footer t={t} home={home} />
+  <script>
+    import '../scripts/main'
+  </script>
+</Base>

@@ -1,17 +1,16 @@
 ---
-// Features as a bento grid. Each card: icon, title, body (the facts), and a small decorative product illustration
-// whose strings come from t.features.minis. Layout (which cards are wide) is by position, so copy can change freely.
+// Cards with a small decorative product illustration on top (strings from t.features.minis) and the facts below.
+// Used twice: the three pillars (with a label and a command line) and the "why it fits" reasons.
 import type { Copy } from '../content/en'
 import Icon from './Icon.astro'
-interface Props { t: Copy }
-const { t } = Astro.props
-const f = t.features
-const mi = f.minis
-const wide = new Set(['filter', 'log', 'search'])
+interface Item { icon: string; title: string; body: string; label?: string; cmd?: string; out?: string }
+interface Props { t: Copy; items: Item[]; variant?: 'pillars' | 'reasons' }
+const { t, items, variant = 'reasons' } = Astro.props
+const mi = t.features.minis
 ---
-<ul class="bento">
-  {f.items.map((it) => (
-    <li class={`bento-card bento-${it.icon}${wide.has(it.icon) ? ' bento-wide' : ''}`} data-reveal>
+<ul class={`bento bento-${variant}`}>
+  {items.map((it) => (
+    <li class={`bento-card bento-${it.icon}`} data-reveal>
       <div class="bento-art" aria-hidden="true">
         {it.icon === 'filter' && (
           <div class="mini mini-filter">
@@ -74,9 +73,12 @@ const wide = new Set(['filter', 'log', 'search'])
         )}
       </div>
       <div class="bento-text">
-        <span class="bento-icon"><Icon name={it.icon} /></span>
+        <span class="bento-icon"><Icon name={it.icon} />{it.label && <span class="bento-label">{it.label}</span>}</span>
         <h3>{it.title}</h3>
         <p>{it.body}</p>
+        {it.cmd && (
+          <pre class="bento-cmd"><span class="tl-prompt" aria-hidden="true">$ </span>{it.cmd}{it.out && <span class="bento-out">{'\n'}{it.out}</span>}</pre>
+        )}
       </div>
     </li>
   ))}

@@ -5,15 +5,15 @@ import type { Copy } from '../content/en'
 interface Props { t: Copy }
 const { t } = Astro.props
 const tm = t.terminal
-const prompt = (who: 'kim' | 'boss') => `${who} $ `
+const prompt = (who: 'alex' | 'sam') => `${who} $ `
 ---
 <figure class="term" data-term aria-labelledby="term-label">
   <figcaption id="term-label" class="sr-only">{tm.label}</figcaption>
   <div class="term-bar">
     <div class="term-dots" aria-hidden="true"><span></span><span></span><span></span></div>
     <div class="term-tabs" aria-hidden="true">
-      <span class="term-tab" data-tab="kim" data-active="true">{tm.tabs.kim}</span>
-      <span class="term-tab" data-tab="boss" data-active="false">{tm.tabs.boss}</span>
+      <span class="term-tab" data-tab="alex" data-active="true">{tm.tabs.alex}</span>
+      <span class="term-tab" data-tab="sam" data-active="false">{tm.tabs.sam}</span>
     </div>
     <button class="term-replay" type="button" data-term-replay hidden>{tm.replay}</button>
   </div>
