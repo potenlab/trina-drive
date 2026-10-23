@@ -1,0 +1,36 @@
+---
+// Variant B: use-case gallery by role. Every card is in the HTML; the role chips (src/scripts/b.ts) only filter what is
+// shown, and without JS all cards stay visible.
+import type { CopyB } from '../../content/en-b'
+import Icon from '../Icon.astro'
+interface Props { t: CopyB }
+const { t } = Astro.props
+const u = t.useCases
+const slug = (r: string) => r.toLowerCase().replace(/[^a-z]+/g, '-')
+---
+<section class="section" id="features" aria-labelledby="uc-title" data-uc>
+  <div class="container">
+    <div class="section-head" data-reveal>
+      <span class="eyebrow">{u.eyebrow}</span>
+      <h2 id="uc-title">{u.title}</h2>
+      <p>{u.sub}</p>
+    </div>
+    <div class="uc-filter" role="group" aria-label={u.eyebrow} hidden data-uc-filter>
+      <button type="button" class="uc-chip" data-uc-role="all" aria-pressed="true">{u.all}</button>
+      {u.roles.map((r) => <button type="button" class="uc-chip" data-uc-role={slug(r)} aria-pressed="false">{r}</button>)}
+    </div>
+    <ul class="uc-grid">
+      {u.items.map((it) => (
+        <li class="uc-card" data-uc-item={slug(it.role)}>
+          <span class="uc-role">{it.role}</span>
+          <p class="uc-prompt"><span class="sr-only">{u.askLabel}: </span>“{it.prompt}”</p>
+          <div class="uc-get">
+            <span class="uc-get-label"><Icon name="sparkle" />{u.getLabel}</span>
+            <p>{it.get}</p>
+          </div>
+          <p class="uc-before"><span class="uc-before-label">{u.beforeLabel}:</span> {it.before}</p>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>

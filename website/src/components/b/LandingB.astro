@@ -1,0 +1,291 @@
+---
+// Variant B of the home page (/b): the same product told for non-developer teams. Shared pieces (Nav, Pricing, Footer,
+// Terminal, the security panel's promise) come from variant A unchanged; B-only parts live in components/b/ and are
+// styled by styles/b.css, which only this page loads.
+import type { CopyB } from '../../content/en-b'
+import Base from '../../layouts/Base.astro'
+import { LINKS, SITE_URL } from '../../site'
+import Footer from '../Footer.astro'
+import Icon from '../Icon.astro'
+import Logo from '../Logo.astro'
+import Nav from '../Nav.astro'
+import Pricing from '../Pricing.astro'
+import Terminal from '../Terminal.astro'
+import ChatDemo from './ChatDemo.astro'
+import Safe from './Safe.astro'
+import UseCases from './UseCases.astro'
+import '../../styles/b.css'
+
+interface Props { t: CopyB }
+const { t } = Astro.props
+const home = '/b'
+const h = t.hero
+const w = t.works
+const g = t.gdrive
+const st = t.setup
+const d = t.devs
+---
+<Base t={t} noindex canonicalHref={`${SITE_URL}/`} preloadHero>
+  <Nav t={t} home={home} />
+  <main id="main" class="vb">
+    <!-- hero: plain-language promise, then an AI chat window answering from the company folders -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-bg" aria-hidden="true"></div>
+      <div class="container hero-copy">
+        <a class="pill" href="#works"><span class="pill-dot" aria-hidden="true"></span>{h.pill}<span class="pill-arrow" aria-hidden="true">→</span></a>
+        <h1 id="hero-title">{h.title} <span class="accent-text">{h.titleAccent}</span></h1>
+        <p class="hero-sub">{h.sub}</p>
+        <div class="hero-ctas">
+          <a class="btn btn-primary btn-lg" data-cta="see-how" href="#features">{h.primary}<Icon name="arrow" /></a>
+          <a class="btn btn-secondary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{h.secondary}</a>
+        </div>
+      </div>
+      <div class="container b-stage">
+        <div class="stage-glow" aria-hidden="true"></div>
+        <ChatDemo t={t} />
+      </div>
+      <div class="container b-proof-wrap">
+        <ul class="proof b-proof">
+          {t.proof.map((p) => <li><Icon name={p.icon} />{p.text}</li>)}
+        </ul>
+      </div>
+    </section>
+
+    <!-- pain in people's own words (public posts, linked) and the one-line answer to each -->
+    <section class="pains" aria-labelledby="pains-title">
+      <div class="container">
+        <h2 class="pains-title" id="pains-title">{t.pains.title}<small>{t.pains.sub}</small></h2>
+        <ul class="pains-grid">
+          {t.pains.items.map((p) => (
+            <li class="pain" data-reveal>
+              <figure>
+                <blockquote>“{p.quote}”</blockquote>
+                <figcaption><a href={p.href} rel="noopener nofollow">— {p.where}</a></figcaption>
+              </figure>
+              <p class="pain-answer"><Icon name="check" />{p.answer}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+
+    <UseCases t={t} />
+
+    <!-- works where you already work: AI apps ⇄ Trina Drive ⇄ folders -->
+    <section class="section section-tint" id="works" aria-labelledby="works-title">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <span class="eyebrow">{w.eyebrow}</span>
+          <h2 id="works-title">{w.title}</h2>
+          <p>{w.sub}</p>
+        </div>
+        <div class="wk" data-reveal>
+          <div class="wk-col">
+            <h3 class="wk-title">{w.appsTitle}</h3>
+            <ul class="wk-apps">
+              {w.apps.map((a) => (
+                <li class="wk-app" data-status={a.status}>
+                  <span class="wk-app-name">{a.name}{a.note && <small>{a.note}</small>}</span>
+                  <span class="wk-status">{a.status === 'today' ? w.today : w.soon}</span>
+                </li>
+              ))}
+            </ul>
+            <p class="wk-dev-title">{w.devTitle}</p>
+            <ul class="wk-dev">
+              {w.devApps.map((a) => <li>{a}</li>)}
+            </ul>
+          </div>
+          <div class="wk-hub" aria-hidden="true">
+            <span class="wk-line"></span>
+            <span class="wk-hub-badge"><Logo /><b>{w.center}</b><small>{w.centerNote}</small></span>
+            <span class="wk-line"></span>
+          </div>
+          <div class="wk-col">
+            <h3 class="wk-title">{w.filesTitle}</h3>
+            <ul class="wk-files">
+              {w.files.map((f) => (
+                <li><span class="wk-file-icon"><Icon name={f.icon} /></span><span><b>{f.name}</b><small>{f.note}</small></span></li>
+              ))}
+            </ul>
+            <p class="wk-note">{w.filesNote}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- knowledge base without the build -->
+    <section class="section" id="kb" aria-labelledby="kb-title">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <span class="eyebrow">{t.kb.eyebrow}</span>
+          <h2 id="kb-title">{t.kb.title}</h2>
+          <p>{t.kb.sub}</p>
+        </div>
+        <div class="ways">
+          {t.kb.cols.map((c) => (
+            <div class={`way${c.us ? ' way-us' : ''}`} data-reveal>
+              <p class="way-tag">{c.tag}</p>
+              <h3>{c.name}</h3>
+              <ul>{c.points.map((pt) => <li><Icon name={c.us ? 'check' : 'minus'} />{pt}</li>)}</ul>
+              <p class="way-foot">{c.foot}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- vs a drive connector -->
+    <section class="section section-tint" id="connector" aria-labelledby="gd-title">
+      <div class="container gd-grid">
+        <div class="section-head" data-reveal>
+          <span class="eyebrow">{g.eyebrow}</span>
+          <h2 id="gd-title">{g.title}</h2>
+          <p>{g.sub}</p>
+        </div>
+        <div class="gd-cards" data-reveal>
+          <div class="gd-card">
+            <h3>{g.left.name}</h3>
+            <ul>{g.left.points.map((pt) => <li><Icon name="minus" />{pt}</li>)}</ul>
+          </div>
+          <div class="gd-card gd-us">
+            <h3>{g.right.name}</h3>
+            <ul>{g.right.points.map((pt) => <li><Icon name="check" />{pt}</li>)}</ul>
+            <div class="gd-search" aria-hidden="true">
+              <span class="gd-q"><Icon name="search" />“{g.search.query}”<small>{g.search.count}</small></span>
+              {g.search.hits.map((x) => <span class="gd-hit"><code>{x.file}</code><span>{x.line}</span></span>)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <Safe t={t} />
+
+    <!-- security: always-dark panel (same promise as variant A, plain-language lists) -->
+    <section class="section" id="security" aria-labelledby="security-title">
+      <div class="container">
+        <div class="sec-panel">
+          <div class="sec-visual" aria-hidden="true">
+            <picture>
+              <source type="image/avif" srcset="/img/vault-560.avif 560w, /img/vault-1120.avif 1120w" sizes="(max-width: 900px) 90vw, 520px" />
+              <img src="/img/vault-560.webp" srcset="/img/vault-560.webp 560w, /img/vault-1120.webp 1120w" sizes="(max-width: 900px) 90vw, 520px" alt="" width="1120" height="836" loading="lazy" decoding="async" />
+            </picture>
+          </div>
+          <div class="sec-top">
+            <div class="section-head" data-reveal>
+              <span class="eyebrow">{t.security.eyebrow}</span>
+              <h2 id="security-title">{t.security.title}</h2>
+            </div>
+            <figure class="promise" data-reveal>
+              <figcaption class="promise-label">{t.security.promiseLabel}</figcaption>
+              <blockquote>{t.security.promise.map((s) => <p>{s}</p>)}</blockquote>
+            </figure>
+          </div>
+          <div class="sec-lists">
+            <div class="sec-list ok" data-reveal>
+              <h3><Icon name="shield" />{t.security.protectTitle}</h3>
+              <ul>{t.security.protect.map((s) => <li><Icon name="check" />{s}</li>)}</ul>
+            </div>
+            <div class="sec-list no" data-reveal>
+              <h3><Icon name="eye" />{t.security.limitsTitle}</h3>
+              <ul>{t.security.limits.map((s) => <li><Icon name="minus" />{s}</li>)}</ul>
+            </div>
+          </div>
+          <a class="sec-link" href="/security">{t.security.link}<span aria-hidden="true">→</span></a>
+        </div>
+      </div>
+    </section>
+
+    <!-- set up for you -->
+    <section class="section section-tint" id="how" aria-labelledby="how-title">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <span class="eyebrow">{st.eyebrow}</span>
+          <h2 id="how-title">{st.title}</h2>
+          <p>{st.sub}</p>
+        </div>
+        <ol class="steps">
+          {st.steps.map((s, i) => (
+            <li class="step" data-reveal>
+              <span class="step-num">{i + 1}</span>
+              <h3>{s.title}</h3>
+              <p>{s.body}</p>
+            </li>
+          ))}
+        </ol>
+        <div class="setup-row" data-reveal>
+          <a class="btn btn-primary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{h.secondary}<Icon name="arrow" /></a>
+          <p class="setup-self"><b>{st.selfTitle}</b> {st.selfBody} <a href={LINKS.installGuide} rel="noopener">{st.selfLink} →</a></p>
+        </div>
+      </div>
+    </section>
+
+    <Pricing t={t} />
+
+    <!-- for developers: the terminal demo from variant A -->
+    <section class="section section-tint" id="developers" aria-labelledby="dev-title">
+      <div class="container dev-grid">
+        <div class="dev-copy">
+          <div class="section-head" data-reveal>
+            <span class="eyebrow">{d.eyebrow}</span>
+            <h2 id="dev-title">{d.title}</h2>
+            <p>{d.sub}</p>
+          </div>
+          <ul class="dev-points">{d.points.map((p) => <li><Icon name="check" />{p}</li>)}</ul>
+          <div class="install">
+            <code><span class="prompt" aria-hidden="true">$ </span>{d.install}</code>
+            <button class="copy-btn" type="button" data-copy={d.install} data-copied={h.copied}>{h.copy}</button>
+          </div>
+          <p class="dev-link"><a href={LINKS.docs} rel="noopener">{d.link} →</a></p>
+        </div>
+        <div class="dev-term"><Terminal t={t} /></div>
+      </div>
+    </section>
+
+    <!-- faq -->
+    <section class="section" id="faq" aria-labelledby="faq-title">
+      <div class="container faq-grid">
+        <div class="faq-side">
+          <div class="section-head">
+            <span class="eyebrow">{t.faq.eyebrow}</span>
+            <h2 id="faq-title">{t.faq.title}</h2>
+          </div>
+          <div class="faq-more">
+            <p class="faq-more-title">{t.faq.more}</p>
+            <p>{t.faq.moreBody}</p>
+            <a href="mailto:contact@trina.app">contact@trina.app</a>
+          </div>
+        </div>
+        <div class="faq">
+          {t.faq.items.map((i) => (
+            <details>
+              <summary>{i.q}<Icon name="plus" /></summary>
+              <p class="answer">{i.a}</p>
+            </details>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- final cta -->
+    <section class="section section-cta" id="start" aria-labelledby="start-title">
+      <div class="container">
+        <div class="cta-box" data-reveal>
+          <div class="cta-bg" aria-hidden="true"></div>
+          <span class="cta-logo" aria-hidden="true"><Logo /></span>
+          <h2 id="start-title">{t.cta.title}</h2>
+          <p>{t.cta.sub}</p>
+          <div class="hero-ctas">
+            <a class="btn btn-primary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{t.cta.primary}<Icon name="arrow" /></a>
+            <a class="btn btn-secondary btn-lg" href="#pricing">{t.cta.secondary}</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <Footer t={t} home={home} />
+  <script>
+    import '../../scripts/main'
+    import '../../scripts/b'
+  </script>
+</Base>

@@ -1,0 +1,147 @@
+---
+// Variant B hero visual: a neutral AI chat window (no vendor branding) next to the company folders that person's AI can
+// see. Every conversation is in the HTML, stacked in one grid cell so the window never changes height; src/scripts/b.ts
+// types the question, then reveals the answer step by step ([data-s]) and rotates through the examples. Without JS, or
+// with reduced motion, the first conversation is shown complete and the tabs still switch. Screen readers get the
+// sr-only transcript; the visual parts are aria-hidden.
+import type { CopyB } from '../../content/en-b'
+import Icon from '../Icon.astro'
+interface Props { t: CopyB }
+const { t } = Astro.props
+const c = t.chat
+const ext = (f: string) => (f.split('.').pop() ?? '').toUpperCase()
+const order = ['finance', 'sales', 'contracts', 'hr', 'payroll']
+---
+<div class="cd" data-chat>
+  <div class="cd-main">
+    <figure class="cd-win" aria-labelledby="cd-label">
+      <figcaption id="cd-label" class="sr-only">{c.label}</figcaption>
+      <div class="cd-bar" aria-hidden="true">
+        <span class="cd-dots"><span></span><span></span><span></span></span>
+        <span class="cd-app"><span class="cd-app-mark"><Icon name="sparkle" /></span>{c.app}</span>
+        <span class="cd-conn"><span class="cd-conn-dot"></span>{c.connected}</span>
+        <span class="cd-users">
+          {c.turns.map((turn, i) => (
+            <span class="cd-user" data-i={i} data-active={String(i === 0)}>
+              <span class="cd-avatar-sm">{turn.who.slice(0, 1)}</span>{turn.who}<small>{turn.team}</small>
+            </span>
+          ))}
+        </span>
+      </div>
+      <div class="cd-stack" aria-hidden="true">
+        {c.turns.map((turn, i) => {
+          let s = 3
+          return (
+          <div class="cd-convo" data-i={i} data-active={String(i === 0)}>
+            <div class="cd-q" data-s="1"><p>{turn.q}</p></div>
+            <div class="cd-a">
+              <span class="cd-bot" data-s="2"><Icon name="sparkle" /></span>
+              <div class="cd-a-body">
+                <p class="cd-status" data-s="2"><Icon name="search" /><span>{turn.status}</span></p>
+                <p class="cd-lead" data-s="3" data-stream>{turn.lead}</p>
+                {turn.table && (
+                  <table class="cd-table" data-s={String(++s)}>
+                    <thead><tr>{turn.table.cols.map((h) => <th>{h}</th>)}</tr></thead>
+                    <tbody>{turn.table.rows.map((r) => <tr>{r.map((cell, j) => j === 0 ? <th>{cell}</th> : <td class={j === r.length - 1 ? 'cd-up' : ''}>{cell}</td>)}</tr>)}</tbody>
+                  </table>
+                )}
+                {turn.list && (
+                  <ul class="cd-list">
+                    {turn.list.map((li) => (
+                      <li data-s={String(++s)}><b>{li.title}</b><span>{li.detail}</span><code>{li.ref}</code></li>
+                    ))}
+                  </ul>
+                )}
+                {turn.outline && (
+                  <ol class="cd-outline">
+                    {turn.outline.map((o) => <li data-s={String(++s)}>{o}</li>)}
+                  </ol>
+                )}
+                {turn.tail && <p class="cd-tail" data-s={String(++s)}>{turn.tail}</p>}
+                {turn.saved && (
+                  <div class="cd-saved" data-s={String(++s)}>
+                    <span class="cd-saved-icon"><Icon name="draft" /></span>
+                    <span class="cd-saved-text"><b>{turn.saved.label}: <code>{turn.saved.path}</code></b><small>{turn.saved.note}</small></span>
+                  </div>
+                )}
+                <div class="cd-sources" data-s={String(++s)}>
+                  <span class="cd-sources-label">{c.sourcesLabel}</span>
+                  {turn.sources.map((f) => (
+                    <span class="cd-chip"><span class={`cd-ext cd-ext-${ext(f).toLowerCase()}`}>{ext(f)}</span><span class="cd-chip-path"><span class="cd-chip-dir">{f.slice(0, f.lastIndexOf('/') + 1)}</span>{f.slice(f.lastIndexOf('/') + 1)}</span></span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+          )
+        })}
+      </div>
+      <div class="cd-input" aria-hidden="true">
+        <span class="cd-field"><span class="cd-typed" data-chat-input></span><span class="cd-ph" data-chat-ph>{c.placeholder}</span></span>
+        <span class="cd-send"><Icon name="arrow" /></span>
+      </div>
+      <div class="sr-only">
+        <p>{c.transcriptTitle}</p>
+        <ol>
+          {c.turns.map((turn) => (
+            <li>
+              <p>{turn.who} ({turn.team}): {turn.q}</p>
+              <p>{turn.lead}</p>
+              {turn.table && <p>{turn.table.rows.map((r) => r.filter(Boolean).join(' ')).join('; ')}</p>}
+              {turn.list && <p>{turn.list.map((l) => `${l.title}: ${l.detail}, ${l.ref}`).join('; ')}</p>}
+              {turn.outline && <p>{turn.outline.join('; ')}</p>}
+              {turn.tail && <p>{turn.tail}</p>}
+              {turn.saved && <p>{turn.saved.label}: {turn.saved.path}. {turn.saved.note}</p>}
+              <p>{c.sourcesLabel}: {turn.sources.join(', ')}</p>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </figure>
+    <div class="cd-tabs" role="group" aria-label={c.pick}>
+      {c.turns.map((turn, i) => (
+        <button type="button" class="cd-tab" data-chat-tab={i} aria-pressed={String(i === 0)}>
+          <span class="cd-tab-who">{turn.who} · {turn.team}</span>
+          <span class="cd-tab-name">{turn.tab}</span>
+          <span class="cd-tab-bar" aria-hidden="true"></span>
+        </button>
+      ))}
+    </div>
+  </div>
+
+  <aside class="cd-files" aria-hidden="true">
+    <div class="cd-files-head">
+      <span class="cd-files-icon"><Icon name="nas" /></span>
+      <span><b>{c.foldersTitle}</b><small>{c.foldersSub}</small></span>
+    </div>
+    <div class="cd-files-stack">
+      {c.turns.map((turn, i) => (
+        <ul class="cd-folders" data-i={i} data-active={String(i === 0)}>
+          {order.map((key) => {
+            const f = c.folders[key]!
+            const noAi = key === 'payroll'
+            const sees = turn.sees.includes(key)
+            const reads = turn.reads.filter(([k]) => k === key)
+            return (
+              <li class="cd-folder" data-state={noAi ? 'noai' : sees ? 'on' : 'off'} data-reading={String(reads.length > 0)}>
+                <span class="cd-folder-row">
+                  <Icon name={noAi || !sees ? 'eyeoff' : 'folder'} />
+                  <span class="cd-folder-name">{f.name}</span>
+                  <span class="cd-folder-tag">{noAi ? c.noAi : sees ? f.access : c.hidden}</span>
+                </span>
+                {reads.length > 0 && (
+                  <span class="cd-reads">
+                    {reads.map(([, file]) => (
+                      <span class="cd-read" data-s="2"><span class={`cd-ext cd-ext-${ext(file).toLowerCase()}`}>{ext(file)}</span><span class="cd-read-name">{file.split('/').pop()}</span><span class="cd-read-dot"></span></span>
+                    ))}
+                  </span>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      ))}
+    </div>
+    <p class="cd-files-foot"><Icon name="lock" />{c.filesFoot}</p>
+  </aside>
+</div>
