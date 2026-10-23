@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } fro
 import { createPortal } from 'react-dom'
 import { api, ApiError, get } from '../api'
 import { fmtDate } from '../i18n'
-import { Badge } from '../ui'
+import { Badge, Skeleton } from '../ui'
 import { FileGlyph } from '../drive/FileGlyph'
 import { ft } from './files-i18n'
 import { uploads, type UploadItem } from './files-upload'
@@ -72,7 +72,9 @@ export function UploadPanel() {
 }
 
 // ---------- context menu ----------
-export interface MenuAction { label: string; icon?: ReactNode; onClick: () => void; danger?: boolean; hidden?: boolean; kbd?: string }
+export interface MenuAction { label: string; icon?: ReactNode; onClick: () => void; danger?: boolean; hidden?: boolean; kbd?: string
+  /** shown but not usable (focusable, with the reason as its title) */
+  disabled?: boolean; title?: string }
 export function Menu({ x, y, actions, onClose }: { x: number; y: number; actions: MenuAction[]; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ x, y })
@@ -102,7 +104,8 @@ export function Menu({ x, y, actions, onClose }: { x: number; y: number; actions
   return createPortal(
     <div className="fv-menu" role="menu" ref={ref} style={{ left: pos.x, top: pos.y }}>
       {actions.filter((a) => !a.hidden).map((a) => (
-        <button key={a.label} type="button" role="menuitem" className={a.danger ? 'danger' : ''} onClick={() => { onClose(); a.onClick() }}>
+        <button key={a.label} type="button" role="menuitem" className={`${a.danger ? 'danger' : ''} ${a.disabled ? 'off' : ''}`} aria-disabled={a.disabled || undefined} title={a.title}
+          onClick={() => { if (a.disabled) return; onClose(); a.onClick() }}>
           <span className="fv-menu-icon" aria-hidden="true">{a.icon}</span><span>{a.label}</span>{a.kbd && <kbd>{a.kbd}</kbd>}
         </button>
       ))}
@@ -227,19 +230,19 @@ export function FolderPicker({ title, action, start, exclude, onPick, onClose }:
 interface Version { version: number; size: number; at: number; by: string | null; current: boolean }
 /** `onChanged(note)`: the file changed; the page reloads it (and may remount this panel, so it shows the note). */
 export function Versions({ path, name, onChanged }: { path: string; name: string; onChanged: (note?: string) => void }) {
-  const [v, setV] = useState<{ versions: Version[]; writable: boolean; kept: number } | null>(null)
+  const [v, setV] = useState<{ versions: Version[]; writable: boolean; kept: number; history?: 'all' | 'editors_only' } | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [n, setN] = useState(0)
   const input = useRef<HTMLInputElement>(null)
   useEffect(() => {
     let live = true
-    get<{ versions: Version[]; writable: boolean; kept: number }>('/files/versions?path=' + enc(path)).then((r) => live && setV(r), (e) => live && setMsg(errMsg(e)))
+    get<{ versions: Version[]; writable: boolean; kept: number; history?: 'all' | 'editors_only' }>('/files/versions?path=' + enc(path)).then((r) => live && setV(r), (e) => live && setMsg(errMsg(e)))
     return () => { live = false }
   }, [path, n])
   return (
     <section className="fv-versions">
       <h3>{ft('versions')}</h3>
-      {!v ? <p className="muted small">{msg ?? '…'}</p> : <>
+      {!v ? (msg ? <p className="muted small">{msg}</p> : <Skeleton rows={2} />) : <>
         <ul>
           {v.versions.map((x) => (
             <li key={x.version}>
@@ -254,7 +257,8 @@ export function Versions({ path, name, onChanged }: { path: string; name: string
             </li>
           ))}
         </ul>
-        <p className="muted small">{ft('versions_kept', { n: v.kept })}</p>
+        {/* a file-only Viewer sees the current version only (older ones may hold what was there before it was shared) */}
+        {v.history === 'editors_only' ? <p className="muted small fv-versions-only">{ft('versions_editors_only')}</p> : <p className="muted small">{ft('versions_kept', { n: v.kept })}</p>}
         {v.writable && <>
           <button type="button" className="btn small" onClick={() => input.current?.click()}>⤒ {ft('new_version')}</button>
           <input ref={input} type="file" hidden onChange={(e) => {
@@ -292,7 +296,7 @@ export function TrashView() {
       {d && <p className="muted small">{ft('trash_help', { days: d.days })}</p>}
       {err && <p className="error" role="alert">{err}</p>}
       {msg && <p className="ok small" role="status">{msg}</p>}
-      {!d ? <p className="muted">…</p> : d.items.length === 0 ? <div className="fv-state"><p>{ft('trash_empty')}</p></div> : (
+      {!d ? (err ? null : <Skeleton rows={4} />) : d.items.length === 0 ? <div className="fv-state"><p>{ft('trash_empty')}</p></div> : (
         <ul className="fv-items list fv-trash-list">
           {d.items.map((x) => (
             <li key={x.id}>

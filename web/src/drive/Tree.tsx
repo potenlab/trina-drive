@@ -17,7 +17,8 @@ const show = (s: string) => s.normalize('NFC')
 const parentOf = (p: string) => p.slice(0, p.lastIndexOf('/')) || '/'
 export const filesHref = (p: string) => '#/files' + (p && p !== '/' ? '?p=' + enc(p) : '')
 
-export function Tree({ current, onPick, onError }: { current: string | null; onPick: () => void; onError: (s: string) => void }) {
+/** `hide`: a top folder left out of the tree (the person's My files, which has its own entry above). */
+export function Tree({ current, hide = null, onPick, onError }: { current: string | null; hide?: string | null; onPick: () => void; onError: (s: string) => void }) {
   const [kids, setKids] = useState<Record<string, Entry[] | 'error'>>({})
   const [open, setOpen] = useState<Set<string>>(() => new Set(['/']))
   const [dropAt, setDropAt] = useState<string | null>(null)
@@ -73,7 +74,7 @@ export function Tree({ current, onPick, onError }: { current: string | null; onP
     if (!open.has(p)) return null
     if (k === undefined) return <li className="tr-loading" style={{ paddingLeft: `${depth * 14 + 30}px` }}>…</li>
     if (k === 'error') return null
-    return k.map((f) => (
+    return k.filter((f) => f.path !== hide).map((f) => (
       <li key={f.path}>
         <div className={`tr-row ${f.path === current ? 'here' : ''} ${dropAt === f.path ? 'drop-on' : ''}`} style={{ paddingLeft: `${depth * 14}px` }}
           onDragOver={over(f.path, !!f.writable)} onDragLeave={() => setDropAt((d) => d === f.path ? null : d)} onDrop={drop(f.path, !!f.writable)}>

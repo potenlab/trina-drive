@@ -6,6 +6,7 @@ import { get, setCsrf, whenSignedOut, type Me } from './api'
 import { ConnectAI } from './drive/ConnectAI'
 import { Mark } from './drive/Mark'
 import { MountPage } from './drive/MountPage'
+import { Recent } from './drive/Recent'
 import { resetShareBackend } from './drive/share-api'
 import { SharedWithMe } from './drive/SharedWithMe'
 import { Shell, type Section } from './drive/Shell'
@@ -104,16 +105,22 @@ function LangSwitch() {
   )
 }
 
-/** Which page a route shows, and the sidebar entry it lights up. Old addresses (#/tokens, #/admin/…) still work. */
-export function routeOf(route: string, admin: boolean): { section: Section; filesPath: string | null } {
+/**
+ * Which page a route shows, and the sidebar entry it lights up. Old addresses (#/tokens, #/admin/…) still work.
+ * `myFiles`: the person's My files path (#/my opens it; a files path inside it lights "My files", not Team folders).
+ */
+export function routeOf(route: string, admin: boolean, myFiles: string | null = null): { section: Section; filesPath: string | null } {
   const bare = route.split('?')[0]!
+  if (bare === '/my') return myFiles ? { section: 'my', filesPath: myFiles } : { section: 'files', filesPath: '/' }
   if (bare === '/files' || bare === '/') {
     const p = new URLSearchParams(route.includes('?') ? route.slice(route.indexOf('?') + 1) : '')
-    const path = (p.get('p') || '/').normalize('NFC')
-    return { section: 'files', filesPath: p.get('q') ? null : path.startsWith('/') ? path : '/' + path }
+    const raw = (p.get('p') || '/').normalize('NFC')
+    const path = raw.startsWith('/') ? raw : '/' + raw
+    const mine = !!myFiles && (path === myFiles || path.startsWith(myFiles + '/'))
+    return { section: mine ? 'my' : 'files', filesPath: p.get('q') ? null : path }
   }
   const map: [RegExp, Section][] = [
-    [/^\/trash$/, 'trash'], [/^\/shared$/, 'shared'], [/^\/drafts$/, 'drafts'], [/^\/approvals(\/\d+)?$/, 'approvals'],
+    [/^\/trash$/, 'trash'], [/^\/shared$/, 'shared'], [/^\/recent$/, 'recent'], [/^\/drafts$/, 'drafts'], [/^\/approvals(\/\d+)?$/, 'approvals'],
     [/^\/skills(\/v\/\d+)?$/, 'skills'], [/^\/(connect|tokens)$/, 'connect'], [/^\/mount$/, 'mount'], [/^\/(admin\/)?people$/, 'people'],
     [/^\/(admin\/)?folders(\/\d+)?$/, 'folders'], [/^\/(admin\/)?audit$/, 'audit'], [/^\/settings$/, 'settings'],
   ]
@@ -124,14 +131,18 @@ export function routeOf(route: string, admin: boolean): { section: Section; file
 
 function DriveShell({ route }: { route: string }) {
   const { me } = useSession()
-  const { section, filesPath } = routeOf(route, !!me?.admin)
+  const my = me?.myFilesPath ?? null
+  const { section, filesPath } = routeOf(route, !!me?.admin, my)
   const bare = route.split('?')[0]!
   const folder = /^\/(?:admin\/)?folders\/(\d+)$/.exec(bare)
   const approval = /^\/approvals(?:\/(\d+))?$/.exec(bare)
   let page: React.ReactNode
   switch (section) {
     case 'files': case 'trash': page = <Files route={section === 'files' && !route.startsWith('/files') ? '/files' : route} />; break
+    // #/my is My files' own folder; deeper inside it the address is #/files?p=… like any folder
+    case 'my': page = <Files route={route.startsWith('/files') ? route : '/files?p=' + encodeURIComponent(my!)} />; break
     case 'shared': page = <SharedWithMe />; break
+    case 'recent': page = <Recent />; break
     case 'drafts': page = <Drafts />; break
     case 'approvals': page = <Approvals id={approval?.[1] ? Number(approval[1]) : undefined} />; break
     case 'skills': page = <Skills route={bare} />; break
@@ -143,5 +154,5 @@ function DriveShell({ route }: { route: string }) {
     case 'settings': page = <Settings />; break
     default: page = <Files route="/files" />
   }
-  return <Shell section={section} filesPath={filesPath}><div className={section === 'files' || section === 'trash' ? 'content wide' : 'content'}>{page}</div></Shell>
+  return <Shell section={section} filesPath={filesPath}><div className={section === 'files' || section === 'trash' || section === 'my' ? 'content wide' : 'content'}>{page}</div></Shell>
 }

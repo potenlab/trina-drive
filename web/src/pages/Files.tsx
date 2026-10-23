@@ -9,9 +9,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { createPortal } from 'react-dom'
 import { NAME } from '../../../src/brand'
 import { api, ApiError, get } from '../api'
-import { go } from '../App'
+import { go, useSession } from '../App'
 import { fmtDate, getLocale, useLocale } from '../i18n'
-import { Badge } from '../ui'
+import { Badge, Skeleton } from '../ui'
 import { ft } from './files-i18n'
 import { ConfirmDialog, errMsg, FolderPicker, Menu, NameDialog, Toast, TrashView, UploadPanel, Versions, type MenuAction, type ToastMsg } from './files-ops'
 import { droppedFiles, pickedFiles, uploadInto, uploads } from './files-upload'
@@ -21,6 +21,7 @@ import { Icon as LineIcon } from '../drive/Icon'
 import { FileGlyph } from '../drive/FileGlyph'
 import { DRAG_TYPE as TREE_DRAG_TYPE } from '../drive/Tree'
 import { ShareDialog } from '../drive/ShareDialog'
+import { inMyFiles, shownPath } from '../drive/share-api'
 import { filesChanged, handleNew, setHere, treeStale } from '../drive/store'
 import { t } from '../i18n'
 import './files.css'
@@ -78,7 +79,7 @@ const ICONS: [string[], string, string][] = [
   [['mp3', 'wav', 'm4a', 'flac', 'aac', 'ogg'], '🎵', 'audio'], [['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'], '🎬', 'video'],
   [['js', 'ts', 'py', 'sh', 'sql', 'css', 'html', 'htm'], '🧾', 'code'],
 ]
-function iconOf(it: { kind: string; ext?: string | null; name: string }): { icon: string; type: string } {
+export function iconOf(it: { kind: string; ext?: string | null; name: string }): { icon: string; type: string } {
   if (it.kind === 'folder') return { icon: '📁', type: 'folder' }
   const ext = (it.ext ?? /\.([^.]+)$/.exec(it.name)?.[1] ?? '').toLowerCase()
   for (const [exts, icon, type] of ICONS) if (exts.includes(ext)) return { icon, type }
@@ -129,7 +130,11 @@ type DialogState =
 
 export function Files({ route }: { route: string }) {
   useLocale()
+  const { me } = useSession()
   const { path, q, sel: selParam, trash } = parseRoute(route)
+  // My files (Trina Cloud, docs/MY-FILES.md): a top folder shown as "My files", never shared, left out of Team folders
+  const my = me?.myFilesPath ?? null
+  const personal = inMyFiles(path, my)
   const [listing, setListing] = useState<Listing | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState<SearchResult | null>(null)
@@ -142,7 +147,7 @@ export function Files({ route }: { route: string }) {
   const [view, setView] = useStored<'list' | 'grid'>(`${NAME}.files.view`, 'list', ['list', 'grid'])
   const [sortKey, setSortKey] = useStored<SortKey>(`${NAME}.files.sort`, 'name', ['name', 'date', 'size'])
   const [order, setOrder] = useStored<'asc' | 'desc'>(`${NAME}.files.order`, 'asc', ['asc', 'desc'])
-  const [sharing, setSharing] = useState<{ path: string; name: string } | null>(null)
+  const [sharing, setSharing] = useState<{ path: string; name: string; kind: 'folder' | 'file' } | null>(null)
   const [reloadN, setReloadN] = useState(0)
   const [drafts, setDrafts] = useState<number | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: FileItem[] } | null>(null)
@@ -151,6 +156,7 @@ export function Files({ route }: { route: string }) {
   const [toast, setToast] = useState<ToastMsg | null>(null)
   const [dropAt, setDropAt] = useState<string | null>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const listedPath = useRef<string | null>(null)
   const filesInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
   const reload = useCallback(() => { setReloadN((n) => n + 1); treeStale.send(path) }, [path])
@@ -177,19 +183,19 @@ export function Files({ route }: { route: string }) {
     setError(null); setMenu(null)
     get<Listing>('/files?path=' + enc(path)).then((l) => {
       if (!live) return
-      setListing((old) => {
-        // same folder again (after a change): keep what is still there selected
-        if (old?.path === l.path) setSel((s) => new Set([...s].filter((p) => l.entries.some((x) => x.path === p))))
-        else { setSel(new Set()); setCursor(0) }
-        return l
-      })
+      // same folder again (after a change): keep what is still there selected (decided here, not inside a state
+      // updater: an updater may run after the `s=` pick below and undo it)
+      if (listedPath.current === l.path) setSel((s) => new Set([...s].filter((p) => l.entries.some((x) => x.path === p))))
+      else { setSel(new Set()); setCursor(0) }
+      listedPath.current = l.path
+      setListing(l)
       if (l.drafts != null) setDrafts(l.drafts)
       const s = selParam ? l.entries.find((x) => x.path === selParam) : null
       if (s) { setSel(new Set([s.path])); setDetailOpen(true) }
     }, (e) => { if (live) { setListing(null); setError(errorText(e)) } })
     return () => { live = false }
   }, [path, q, reloadN, selParam, trash])
-  useEffect(() => { setListing(null); setSel(new Set()); setCursor(0) }, [path])
+  useEffect(() => { setListing(null); setSel(new Set()); setCursor(0); listedPath.current = null }, [path])
 
   // search
   useEffect(() => {
@@ -200,7 +206,7 @@ export function Files({ route }: { route: string }) {
     return () => { live = false }
   }, [path, q, reloadN])
 
-  const items = useMemo(() => listing ? sorted(listing.entries, sortKey, order === 'desc') : [], [listing, sortKey, order])
+  const items = useMemo(() => listing ? sorted(listing.entries.filter((x) => x.path !== my), sortKey, order === 'desc') : [], [listing, sortKey, order, my])
   const hits = search?.results ?? []
   const writable = !!listing?.writable && !q && !trash
   const chosen = items.filter((x) => sel.has(x.path))
@@ -259,7 +265,7 @@ export function Files({ route }: { route: string }) {
     try { report(await api('POST', '/files/move', { paths, to }), (n) => ft('moved_n', { n })) } catch (e) { setToast({ text: errMsg(e), error: true }) }
     reload()
   }
-  const share = (p: string) => setSharing({ path: p, name: p === '/' ? ft('home') : show(baseName(p)) })
+  const share = (p: string, kind: 'folder' | 'file' = 'folder') => setSharing({ path: p, kind, name: p === '/' ? ft('home') : p === my ? t('my_title') : show(baseName(p)) })
   const actionsFor = (list: FileItem[]): MenuAction[] => {
     const one = list.length === 1 ? list[0]! : null
     return [
@@ -269,7 +275,9 @@ export function Files({ route }: { route: string }) {
       { label: ft('move_to'), icon: <LineIcon name="move" size={18} />, onClick: () => setDialog({ kind: 'move', items: list }), hidden: !writable },
       { label: ft('copy_to'), icon: <LineIcon name="copy" size={18} />, onClick: () => setDialog({ kind: 'copy', items: list }), hidden: list.some((x) => x.kind !== 'file') || !listing?.managed },
       { label: ft('versions'), icon: <LineIcon name="recent" size={18} />, onClick: () => { setSel(new Set([one!.path])); setDetailOpen(true) }, hidden: !one || one.kind !== 'file' || !listing?.managed },
-      { label: t('share_action'), icon: <LineIcon name="shared" size={18} />, onClick: () => one && share(one.path), hidden: !one || one.kind !== 'folder' || !listing?.managed },
+      // files and folders (A2); My files never: shown, but says why
+      { label: t('share_action'), icon: <LineIcon name="shared" size={18} />, onClick: () => one && share(one.path, one.kind), hidden: !one || !listing?.managed,
+        disabled: personal, title: personal ? t('my_share_disabled') : undefined },
       { label: ft('who_title'), icon: <LineIcon name="info" size={18} />, onClick: () => { setSel(new Set([one!.path])); setDetailOpen(true) }, hidden: !one },
       { label: ft('delete'), icon: <LineIcon name="trash" size={18} />, kbd: 'Del', danger: true, onClick: () => doDelete(list), hidden: !writable },
     ]
@@ -346,8 +354,10 @@ export function Files({ route }: { route: string }) {
     e.dataTransfer.effectAllowed = 'move'
   }
 
-  const crumbs = path === '/' ? [] : path.slice(1).split('/')
-  const where = path === '/' ? ft('home') : show(path)
+  // inside My files the way starts at "My files", not at its folder name
+  const crumbBase = personal ? my! : '/'
+  const crumbs = path === crumbBase ? [] : path.slice(crumbBase === '/' ? 1 : crumbBase.length + 1).split('/')
+  const where = path === '/' ? ft('home') : personal && path === my ? t('my_title') : show(path)
   const newMenuActions: MenuAction[] = [
     { label: ft('new_folder'), icon: <LineIcon name="folderPlus" size={18} />, onClick: () => setDialog({ kind: 'newfolder' }) },
     { label: ft('upload_files'), icon: <LineIcon name="upload" size={18} />, onClick: () => filesInput.current?.click() },
@@ -367,14 +377,18 @@ export function Files({ route }: { route: string }) {
         <div className="fv-bar">
           {trash ? <nav className="fv-crumbs"><span className="here">{ft('trash')}</span></nav> : (
             <nav className="fv-crumbs" aria-label="breadcrumb">
-              <a href={'#' + filesRoute('/')} className={crumbs.length ? '' : 'here'}>{ft('home')}</a>
+              {personal ? <a href="#/my" className={crumbs.length ? '' : 'here'} aria-current={crumbs.length ? undefined : 'page'}>{t('my_title')}</a>
+                : <a href={'#' + filesRoute('/')} className={crumbs.length ? '' : 'here'}>{ft('home')}</a>}
               {crumbs.map((c, i) => {
-                const to = '/' + crumbs.slice(0, i + 1).join('/')
+                const to = (crumbBase === '/' ? '' : crumbBase) + '/' + crumbs.slice(0, i + 1).join('/')
                 return <span key={to}><span className="sep" aria-hidden="true">›</span>{i === crumbs.length - 1 ? <span className="here" aria-current="page">{show(c)}</span> : <a href={'#' + filesRoute(to)}>{show(c)}</a>}</span>
               })}
             </nav>
           )}
-          {!trash && !q && path !== '/' && listing?.managed && <button type="button" className="btn small fv-share" onClick={() => share(path)}><LineIcon name="shared" size={16} />{t('share_action')}</button>}
+          {!trash && !q && path !== '/' && listing?.managed && (personal
+            ? <button type="button" className="btn small fv-share" aria-disabled="true" title={t('my_share_disabled')} aria-describedby="fv-share-why" onClick={() => setToast({ text: t('my_share_disabled') })}>
+              <LineIcon name="lock" size={16} />{t('share_action')}<span id="fv-share-why" className="sr">{t('my_share_disabled')}</span></button>
+            : <button type="button" className="btn small fv-share" onClick={() => share(path)}><LineIcon name="shared" size={16} />{t('share_action')}</button>)}
           <input ref={filesInput} type="file" multiple hidden onChange={async (e) => { const f = e.target.files; if (f?.length) { try { await uploadInto(path, pickedFiles(f)) } catch (x) { setToast({ text: errMsg(x), error: true }) } } e.target.value = '' }} />
           <input ref={folderInput} type="file" multiple hidden {...{ webkitdirectory: '', directory: '' }} onChange={async (e) => { const f = e.target.files; if (f?.length) { try { await uploadInto(path, pickedFiles(f)); reload() } catch (x) { setToast({ text: errMsg(x), error: true }) } } e.target.value = '' }} />
         </div>
@@ -409,7 +423,7 @@ export function Files({ route }: { route: string }) {
         {error && <div className="fv-state" role="alert"><p>{error}</p><button type="button" className="btn small" onClick={reload}>{ft('retry')}</button>{path !== '/' && <a className="btn small" href={'#' + filesRoute('/')}>{ft('home')}</a>}</div>}
 
         {q ? (
-          searching ? <p className="muted">{ft('search')}…</p> : search && <>
+          searching ? <Skeleton rows={4} /> : search && <>
             <p className="fv-results-head">{ft('results_for', { q, folder: where })} {path !== '/' && <a href={'#' + filesRoute('/', { q })}>{ft('search_everywhere')}</a>}</p>
             {search.partial && <p className="warn small">{ft('results_partial')}</p>}
             {hits.length === 0 ? <div className="fv-state"><p>{ft('results_none')}</p></div> : (
@@ -421,7 +435,7 @@ export function Files({ route }: { route: string }) {
                     <Icon it={{ kind: h.kind, name: h.name }} />
                     <div className="fv-hit-main">
                       <div className="fv-name"><Marked text={show(h.name)} q={h.name_match ? q : ''} />{h.name_match && <Badge>{ft('name_match')}</Badge>}</div>
-                      <div className="muted small fv-path">{ft('in_folder', { folder: show(parentOf(h.path)) })}{h.mtime != null && <> · {fmtDate(h.mtime)}</>}{h.size != null && <> · {fmtSize(h.size)}</>}</div>
+                      <div className="muted small fv-path">{ft('in_folder', { folder: show(shownPath(parentOf(h.path), my, t('my_title'))) })}{h.mtime != null && <> · {fmtDate(h.mtime)}</>}{h.size != null && <> · {fmtSize(h.size)}</>}</div>
                       {h.snippets.map((s) => <div key={s.line} className="fv-snippet"><span className="muted">{ft('line_n', { n: s.line })}</span> <Marked text={s.text} q={q} /></div>)}
                     </div>
                   </li>
@@ -430,17 +444,18 @@ export function Files({ route }: { route: string }) {
             )}
             {search.more && <p className="muted small">{ft('results_more', { n: hits.length })}</p>}
           </>
-        ) : !listing && !error ? <p className="muted">…</p> : listing && <>
+        ) : !listing && !error ? <Skeleton rows={7} grid={view === 'grid'} /> : listing && <>
           {path === '/' && (
             <a className="fv-drafts" href="#/drafts" title={ft('my_drafts_help')}>
               <span className="fv-icon" aria-hidden="true"><LineIcon name="drafts" /></span>
               <span><span className="fv-name">{drafts ? ft('my_drafts_n', { n: drafts }) : ft('my_drafts')}</span><span className="muted small"> · {ft('my_drafts_help')}</span></span>
             </a>
           )}
+          {personal && path === my && <p className="muted small fv-note fv-my-note"><LineIcon name="lock" size={14} /> {t('my_help')}</p>}
           {listing.readable === false && <p className="muted small fv-note">{ft('bare_folder')}</p>}
           {path !== '/' && listing.readable !== false && !listing.writable && <p className="muted small fv-note">{listing.managed ? ft('read_only_here') : null}</p>}
           {dropAt === path && <div className="fv-drop-hint" aria-hidden="true">{ft('drop_here', { folder: where })}</div>}
-          {items.length === 0 ? <div className={`fv-state ${writable ? 'fv-dropzone' : ''}`}><p>{path === '/' ? ft('empty_root') : writable ? ft('empty_writable') : ft('empty_folder')}</p></div> : <>
+          {items.length === 0 ? <div className={`fv-state ${writable ? 'fv-dropzone' : ''}`}><LineIcon name={path === '/' ? 'drive' : 'folder'} size={36} /><p>{path === '/' ? ft('empty_root') : personal && path === my ? t('my_empty') : writable ? ft('empty_writable') : ft('empty_folder')}</p></div> : <>
             {view === 'list' && <div className="fv-cols muted small" aria-hidden="true"><span>{ft('col_name')}</span><span>{ft('col_modified')}</span><span>{ft('col_size')}</span></div>}
             <ul className={`fv-items ${view}`} role="listbox" aria-multiselectable="true" tabIndex={0} aria-label={where} onKeyDown={onKey} ref={listRef}
               aria-activedescendant={items[cursor] ? `fv-item-${cursor}` : undefined}>
@@ -460,8 +475,12 @@ export function Files({ route }: { route: string }) {
                     </span>
                     <span className="fv-date muted small">{it.mtime != null ? fmtDate(it.mtime) : '—'}</span>
                     <span className="fv-size muted small">{it.kind === 'folder' ? '—' : fmtSize(it.size)}</span>
-                    <button type="button" className="fv-more" aria-label={`${ft('more')}: ${show(it.name)}`} tabIndex={-1}
-                      onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openMenu(r.right - 8, r.bottom, it, i) }}>⋮</button>
+                    <span className="fv-row-acts">
+                      {listing.managed && !personal && <button type="button" className="fv-row-share" aria-label={`${t('share_action')}: ${show(it.name)}`} title={t('share_action')} tabIndex={-1}
+                        onClick={(e) => { e.stopPropagation(); share(it.path, it.kind) }}><LineIcon name="shared" size={16} /></button>}
+                      <button type="button" className="fv-more" aria-label={`${ft('more')}: ${show(it.name)}`} tabIndex={-1}
+                        onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openMenu(r.right - 8, r.bottom, it, i) }}>⋮</button>
+                    </span>
                   </li>
                 )
               })}
@@ -472,7 +491,7 @@ export function Files({ route }: { route: string }) {
         </>}
       </section>
 
-      {selected && !trash && <Detail key={selected.path + reloadN} item={selected} managed={!!listing?.managed} writable={writable} onShare={share} onChanged={(note) => { if (note) setToast({ text: note }); reload() }}
+      {selected && !trash && <Detail key={selected.path + reloadN} item={selected} managed={!!listing?.managed} personal={personal} myFiles={my} writable={writable} onShare={share} onChanged={(note) => { if (note) setToast({ text: note }); reload() }}
         onAction={(a) => a === 'rename' ? setDialog({ kind: 'rename', item: selected }) : a === 'move' ? setDialog({ kind: 'move', items: [selected] }) : doDelete([selected])}
         onClose={() => { setDetailOpen(false); listRef.current?.focus() }} />}
 
@@ -491,7 +510,7 @@ export function Files({ route }: { route: string }) {
           reload()
         }} />}
       {dialog?.kind === 'delete' && <ConfirmDialog title={ft('delete')} text={ft('confirm_delete', { n: dialog.items.length })} action={ft('delete')} danger onClose={() => setDialog(null)} onConfirm={() => doDelete(dialog.items)} />}
-      {sharing && <ShareDialog path={sharing.path} name={sharing.name} onClose={() => { setSharing(null); reload() }} />}
+      {sharing && <ShareDialog path={sharing.path} name={sharing.name} kind={sharing.kind} onClose={() => { setSharing(null); reload() }} />}
       {toast && <Toast msg={toast} onClose={() => setToast(null)} />}
       <UploadPanel />
       <GdrivePanel />
@@ -500,8 +519,8 @@ export function Files({ route }: { route: string }) {
 }
 
 // ---------- detail panel ----------
-function Detail({ item, onClose, managed, writable, onShare, onChanged, onAction }: {
-  item: FileItem; onClose: () => void; managed: boolean; writable: boolean; onShare: (path: string) => void; onChanged: (note?: string) => void
+function Detail({ item, onClose, managed, personal, myFiles, writable, onShare, onChanged, onAction }: {
+  item: FileItem; onClose: () => void; managed: boolean; personal: boolean; myFiles: string | null; writable: boolean; onShare: (path: string, kind: 'folder' | 'file') => void; onChanged: (note?: string) => void
   onAction: (a: 'rename' | 'move' | 'delete') => void
 }) {
   const [who, setWho] = useState<Who | null>(null)
@@ -526,6 +545,7 @@ function Detail({ item, onClose, managed, writable, onShare, onChanged, onAction
             {item.has_text && <button type="button" className="btn" onClick={() => setTextOpen(true)}>{ft('view_text')}</button>}
           </>
           : <a className="btn primary" href={'#' + filesRoute(item.path)}>{ft('open')}</a>}
+        {managed && !personal && <button type="button" className="btn fv-detail-share" onClick={() => onShare(item.path, item.kind)}><LineIcon name="shared" size={16} />{t('share_action')}</button>}
         {writable && <>
           <button type="button" className="btn small" onClick={() => onAction('rename')}>{ft('rename')}</button>
           <button type="button" className="btn small" onClick={() => onAction('move')}>{ft('move_to')}</button>
@@ -536,13 +556,13 @@ function Detail({ item, onClose, managed, writable, onShare, onChanged, onAction
         <dt>{ft('kind')}</dt><dd>{item.kind === 'folder' ? ft('folder') : `${ft('file')}${item.ext ? ' · ' + item.ext.toUpperCase() : ''}`}</dd>
         {item.kind === 'file' && <><dt>{ft('size')}</dt><dd>{fmtSize(item.size)} <span className="muted small">({(item.size ?? 0).toLocaleString()} B)</span></dd></>}
         {item.mtime != null && <><dt>{ft('modified')}</dt><dd>{fmtDate(item.mtime)}</dd></>}
-        <dt>{ft('location')}</dt><dd className="mono small fv-path"><a href={'#' + filesRoute(parentOf(item.path))}>{show(parentOf(item.path))}</a></dd>
+        <dt>{ft('location')}</dt><dd className="mono small fv-path"><a href={'#' + filesRoute(parentOf(item.path))}>{show(shownPath(parentOf(item.path), myFiles, t('my_title')))}</a></dd>
         {item.kind === 'file' && <><dt>{ft('contains_text')}</dt><dd>{item.has_text ? <Badge kind="ok">{ft('contains_text')}</Badge> : <span className="muted">{ft('no_text')}</span>}</dd></>}
       </dl>
       <section className="fv-who">
         <h3>{ft('who_title')}</h3>
-        {whoErr ? <p className="muted small">{whoErr}</p> : !who ? <p className="muted small">…</p> : <WhoView who={who} />}
-        {who?.can_share && item.kind === 'folder' && <button type="button" className="btn small" onClick={() => onShare(item.path)}><LineIcon name="shared" size={16} />{t('share_action')}</button>}
+        {whoErr ? <p className="muted small">{whoErr}</p> : !who ? <Skeleton rows={2} /> : <WhoView who={who} />}
+        {managed && personal && <p className="muted small fv-my-note"><LineIcon name="lock" size={14} /> {t('my_share_disabled')}</p>}
       </section>
       {managed && item.kind === 'file' && <Versions path={item.path} name={item.name} onChanged={onChanged} />}
       {textOpen && <TextViewer item={item} onClose={() => setTextOpen(false)} />}
@@ -601,7 +621,7 @@ function TextViewer({ item, onClose }: { item: FileItem; onClose: () => void }) 
         </header>
         {res?.extracted && <p className="muted small">{ft('text_extracted')}</p>}
         {res?.truncated && <p className="warn small">{ft('text_truncated')}</p>}
-        {err ? <p className="error">{err}</p> : !res ? <p className="muted">…</p> : <pre className="fv-text" tabIndex={0}>{res.text || ft('text_empty')}</pre>}
+        {err ? <p className="error">{err}</p> : !res ? <Skeleton rows={5} /> : <pre className="fv-text" tabIndex={0}>{res.text || ft('text_empty')}</pre>}
       </div>
     </div>,
     document.body,
