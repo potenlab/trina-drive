@@ -196,7 +196,8 @@ Decision: **bundle, do not depend on Homebrew at run time.** Homebrew's prefix i
 Homebrew, so a program the server runs from there could be replaced without `sudo`; the bundled copies are root-owned
 and listed in `SHA256SUMS`/`tools.json`. Homebrew is only a fallback when a release lacks a tool (a development build,
 or `pdftotext` on Intel): the installer then uses `/opt/homebrew/bin/<tool>` and prints a warning. License texts of all
-bundled tools and libraries are in `tools/licenses/`.
+bundled tools and libraries are in `tools/licenses/`; Trina Drive's own `LICENSE` (Apache-2.0) and `NOTICE` are at the
+top of the release folder, and [THIRD-PARTY.md](THIRD-PARTY.md) lists every component.
 
 ## 10. Building a release
 

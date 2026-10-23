@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/potenlab/trina-drive/stargazers"><img src="https://img.shields.io/github/stars/potenlab/trina-drive?style=flat&logo=github&color=0a7a53" alt="GitHub stars"></a>
   <a href="https://github.com/potenlab/trina-drive/actions/workflows/ci.yml"><img src="https://github.com/potenlab/trina-drive/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="#license"><img src="https://img.shields.io/badge/license-TBD-lightgrey" alt="License: to be announced"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
   <a href="#quickstart"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Docker-555" alt="Platform: macOS | Docker"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-3ddc97" alt="PRs welcome"></a>
   <a href="https://github.com/potenlab/trina-drive/discussions"><img src="https://img.shields.io/badge/chat-Discussions-6E56CF?logo=github" alt="GitHub Discussions"></a>
@@ -252,14 +252,14 @@ Drive's control.
 <summary><b>Is it free? What's the license?</b></summary>
 
 Self-hosting is free, with every security feature. We charge for running it for you (from $99/month,
-[pricing](https://drive.trina.app/#pricing)). The license is to be announced; see [License](#license).
+[pricing](https://drive.trina.app/#pricing)). The whole project is open source under Apache-2.0; see [License](#license).
 </details>
 
 ## Contributing
 
 Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) (setup, tests, what a good PR
 looks like) and the [good first issues](https://github.com/potenlab/trina-drive/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
-The contributor agreement will be settled together with the license. Please follow the
+Contributions are accepted under Apache-2.0 with a DCO sign-off (`git commit -s`). Please follow the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Community
@@ -271,8 +271,10 @@ The contributor agreement will be settled together with the license. Please foll
 
 ## License
 
-License: to be announced (AGPL-3.0 planned for the server, Apache-2.0 for the CLI). Until it is published, all
-rights are reserved by Trina Inc.
+Apache-2.0 — see [LICENSE](LICENSE). This covers the whole repository: server, CLI, web app and website. Copyright
+2026 Trina Inc.; required notices are in [NOTICE](NOTICE), and third-party components and their licenses are listed in
+[docs/THIRD-PARTY.md](docs/THIRD-PARTY.md). "Trina" and "Trina Drive" are trademarks of Trina Inc. and are not
+licensed by Apache-2.0.
 
 ## Star history
 

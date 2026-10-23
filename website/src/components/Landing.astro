@@ -169,7 +169,7 @@ const jsonLd = {
           {t.faq.items.map((i) => (
             <details>
               <summary>{i.q}<Icon name="plus" /></summary>
-              <p class="answer">{i.a}</p>
+              <p class="answer">{i.a}{'link' in i && i.link && <> <a href={i.link.href} rel="noopener">{i.link.text}</a></>}</p>
             </details>
           ))}
         </div>

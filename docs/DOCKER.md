@@ -250,7 +250,8 @@ docker run --rm --entrypoint sh trina-drive:dev -c 'cd /app && sha256sum -c --qu
   arm64 image. syft does not recognise the static ripgrep binary (a Rust build without embedded dependency data);
   its origin and hashes are in `/usr/share/trina-drive/tools.json`.
 - **Labels:** `org.opencontainers.image.version`, `.revision` (git commit, `--build-arg REVISION=…`), `.created`,
-  `.source`, `.licenses` (`NOASSERTION` until the license is decided; AGPL-3.0 planned), `.base.name`.
+  `.source`, `.licenses` (`Apache-2.0`, Trina Drive's own license; bundled programs keep theirs, see
+  [THIRD-PARTY.md](THIRD-PARTY.md)), `.base.name`. `/app/LICENSE` and `/app/NOTICE` are in the image.
 - **Not yet:** a published image, image signatures (cosign) and provenance attestations; they come with the first
   public release (plan 7.1 "서명된 릴리스·이미지").
 

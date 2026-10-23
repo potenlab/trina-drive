@@ -8,9 +8,11 @@ and security come before features. This page covers setup, tests, and what we lo
 - **Security issues go to security@trina.app, not to public issues.** See [SECURITY.md](SECURITY.md).
 - Be kind; we follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 - For anything larger than a bug fix, open an issue first so we can agree on the approach.
-- **Contributor agreement: to be decided before the public release** (planned: a license-grant CLA for server code,
-  DCO sign-off for docs, translations and examples). Until then, by opening a pull request you agree that your
-  contribution may be released under the project's license once it is announced.
+- **License and sign-off.** Trina Drive is licensed under [Apache-2.0](LICENSE), and contributions are accepted under
+  the same license (Apache-2.0, section 5), with no separate agreement to sign. Sign off every commit with
+  `git commit -s`, which adds `Signed-off-by: Your Name <you@example.com>` and certifies the
+  [Developer Certificate of Origin](#developer-certificate-of-origin) below. Forgot? `git commit --amend -s` for
+  the last commit, or `git rebase --signoff main` for all of them.
 
 ## Setup
 
@@ -72,6 +74,48 @@ Fill in the pull request template; it asks about permissions and audit for a rea
 ## Code style
 
 TypeScript, strict, ES modules, no build step for the server (Bun runs the sources). Keep dependencies few and
-pinned (each one is reviewed for license and supply chain; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#dependencies-and-licenses)).
+pinned (each one is reviewed for license and supply chain; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#dependencies-and-licenses)
+and [docs/THIRD-PARTY.md](docs/THIRD-PARTY.md): nothing GPL/AGPL-licensed may become a runtime dependency).
 Comments explain why, not what. The web app is React + Vite with English and Korean strings in `web/src/i18n.ts` and
 the `*-i18n.ts` files: add both languages.
+
+## Developer Certificate of Origin
+
+By signing off a commit you certify the following ([developercertificate.org](https://developercertificate.org)):
+
+```
+Developer Certificate of Origin
+Version 1.1
+
+Copyright (C) 2004, 2006 The Linux Foundation and its contributors.
+
+Everyone is permitted to copy and distribute verbatim copies of this
+license document, but changing it is not allowed.
+
+
+Developer's Certificate of Origin 1.1
+
+By making a contribution to this project, I certify that:
+
+(a) The contribution was created in whole or in part by me and I
+    have the right to submit it under the open source license
+    indicated in the file; or
+
+(b) The contribution is based upon previous work that, to the best
+    of my knowledge, is covered under an appropriate open source
+    license and I have the right under that license to submit that
+    work with modifications, whether created in whole or in part
+    by me, under the same open source license (unless I am
+    permitted to submit under a different license), as indicated
+    in the file; or
+
+(c) The contribution was provided directly to me by some other
+    person who certified (a), (b) or (c) and I have not modified
+    it.
+
+(d) I understand and agree that this project and the contribution
+    are public and that a record of the contribution (including all
+    personal information I submit with it, including my sign-off) is
+    maintained indefinitely and may be redistributed consistent with
+    this project or the open source license(s) involved.
+```

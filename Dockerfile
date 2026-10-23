@@ -22,7 +22,7 @@ FROM ${BUN_IMAGE} AS bun
 # its outputs (JavaScript, the target's ripgrep download) do not depend on where it runs.
 FROM --platform=$BUILDPLATFORM ${BUN_IMAGE} AS build
 WORKDIR /src
-COPY package.json bun.lock bunfig.toml tsconfig.json ./
+COPY package.json bun.lock bunfig.toml tsconfig.json LICENSE NOTICE ./
 # lifecycle scripts never run (the optional native compressors of just-bash are not needed)
 RUN bun install --frozen-lockfile --ignore-scripts
 COPY web ./web
@@ -36,9 +36,9 @@ RUN bun scripts/docker/tools.ts "linux-$([ "$TARGETARCH" = amd64 ] && echo x64 |
 # /app as it ships, and SHA256SUMS of every file in it (scripts/build.ts writeChecksums, the release manifest format;
 # check with: docker run --rm --entrypoint sh <image> -c 'cd /app && sha256sum -c --quiet SHA256SUMS')
 RUN mkdir -p /app/web /app/docs \
- && cp -r src package.json bunfig.toml tsconfig.json /app/ \
+ && cp -r src package.json bunfig.toml tsconfig.json LICENSE NOTICE /app/ \
  && cp -r web/dist /app/web/dist \
- && cp docs/DOCKER.md docs/BACKUP-FORMAT.md docs/worker.md /app/docs/ \
+ && cp docs/DOCKER.md docs/BACKUP-FORMAT.md docs/worker.md docs/THIRD-PARTY.md /app/docs/ \
  && cp -r /prod/node_modules /app/node_modules \
  && bun -e "await (await import('/src/scripts/build.ts')).writeChecksums('/app')"
 
@@ -90,7 +90,7 @@ LABEL org.opencontainers.image.title="Trina Drive" \
       org.opencontainers.image.source="https://github.com/potenlab/trina-drive" \
       org.opencontainers.image.url="https://drive.trina.app" \
       org.opencontainers.image.vendor="Trina Inc." \
-      org.opencontainers.image.licenses="NOASSERTION" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.base.name="docker.io/library/debian:trixie-slim"
 
 # ---- test: the runtime image plus dev dependencies, the test suite and the tools some tests call (ps, shasum)

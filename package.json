@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Trina Drive: a self-hosted, permission-aware team file server for AI agents. Agents see only what each person may see, never touch originals, and every read is logged.",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "homepage": "https://drive.trina.app",
   "repository": { "type": "git", "url": "https://github.com/potenlab/trina-drive.git" },
   "scripts": {

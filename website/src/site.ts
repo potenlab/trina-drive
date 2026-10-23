@@ -4,7 +4,7 @@ export const SITE_URL = 'https://drive.trina.app'
 export const CONTACT_EMAIL = 'contact@trina.app'
 
 export const LINKS = {
-  // The repository is public (source on GitHub; the LICENSE file is not published yet — don't claim an OSI license).
+  // The repository is public and the whole of it is licensed under Apache-2.0 (LICENSE at the repo root).
   github: 'https://github.com/potenlab/trina-drive',
   docs: 'https://github.com/potenlab/trina-drive#readme',
   securityModel: 'https://github.com/potenlab/trina-drive/blob/main/docs/SECURITY-MODEL.md',

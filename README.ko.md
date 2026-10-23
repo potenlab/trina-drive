@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/potenlab/trina-drive/stargazers"><img src="https://img.shields.io/github/stars/potenlab/trina-drive?style=flat&logo=github&color=0a7a53" alt="GitHub stars"></a>
   <a href="https://github.com/potenlab/trina-drive/actions/workflows/ci.yml"><img src="https://github.com/potenlab/trina-drive/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="#라이선스"><img src="https://img.shields.io/badge/license-TBD-lightgrey" alt="라이선스: 발표 예정"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="라이선스: Apache-2.0"></a>
   <a href="#빠르게-시작하기"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Docker-555" alt="플랫폼: macOS | Docker"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-3ddc97" alt="PR 환영"></a>
   <a href="https://github.com/potenlab/trina-drive/discussions"><img src="https://img.shields.io/badge/chat-Discussions-6E56CF?logo=github" alt="GitHub Discussions"></a>
@@ -249,14 +249,15 @@ NAS를 직접 여는 경우는 Trina Drive가 막을 수 없어요.
 <summary><b>무료인가요? 라이선스는요?</b></summary>
 
 직접 설치하면 보안 기능까지 모두 무료예요. 대신 운영을 맡기면 비용을 받아요(월 $99부터,
-[요금](https://drive.trina.app/#pricing)). 라이선스는 아래를 봐 주세요.
+[요금](https://drive.trina.app/#pricing)). 프로젝트 전체가 Apache-2.0 오픈소스예요. [라이선스](#라이선스)를 봐 주세요.
 </details>
 
 ## 기여하기
 
 이슈와 PR 모두 환영해요. [CONTRIBUTING.md](CONTRIBUTING.md)(개발 환경, 테스트, 좋은 PR)와
 [good first issue](https://github.com/potenlab/trina-drive/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)부터
-보세요. 기여자 동의 방식은 라이선스와 함께 정해요. [행동 강령](CODE_OF_CONDUCT.md)을 지켜 주세요.
+보세요. 기여는 Apache-2.0으로 받고, 커밋에 DCO 서명(`git commit -s`)을 붙여 주세요. [행동 강령](CODE_OF_CONDUCT.md)을
+지켜 주세요.
 
 ## 커뮤니티
 
@@ -267,8 +268,10 @@ NAS를 직접 여는 경우는 Trina Drive가 막을 수 없어요.
 
 ## 라이선스
 
-라이선스는 발표 예정이에요(서버는 AGPL-3.0, CLI는 Apache-2.0 예정). 발표 전까지 모든 권리는 주식회사 트리나에
-있어요.
+Apache-2.0 — [LICENSE](LICENSE)를 봐 주세요. 서버, CLI, 웹 앱, 웹사이트까지 저장소 전체에 적용돼요. Copyright 2026
+Trina Inc. 필수 고지는 [NOTICE](NOTICE)에, 서드파티 구성 요소와 라이선스는
+[docs/THIRD-PARTY.md](docs/THIRD-PARTY.md)에 있어요. "Trina"와 "Trina Drive"는 주식회사 트리나의 상표이고 Apache-2.0으로
+허락되지 않아요.
 
 ## 스타 추이
 

@@ -88,8 +88,8 @@ is a quoted human service and never goes through Paddle.
 
 ## Other placeholders
 
-- **Links** in `src/site.ts`: GitHub / docs / security model point at `github.com/potenlab/trina-drive`, which is not
-  public yet (open-source release pending, license TBA). "Book a setup call" is a mailto until there is a booking link.
+- **Links** in `src/site.ts`: GitHub / docs / security model point at `github.com/potenlab/trina-drive` (public,
+  Apache-2.0). "Book a setup call" is a mailto until there is a booking link.
 
 ## Deploy (Vercel)
 

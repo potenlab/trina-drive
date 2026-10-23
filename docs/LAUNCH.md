@@ -22,8 +22,12 @@ Everything here is a **draft** for the public launch. Nothing has been posted.
 
 **Before (gate):**
 
-- [ ] License announced and `LICENSE` added (AGPL-3.0 server planned); README and badge updated
-- [ ] CLA/DCO decided; CONTRIBUTING updated; CLA bot installed if CLA
+- [x] License: Apache-2.0 for the whole repo; `LICENSE`, `NOTICE`, `docs/THIRD-PARTY.md` added; READMEs, badge and
+  website updated
+- [x] Contributions: DCO sign-off (`git commit -s`); CONTRIBUTING and PR template updated
+- [ ] DCO check enabled on the repo (the [DCO GitHub App](https://github.com/apps/dco)), required once CI is green
+- [ ] Release notes link the source of the bundled GPL `pdftotext` (poppler) and its libraries
+  ([THIRD-PARTY.md](THIRD-PARTY.md#poppler-pdftotext-gpl))
 - [ ] Security gate passed (plan 7.4); SECURITY.md address `security@trina.app` receives mail
 - [ ] `contact@trina.app` receives mail
 - [ ] CI green on `main` (Ubuntu + macOS); badge shows passing
@@ -101,7 +105,7 @@ what each person is allowed to**
 > - Hash-chained audit log, alerts for bulk reads and new clients, encrypted backups.
 > - Web UI for people (English/Korean): folders, rules, tokens, approvals, read-only file browser.
 >
-> Free and self-hosted with all features; license announced before 1.0 (AGPL planned for the server).
+> Free and self-hosted with all features; open source under Apache-2.0.
 > Repo: https://github.com/potenlab/trina-drive. Happy to answer questions about the threat model.
 
 (Check the subreddit's self-promotion rules on the day; reply as the author, flair "Release".)
