@@ -11,6 +11,8 @@ import { has2FA } from './mfa'
 import { forbidden, notFound, type WebCtx } from './http'
 import { visibleFolder, type Op } from './ops'
 import { ensureWebSchema } from './schema'
+import { managedMountIds } from '../managed/core'
+import { storageSettings } from '../managed/settings'
 
 const people = (w: WebCtx) => w.db.query<{ id: number; name: string; admin: number; active: number }, []>('SELECT id, name, admin, active FROM people ORDER BY name').all()
 const groups = (w: WebCtx) => w.db.query<{ id: number; name: string }, []>('SELECT id, name FROM groups ORDER BY name').all()
@@ -19,7 +21,9 @@ export function me(w: WebCtx, a: Actor) {
   const p = w.db.query<{ id: number; name: string; admin: number }, [number]>('SELECT id, name, admin FROM people WHERE id = ?').get(a.personId)!
   const unread = w.db.query<{ n: number }, [number]>('SELECT count(*) AS n FROM notices WHERE person_id = ? AND read_at IS NULL').get(a.personId)!.n
   return { id: p.id, name: p.name, admin: !!p.admin, email: accountOf(w.db, a.personId)?.email ?? null, unread_notices: unread,
-    approvals: decidableCount(w.db, a.personId), second_factor: has2FA(w.db, a.personId) }
+    approvals: decidableCount(w.db, a.personId), second_factor: has2FA(w.db, a.personId),
+    // managed storage (cloud mode): the app hides NAS-only settings and offers uploads where the person may write
+    storage: storageSettings(w.db, w.dataDir).mode }
 }
 
 /** Names are not secret inside the team; addresses and sign-in state are for admins (and yourself). */
@@ -42,8 +46,11 @@ function folderStatus(w: WebCtx, f: FolderRow): 'ok' | 'missing' {
 }
 
 function folderSummary(w: WebCtx, r: Rights, a: Actor, f: FolderRow) {
-  const nas = f.registered ? (f.nas_readers === 'all' || f.nas_readers === 'unknown' ? f.nas_readers : f.nas_readers ? 'chosen' : 'unknown') : null
+  const top = r.top(f)
+  const managed = !!top && managedMountIds(w.db).has(top.id)
+  const nas = managed ? null : f.registered ? (f.nas_readers === 'all' || f.nas_readers === 'unknown' ? f.nas_readers : f.nas_readers ? 'chosen' : 'unknown') : null
   return {
+    managed,
     id: f.id, name: f.registered ? f.mount_name : f.path.slice(f.path.lastIndexOf('/') + 1), vpath: r.vpath(f), registered: !!f.registered,
     ...(a.admin ? { path: f.path } : {}),
     personal_owner: r.personal(f)?.personal_owner ?? null,
@@ -53,7 +60,7 @@ function folderSummary(w: WebCtx, r: Rights, a: Actor, f: FolderRow) {
     mine: { ai: r.aiLevel(a.personId, f) >= 1 && !r.flagged(f), nas: r.nasReader(a.personId, f), manage: r.manages(a.personId, f) },
     can: {
       edit_rules: r.canEditRules(a, f), no_ai_on: r.canSetNoAi(a, f, true), no_ai_off: r.canSetNoAi(a, f, false),
-      edit_nas: r.canEditNas(a, f), admin: r.canAdmin(a),
+      edit_nas: !managed && r.canEditNas(a, f), admin: r.canAdmin(a),
     },
   }
 }
@@ -75,7 +82,10 @@ export function folderView(op: Op, id: unknown) {
   const { w, actor: a } = op
   const r = new Rights(w.db)
   const f = visibleFolder(op, r, id)
-  const nas = r.nas(f)
+  const top = r.top(f)
+  // managed storage has no NAS: no NAS column, no "AI ✓ · NAS ✗" warnings
+  const nas = top && managedMountIds(w.db).has(top.id) ? 'unknown' as const : r.nas(f)
+  const noNas = nas === 'unknown' && !!top && managedMountIds(w.db).has(top.id)
   const groupRows = groups(w).map((g) => {
     const direct = r.rules.get(f.id)?.find((x) => x.subject_type === 'group' && x.subject_id === g.id)?.level ?? 0
     const eff = r.subjectLevel('group', g.id, f)
@@ -93,7 +103,7 @@ export function folderView(op: Op, id: unknown) {
     const own = r.subjectLevel('person', p.id, f)
     const level = r.aiLevel(p.id, f)
     const via = level < 1 ? null : own.level >= 1 ? (own.from === f.id ? 'direct' : 'inherited') : 'group'
-    const nasR = r.nasReader(p.id, f)
+    const nasR = noNas ? null : r.nasReader(p.id, f)
     return {
       type: 'person' as const, id: p.id, name: p.name,
       ai: { direct: direct >= 1, level, via, inherited_from: via === 'inherited' && own.from !== null ? r.vpath(r.folders.get(own.from)!) : null },

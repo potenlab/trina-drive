@@ -83,10 +83,14 @@ export function addShareRoot(db: DB, dir: string) {
 }
 export const shareRoots = (db: DB) => db.query<{ path: string; dev: string; ino: string }, []>('SELECT path, dev, ino FROM share_roots ORDER BY path').all()
 
-/** Where walks start: share roots, then registered folders that no share root or other registered folder contains. */
+/**
+ * Where walks start: share roots, then registered folders that no share root or other registered folder contains.
+ * Managed team folders (src/managed) are never walked: only this server writes there and audits each change as it
+ * makes it, and a person's move there is theirs to make (not an R10 quarantine).
+ */
 export function walkRoots(db: DB): { path: string; folder: FolderRow | null }[] {
   const shares = shareRoots(db)
-  const reg = db.query<FolderRow, []>('SELECT * FROM folders WHERE registered = 1').all()
+  const reg = db.query<FolderRow, []>('SELECT * FROM folders WHERE registered = 1 AND id NOT IN (SELECT folder_id FROM managed_mounts)').all()
   const out: { path: string; folder: FolderRow | null }[] = shares.map((s) => ({ path: s.path, folder: null }))
   for (const f of reg) {
     if (shares.some((s) => under(f.path, s.path))) continue
