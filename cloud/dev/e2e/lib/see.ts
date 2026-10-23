@@ -87,8 +87,12 @@ export async function hiddenLikeMissing(t: T, who: Who, file: string, routes: Ro
   if (routes.includes('mcp')) {
     const tok = await fx.token(who)
     for (const cmd of ['cat', 'ls', 'stat', 'wc -c']) {
-      const a = await bash(t.http, fx.slug, tok, `${cmd} '${file}'`), b = await bash(t.http, fx.slug, tok, `${cmd} '${twin}'`)
-      t.check(`${who} ${file}: MCP \`${cmd}\` hidden == nonexistent (exit ${a.exit})`, a.exit === b.exit && a.exit !== 0 && norm(a.stderr, file) === norm(b.stderr, twin) && a.stdout === b.stdout, { hidden: [a.exit, a.stderr], missing: [b.exit, b.stderr] })
+      // no tool result at all (exit null: the call itself failed, e.g. a busy worker) says nothing about hidden vs
+      // missing: ask once more, and show the raw answer if it fails again
+      const run = async (p: string) => { const r = await bash(t.http, fx.slug, tok, `${cmd} '${p}'`); return r.exit === null ? bash(t.http, fx.slug, tok, `${cmd} '${p}'`) : r }
+      const a = await run(file), b = await run(twin)
+      t.check(`${who} ${file}: MCP \`${cmd}\` hidden == nonexistent (exit ${a.exit})`, a.exit === b.exit && a.exit !== 0 && norm(a.stderr, file) === norm(b.stderr, twin) && a.stdout === b.stdout,
+        { hidden: [a.exit, a.stderr, ...(a.exit === null ? [a.status, a.raw.slice(0, 300)] : [])], missing: [b.exit, b.stderr, ...(b.exit === null ? [b.status, b.raw.slice(0, 300)] : [])] })
     }
   }
 }
