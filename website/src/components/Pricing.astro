@@ -13,6 +13,8 @@ const p = t.pricing
 const defaultCurrency = 'USD'
 const CUR = ['USD', 'KRW'] as const
 const BILL = ['monthly', 'yearly'] as const
+// Analytics hook names for the A/B test (attributes only; no visual effect).
+const CTA: Record<string, string | undefined> = { team: 'checkout-team', business: 'checkout-business' }
 const curClass = (c: 'USD' | 'KRW') => (c === 'USD' ? 'price-usd' : 'price-krw')
 const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bill-y')
 ---
@@ -86,7 +88,7 @@ const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bi
           )}
           {plan.ctaKind === 'link'
             ? <a class="btn btn-secondary btn-block" href={LINKS.github} rel="noopener">{plan.cta}</a>
-            : <button type="button" class={`btn btn-block ${plan.featured ? 'btn-primary' : 'btn-secondary'}`} data-plan={plan.id}>
+            : <button type="button" class={`btn btn-block ${plan.featured ? 'btn-primary' : 'btn-secondary'}`} data-plan={plan.id} data-cta={CTA[plan.id]}>
                 {online && plan.ctaPay ? plan.ctaPay : plan.cta}
               </button>}
         </article>

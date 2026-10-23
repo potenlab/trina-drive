@@ -11,10 +11,12 @@ interface Props {
   jsonLd?: object
   /** Landing page: preload the hero's display font. */
   preloadHero?: boolean
+  /** Canonical URL to emit even on a noindex page (A/B variants point at the original). */
+  canonicalHref?: string
 }
-const { t, title = t.meta.title, description = t.meta.description, noindex = false, jsonLd, preloadHero = false } = Astro.props
+const { t, title = t.meta.title, description = t.meta.description, noindex = false, jsonLd, preloadHero = false, canonicalHref } = Astro.props
 const path = Astro.url.pathname.replace(/\.html$/, '').replace(/\/index$/, '/')
-const canonical = new URL(path, SITE_URL).href
+const canonical = canonicalHref ?? new URL(path, SITE_URL).href
 const ogImage = new URL(t.meta.ogImage, SITE_URL).href
 ---
 <!doctype html>
@@ -24,7 +26,8 @@ const ogImage = new URL(t.meta.ogImage, SITE_URL).href
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
+    {noindex && <meta name="robots" content="noindex" />}
+    {(!noindex || canonicalHref) && <link rel="canonical" href={canonical} />}
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0a0b0d" media="(prefers-color-scheme: dark)" />
     <meta name="color-scheme" content="light dark" />

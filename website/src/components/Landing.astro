@@ -62,8 +62,8 @@ const jsonLd = {
         <h1 id="hero-title">{h.title} <span class="accent-text">{h.titleAccent}</span></h1>
         <p class="hero-sub">{h.sub}</p>
         <div class="hero-ctas">
-          <a class="btn btn-primary btn-lg" href="#how">{h.primary}<Icon name="arrow" /></a>
-          <a class="btn btn-secondary btn-lg" href={LINKS.bookCall(t.lang)}>{h.secondary}</a>
+          <a class="btn btn-primary btn-lg" data-cta="see-how" href="#how">{h.primary}<Icon name="arrow" /></a>
+          <a class="btn btn-secondary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{h.secondary}</a>
         </div>
         <div class="install">
           <code><span class="prompt" aria-hidden="true">$ </span>{h.install}</code>
@@ -254,7 +254,7 @@ const jsonLd = {
           <p>{t.cta.sub}</p>
           <div class="hero-ctas">
             <a class="btn btn-primary btn-lg" href={LINKS.github} rel="noopener"><Icon name="github" />{t.cta.primary}</a>
-            <a class="btn btn-secondary btn-lg" href={LINKS.bookCall(t.lang)}>{t.cta.secondary}</a>
+            <a class="btn btn-secondary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{t.cta.secondary}</a>
           </div>
           <div class="install install-dark">
             <code><span class="prompt" aria-hidden="true">$ </span>{h.install}</code>

@@ -23,8 +23,8 @@ const securityPage = '/security'
       <button class="icon-btn" type="button" data-theme-toggle aria-label={n.theme} title={n.theme}>
         <Icon name="moon" class="theme-icon-light" /><Icon name="sun" class="theme-icon-dark" />
       </button>
-      <a class="btn btn-secondary btn-sm nav-book" href={LINKS.bookCall(t.lang)}>{n.book}</a>
-      <a class="btn btn-primary btn-sm nav-start" href={a('start')}>{n.start}</a>
+      <a class="btn btn-secondary btn-sm nav-book" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{n.book}</a>
+      <a class="btn btn-primary btn-sm nav-start" data-cta="get-started" href={a('start')}>{n.start}</a>
       <button class="icon-btn menu-btn" type="button" data-menu-toggle aria-expanded="false" aria-controls="mobile-menu" aria-label={n.menu}>
         <Icon name="menu" />
       </button>
@@ -35,6 +35,6 @@ const securityPage = '/security'
     <a href={a('pricing')}>{n.pricing}</a>
     <a href={securityPage}>{n.security}</a>
     <a href={a('faq')}>{n.faq}</a>
-    <a class="btn btn-secondary" href={LINKS.bookCall(t.lang)}>{n.book}</a>
+    <a class="btn btn-secondary" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{n.book}</a>
   </div>
 </header>
