@@ -54,7 +54,8 @@ export function buildCloud(cfg: Config, opts: { driver?: Driver; mailer?: Mailer
       aws, hostTag: cfg.aws.hostTag, ssmPrefix: cfg.aws.ssmPrefix, kmsKeyId: cfg.kmsKeyId,
       backupBucket: target.bucket ? `${target.bucket}${target.prefix ? `/${target.prefix}` : ''}` : null,
       caddyContainer: cfg.caddyContainer, helperImage: cfg.helperImage, maxTeamsPerHost: cfg.maxTeamsPerHost,
-      teamsOnHost: (h) => cloud!.db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM teams WHERE host = ? AND status NOT IN ('deleted', 'pending_payment')").get(h)!.n,
+      // slots in use: Business takes two (twice the cpu and memory limits)
+      teamsOnHost: (h) => cloud!.db.query<{ n: number | null }, [string]>("SELECT sum(CASE plan WHEN 'business' THEN 2 ELSE 1 END) AS n FROM teams WHERE host = ? AND status NOT IN ('deleted', 'pending_payment')").get(h)!.n ?? 0,
     })
     : cfg.driver === 'fake' ? new FakeDriver(path.join(cfg.stateDir, 'fake'))
       : localDockerDriver({ stateDir: cfg.stateDir, seccomp: cfg.seccompProfile, apparmor: cfg.apparmorProfile, caddyContainer: cfg.caddyContainer, helperImage: cfg.helperImage }))

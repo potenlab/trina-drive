@@ -51,6 +51,8 @@ output "control_env_template" {
     TDCLOUD_OPS_EMAIL=${var.acme_email}
     TDCLOUD_KMS_KEY_ID=${aws_kms_alias.main.name}
     TDCLOUD_BACKUP_TARGET=s3://${aws_s3_bucket.backups.id}
+    TDCLOUD_BACKUP_KEEP=7
+    TDCLOUD_MAX_TEAMS_PER_HOST=20
     TDCLOUD_ROUTE53_ZONE_ID=${aws_route53_zone.cloud.zone_id}
     TDCLOUD_SSM_PREFIX=/${var.name}
     AWS_REGION=${var.region}

@@ -2,7 +2,7 @@
 # Removes the local Trina Cloud: team containers, networks and volumes (label tdcloud.team), the control plane and
 # Caddy, and cloud/dev/.state. Touches nothing without the tdcloud label or outside the tdcloud-dev compose project.
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 DEV=$PWD/cloud/dev
 STATE=$DEV/.state
 q() { [ "${1:-}" = --quiet ] || echo "$2"; }

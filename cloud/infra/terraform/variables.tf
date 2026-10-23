@@ -46,7 +46,7 @@ variable "host_count" {
 }
 
 variable "host_instance_type" {
-  description = "Team host size (arm64). m7g.xlarge = 4 vCPU / 16 GiB: about 25 Team-plan teams (README, Sizing)."
+  description = "Team host size (arm64). m7g.xlarge = 4 vCPU / 16 GiB: 20 slots (a Team-plan team is 1 slot, Business 2; README, Sizing)."
   type        = string
   default     = "m7g.xlarge"
 }
@@ -54,7 +54,7 @@ variable "host_instance_type" {
 variable "host_data_gb" {
   description = "Team data volume per host (gp3, XFS with per-team project quotas). Plan quotas are 50 GB (Team) and 200 GB (Business), but most teams use far less: size for actual use and grow the volume online."
   type        = number
-  default     = 500
+  default     = 300
 }
 
 variable "control_instance_type" {

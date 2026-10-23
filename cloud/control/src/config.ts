@@ -31,7 +31,7 @@ export interface Config {
   caddyContainer: string
   /** this control plane's own image: hosts run it as a short-lived helper to seal backups and secret outputs */
   helperImage: string
-  /** AWS driver: teams per host before a new host is needed */
+  /** AWS driver: slots per host before a new host is needed (a Team-plan team takes 1, Business 2) */
   maxTeamsPerHost: number
   /** first uid for team containers (each team gets its own uid: uidBase + team number) */
   uidBase: number
@@ -126,7 +126,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     apparmorProfile: env.TDCLOUD_APPARMOR ?? 'trina-drive-bwrap',
     caddyContainer: env.TDCLOUD_CADDY_CONTAINER || 'tdc-caddy',
     helperImage: env.TDCLOUD_HELPER_IMAGE || 'tdcloud-control:dev',
-    maxTeamsPerHost: int(env.TDCLOUD_MAX_TEAMS_PER_HOST, 25, 'TDCLOUD_MAX_TEAMS_PER_HOST'),
+    maxTeamsPerHost: int(env.TDCLOUD_MAX_TEAMS_PER_HOST, 20, 'TDCLOUD_MAX_TEAMS_PER_HOST'),
     uidBase: int(env.TDCLOUD_UID_BASE, 20000, 'TDCLOUD_UID_BASE'),
     mailer,
     mailFrom: env.TDCLOUD_MAIL_FROM || 'Trina Cloud <cloud@trina.app>',

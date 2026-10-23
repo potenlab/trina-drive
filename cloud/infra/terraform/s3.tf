@@ -73,6 +73,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
   }
 }
 
+# The control plane keeps the newest TDCLOUD_BACKUP_KEEP (7) daily backups per team and deletes older ones; a deleted
+# object stays as a noncurrent version for 7 more days (accidental or malicious deletion window), then goes.
 resource "aws_s3_bucket_lifecycle_configuration" "backups" {
   bucket = aws_s3_bucket.backups.id
   rule {
@@ -80,21 +82,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
     status = "Enabled"
     filter {}
     noncurrent_version_expiration {
-      noncurrent_days = 30
+      noncurrent_days = 7
     }
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
-    }
-  }
-  rule {
-    id     = "infrequent-access"
-    status = "Enabled"
-    filter {
-      prefix = "teams/"
-    }
-    transition {
-      days          = 30
-      storage_class = "STANDARD_IA"
     }
   }
 }
