@@ -198,7 +198,7 @@ const enB = {
     title: 'Three steps.\nNo IT team needed.',
     steps: [
       { title: 'Create your team drive', body: 'Sign up and invite your team.' },
-      { title: 'Add your files', body: 'Drag and drop in the browser. Choose who sees each folder.' },
+      { title: 'Add your files', body: 'Drag and drop, or import from Google Drive (beta). Choose who sees each folder.' },
       { title: 'Connect your AI app', body: 'One sign-in for Claude or ChatGPT (rolling out). The Codex app works today.' },
     ],
   },

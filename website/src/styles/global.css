@@ -944,8 +944,7 @@ html[lang="ko"] .secpage-hero h1 { line-height: 1.22; letter-spacing: -0.03em; f
   padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: var(--fg-muted);
   background: var(--inset); border: 1px solid var(--border-strong);
 }
-.pcard-soon { background: transparent; border-style: dashed; border-color: var(--border-strong); box-shadow: none; }
-.pcard-soon .bento-icon { background: var(--inset); color: var(--fg-muted); }
+.pcard-beta .pcard-badge { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
 .pcard-chips { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 6px; }
 .pcard-chips li {
   display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 13px;

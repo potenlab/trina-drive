@@ -1,6 +1,6 @@
 // Site copy (English only). Facts come from the repo README, docs/ARCHITECTURE.md (managed storage), the security
 // model, cloud/README.md and research/trina-drive/PRICING.md. Do not add features the product does not have; anything
-// still being built is labelled "Soon". Demo names, companies, files and numbers are fictional.
+// built but not yet proven with real customers is labelled "Beta". Demo names, companies, files and numbers are fictional.
 //
 // Business model (owner, 2026-10-23), structured like supabase.com: Trina Cloud (we host it) is the main product; the
 // same software is open source (Apache-2.0) and free to self-host; on-site installs are Enterprise only.
@@ -110,12 +110,13 @@ const en = {
     rollout: 'Claude and ChatGPT web connectors: rolling out (v0.2).',
     trademarks: 'Trademarks belong to their owners; Trina Drive is not affiliated with or endorsed by them.',
   },
-  // Product grid (supabase.com's product cards): what is built, then two "Soon" cards. The first card is wide and
+  // Product grid (supabase.com's product cards): what is built, then two "Beta" cards (built in PR #19, not yet tested
+// against real Google credentials or real Finder / Explorer clients). The first card is wide and
   // carries the drive's features as chips.
   product: {
     eyebrow: 'Product',
     title: 'Everything a team drive needs.\nPlus your team’s AI.',
-    soon: 'Soon',
+    beta: 'Beta',
     // Decorative upload illustration in the wide drive card.
     art: { drop: 'Drop files or folders', folder: 'site-photos/', progress: '64%', docs: [['board-memo-Q3.pdf', 'v3'], ['rate-card-2026.xlsx', 'v7']] },
     items: [
@@ -135,16 +136,16 @@ const en = {
       { icon: 'draft', title: 'AI writes drafts. People approve.', body: 'Through Trina Drive, AI never changes your originals.' },
       { icon: 'search', title: 'Search inside every file', body: 'PDF, Word, Excel, PowerPoint and HWP, all at once.' },
       { icon: 'log', title: 'Every read on the record', body: 'Each file an AI opens is logged. Approvals need a passkey.' },
-      { icon: 'cloud', title: 'Import from Google Drive', body: 'Bring your folders over in one go.', soon: true },
-      { icon: 'nas', title: 'Mount it as a drive', body: 'Open it in Finder or Windows Explorer (WebDAV).', soon: true },
-    ] as { icon: string; title: string; body: string; chips?: string[]; wide?: boolean; soon?: boolean }[],
+      { icon: 'cloud', title: 'Import from Google Drive', body: 'Pick files. Docs, Sheets and Slides arrive as Word, Excel and PowerPoint.', beta: true },
+      { icon: 'nas', title: 'Mount it as a drive', body: 'Open it in Finder or Windows Explorer, with the same permissions.', beta: true },
+    ] as { icon: string; title: string; body: string; chips?: string[]; wide?: boolean; beta?: boolean }[],
   },
   how: {
     eyebrow: 'How it works',
     title: 'Three steps.\nNothing to install.',
     steps: [
       { title: 'Create your team drive', body: 'Sign up and invite your team.' },
-      { title: 'Add your files', body: 'Drag and drop in the browser. Choose who sees each folder.' },
+      { title: 'Add your files', body: 'Drag and drop, or import from Google Drive (beta). Choose who sees each folder.' },
       { title: 'Connect your AI', body: 'Claude Code, Codex and Cursor today. Claude and ChatGPT: rolling out.' },
     ],
   },

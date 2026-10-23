@@ -1,7 +1,7 @@
 ---
 // Product grid (both variants), shaped like supabase.com's product cards: one wide card for the drive itself (with a
-// small upload illustration and its features as chips), one card per AI/security feature, and "Soon" cards for what is
-// still being built. Then the limits in three lines (full promise on /security). Copy: t.product, t.security.
+// small upload illustration and its features as chips), one card per AI/security feature, and "Beta" cards for what is
+// built but not yet proven with real customers. Then the limits in three lines (full promise on /security). Copy: t.product, t.security.
 import Lines from './Lines.astro'
 import type { Copy } from '../content/en'
 import Icon from './Icon.astro'
@@ -17,11 +17,11 @@ const p = t.product
     </div>
     <ul class="pgrid">
       {p.items.map((it) => (
-        <li class={`pcard${it.wide ? ' pcard-wide' : ''}${it.soon ? ' pcard-soon' : ''}`} data-reveal>
+        <li class={`pcard${it.wide ? ' pcard-wide' : ''}${it.beta ? ' pcard-beta' : ''}`} data-reveal>
           <div class="pcard-text">
             <span class="pcard-top">
               <span class="bento-icon"><Icon name={it.icon} /></span>
-              {it.soon && <span class="pcard-badge">{p.soon}</span>}
+              {it.beta && <span class="pcard-badge">{p.beta}</span>}
             </span>
             <h3>{it.title}</h3>
             <p>{it.body}</p>
