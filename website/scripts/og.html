@@ -1,13 +1,13 @@
 <!doctype html>
-<!-- Source of public/og.png (1200×630). Rendered with headless Chromium, e.g.:
-     bunx playwright screenshot --viewport-size=1200,630 "file://$PWD/scripts/og.html" public/og.png
-     then compressed (sharp / pngquant). Uses the site's own font and key visual. -->
+<!-- Template for the 1200×630 social cards (public/og.png, public/og/*.png). `bun run og` renders one per page with
+     headless Chrome, passing the text in the query string (?t1=…&t2=…&sub=…&chips=a|b|c); see scripts/og.ts.
+     Uses the site's own font, mark and key visual. Opened without a query string it shows the home card. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <style>
-  @font-face { font-family: Geist; src: url("../public/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; }
-  @font-face { font-family: "Geist Mono"; src: url("../public/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; }
+  @font-face { font-family: Geist; src: url("../src/assets/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; }
+  @font-face { font-family: "Geist Mono"; src: url("../src/assets/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; }
   html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #0e0c0b; }
   body { position: relative; font-family: Geist, sans-serif; color: #f6f2ea; -webkit-font-smoothing: antialiased; }
   .bg { position: absolute; inset: 0; background: url("../public/img/hero-dark-2400.webp") center / cover no-repeat; opacity: .9; }
@@ -16,10 +16,12 @@
   .brand { display: flex; align-items: center; gap: 12px; font-size: 26px; font-weight: 650; letter-spacing: -.03em; }
   .brand svg { width: 40px; height: 40px; }
   h1 { margin: 34px 0 0; font-size: 66px; line-height: 1.04; letter-spacing: -.048em; font-weight: 600; }
-  h1 span { display: block; background: linear-gradient(100deg, #ff6a33, #ff8a4c 55%, #ffab73); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  h1 span { display: block; }
+  h1 .accent { background: linear-gradient(100deg, #ff6a33, #ff8a4c 55%, #ffab73); -webkit-background-clip: text; background-clip: text; color: transparent; }
   p { margin: 26px 0 0; font-size: 24px; color: #cfc6bb; letter-spacing: -.01em; }
-  code { display: inline-block; margin-top: 30px; padding: 10px 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,.16); background: rgba(0,0,0,.45); font-family: "Geist Mono", monospace; font-size: 20px; color: #ece6dc; }
-  code b { color: #ff6a33; font-weight: 400; }
+  .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 34px; }
+  .chips span { padding: 7px 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); background: rgba(0,0,0,.45); font-family: "Geist Mono", monospace; font-size: 19px; color: #ece6dc; }
+  .url { position: absolute; bottom: 30px; left: 0; right: 0; text-align: center; font-family: "Geist Mono", monospace; font-size: 17px; color: #8f857a; }
 </style>
 </head>
 <body>
@@ -29,9 +31,15 @@
       <svg viewBox="0 0 32 32"><defs><mask id="m" maskUnits="userSpaceOnUse" x="-8" y="-8" width="48" height="48"><rect x="-8" y="-8" width="48" height="48" fill="#fff"/><path d="M16 19.028L11.497 13.85L2.528 11.25L11.497 8.65L16 3.472L20.503 8.65L29.472 11.25L20.503 13.85Z" fill="#000" stroke="#000" stroke-width="3" stroke-linejoin="round"/><path d="M16 19.028L16 29.528" stroke="#000" stroke-width="1.65"/></mask></defs><g fill="#f6f2ea" stroke="#f6f2ea" stroke-width="0.25" stroke-linejoin="round" mask="url(#m)"><path d="M29.472 11.25L20.503 13.85L20.503 23.35L29.472 20.75Z"/><path d="M11.497 13.85L2.528 11.25L2.528 20.75L11.497 23.35Z"/><path d="M16 19.028L11.497 13.85L11.497 23.35L16 28.528Z"/><path d="M20.503 13.85L16 19.028L16 28.528L20.503 23.35Z"/></g><path d="M16 19.028L11.497 13.85L2.528 11.25L11.497 8.65L16 3.472L20.503 8.65L29.472 11.25L20.503 13.85Z" fill="#ff6a33"/></svg>
       Trina Drive
     </div>
-    <h1>Your company folders,<span>as your team’s AI knowledge base.</span></h1>
-    <p>No ontology, no RAG pipeline, no uploads. For teams of 5 to 20.</p>
-    <code><b>$</b> grep -ri "termination fee" /contracts</code>
+    <h1><span id="t1">The team drive</span><span id="t2" class="accent">your AI can read.</span></h1>
+    <p id="sub">AI knowledge base for teams. Each person’s AI sees only what they may.</p>
+    <div class="chips" id="chips"><span>Claude</span><span>ChatGPT</span><span>Codex</span><span>Cursor</span><span>MCP</span><span>Open source</span></div>
   </div>
+  <div class="url">drive.trina.app</div>
+  <script>
+    const q = new URLSearchParams(location.search)
+    for (const id of ['t1', 't2', 'sub']) if (q.has(id)) document.getElementById(id).textContent = q.get(id)
+    if (q.has('chips')) document.getElementById('chips').replaceChildren(...q.get('chips').split('|').filter(Boolean).map((c) => Object.assign(document.createElement('span'), { textContent: c })))
+  </script>
 </body>
 </html>

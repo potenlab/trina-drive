@@ -5,7 +5,7 @@ import Nav from '../components/Nav.astro'
 import en from '../content/en'
 const t = en
 ---
-<Base t={t} title={`${t.notFound.title} — Trina Drive`} noindex>
+<Base t={t} title={`${t.notFound.title} — Trina Drive`} description={t.notFound.body} noindex>
   <Nav t={t} home="/" />
   <main id="main" class="container legal">
     <h1>{t.notFound.title}</h1>

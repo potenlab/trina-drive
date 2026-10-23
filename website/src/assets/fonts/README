@@ -1,0 +1,10 @@
+Geist and Geist Mono variable fonts (SIL OFL 1.1, see public/fonts/OFL-Geist.txt), subset to the characters the site
+uses so each file is ~30 KB instead of ~58 KB:
+
+  uvx --from 'fonttools[woff]' pyftsubset Geist-Variable.woff2 --flavor=woff2 --layout-features='*' \
+    --unicodes="U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+2190-2199,U+2212,U+2215,U+2229,U+2026,U+20AC,U+2122,U+00D7" \
+    --output-file=Geist-Variable.woff2
+
+(same for GeistMono-Variable.woff2; originals: https://github.com/vercel/geist-font). Anything outside that range
+(Hangul in the company line, for example) falls back to a system font. Referenced from src/styles/global.css and
+preloaded by src/layouts/Base.astro; Vite fingerprints them into /_astro/.

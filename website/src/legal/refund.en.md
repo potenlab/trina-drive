@@ -1,11 +1,11 @@
 **Effective date:** 2026-11-01\
 Provider: Trina Inc. (주식회사 트리나), Republic of Korea · contact@trina.app
 
-Trina Drive itself is free, open-source software. This policy covers what you pay us for: managed plans (Team, Business) and setup & migration services. Online orders are processed by our reseller and Merchant of Record, Paddle.com.
+Trina Drive itself is free, open-source software. This policy covers what you pay us for: Trina Cloud plans (Team, Business) and Enterprise services, including setup & migration. The Free plan costs nothing and has nothing to refund. Online orders are processed by our reseller and Merchant of Record, Paddle.com.
 
 ## 1. Free trial
 
-Team plans can start with a 14-day free trial after a setup call. Cancel any time during the trial and you will not be charged.
+The Trina Cloud Team plan starts with a 14-day free trial. Cancel any time during the trial and you will not be charged.
 
 ## 2. 14-day refund window
 
@@ -13,7 +13,7 @@ Team plans can start with a 14-day free trial after a setup call. Cancel any tim
 - **Annual plans:** ask within 14 days of an annual purchase **or an annual renewal** and we refund the unused part of the year, pro-rata by day. After 14 days, you can still cancel; the service continues until the end of the paid year and will not renew.
 - **Additional AI-connected people:** when you remove people, the change applies from the next billing period. Seat charges added in the last 14 days can be refunded pro-rata on request.
 
-## 3. Setup & migration services
+## 3. Setup & migration services (Enterprise)
 
 - Cancel before work starts: full refund.
 - Cancel after work has started: we refund the part of the quoted work not yet performed.
@@ -21,7 +21,7 @@ Team plans can start with a 14-day free trial after a setup call. Cancel any tim
 
 ## 4. When we always refund
 
-If we cannot install or operate Trina Drive on your hardware for reasons on our side, or we end the managed service without your breach, we refund the prepaid fees for the period we did not serve, regardless of the 14-day window. Duplicate charges and billing errors are always refunded.
+If we cannot provide Trina Cloud, or install or operate Trina Drive on your hardware (Enterprise), for reasons on our side, or we end a paid service without your breach, we refund the prepaid fees for the period we did not serve, regardless of the 14-day window. Duplicate charges and billing errors are always refunded.
 
 ## 5. How to request a refund
 

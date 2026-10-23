@@ -1,0 +1,26 @@
+---
+// Final call to action (both variants): Trina Cloud first, self-hosting second.
+import Lines from './Lines.astro'
+import type { Copy } from '../content/en'
+import { CLOUD_LIVE, LINKS } from '../site'
+import Icon from './Icon.astro'
+import Logo from './Logo.astro'
+import StartCta from './StartCta.astro'
+interface Props { t: Pick<Copy, 'cta' | 'lang'> }
+const { t } = Astro.props
+const c = t.cta
+---
+<section class="section section-cta" id="start" aria-labelledby="start-title">
+  <div class="container">
+    <div class="cta-box" data-reveal>
+      <div class="cta-bg" aria-hidden="true"></div>
+      <span class="cta-logo" aria-hidden="true"><Logo /></span>
+      <h2 id="start-title"><Lines text={c.title} /></h2>
+      <p>{CLOUD_LIVE ? c.subLive : c.sub}</p>
+      <div class="hero-ctas">
+        <StartCta label={c.primary} lang={t.lang} />
+        <a class="btn btn-secondary btn-lg" data-cta="self-host" href={LINKS.github} rel="noopener"><Icon name="github" />{c.secondary}</a>
+      </div>
+    </div>
+  </div>
+</section>

@@ -1,53 +1,49 @@
 ---
-// Variant B of the home page (/b): the same product told for non-developer teams. Shared pieces (Nav, Pricing, Footer,
-// Terminal, the security panel's promise) come from variant A unchanged; B-only parts live in components/b/ and are
-// styled by styles/b.css, which only this page loads.
-import Lines from '../Lines.astro'
+// Home page, variant B (/ and /b): the same structure as variant A (supabase.com-style), told for non-developer teams.
+// B differs in the hero visual (an animated AI chat beside the company folders), the proof chips under it and the
+// use-case gallery. Shared sections come from components/; B-only parts live in components/b/ and are styled by
+// styles/b.css, which only this page loads.
 import type { CopyB } from '../../content/en-b'
 import Base from '../../layouts/Base.astro'
 import { CLOUD_LIVE, LINKS, SITE_URL } from '../../site'
+import { homeJsonLd } from '../../seo'
 import CloudTrust from '../CloudTrust.astro'
+import Faq from '../Faq.astro'
+import FinalCta from '../FinalCta.astro'
 import Footer from '../Footer.astro'
-import ClientMark from '../ClientMark.astro'
-import Compare from '../Compare.astro'
 import Icon from '../Icon.astro'
-import Logo from '../Logo.astro'
 import Marquee from '../Marquee.astro'
 import Nav from '../Nav.astro'
+import OpenSource from '../OpenSource.astro'
 import Pricing from '../Pricing.astro'
-import Terminal from '../Terminal.astro'
+import Products from '../Products.astro'
+import StartCta from '../StartCta.astro'
+import Steps from '../Steps.astro'
 import ChatDemo from './ChatDemo.astro'
-import Safe from './Safe.astro'
 import UseCases from './UseCases.astro'
 import '../../styles/b.css'
 
-interface Props { t: CopyB }
-const { t } = Astro.props
-const home = '/b'
+interface Props { t: CopyB; /** Served at /b: same page, noindex with canonical → / (A/B link). */ abLink?: boolean }
+const { t, abLink = false } = Astro.props
+const home = '/'
+const jsonLd = homeJsonLd(t)
 const h = t.hero
-const w = t.works
-const g = t.compare.search
-const st = t.setup
-const d = t.devs
 ---
-<Base t={t} noindex canonicalHref={`${SITE_URL}/`} preloadHero variant="b">
+<Base t={t} jsonLd={abLink ? undefined : jsonLd} preloadHero variant="b" noindex={abLink} canonicalHref={abLink ? `${SITE_URL}/` : undefined}>
   <Nav t={t} home={home} />
   <main id="main" class="vb">
-    <!-- hero: plain-language promise, then an AI chat window answering from the company folders -->
+    <!-- hero: Trina Cloud first, self-host second; then an AI chat window answering from the company folders -->
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-bg" aria-hidden="true"></div>
       <div class="container hero-copy">
-        <a class="pill" href="#cloud"><span class="pill-dot" aria-hidden="true"></span>{h.pill}<span class="pill-arrow" aria-hidden="true">→</span></a>
+        <a class="pill" href="#pricing"><span class="pill-dot" aria-hidden="true"></span>{h.pill}<span class="pill-arrow" aria-hidden="true">→</span></a>
         <h1 id="hero-title">{h.title} <span class="accent-text">{h.titleAccent}</span></h1>
         <p class="hero-sub">{h.sub}</p>
         <div class="hero-ctas">
-          {CLOUD_LIVE
-            ? <button class="btn btn-primary btn-lg" type="button" data-plan="team" data-cta="start-trial">{h.primaryLive}<Icon name="arrow" /></button>
-            : <a class="btn btn-primary btn-lg" data-cta="early-access" href={LINKS.earlyAccess(t.lang)}>{h.primary}<Icon name="arrow" /></a>}
-          <a class="btn btn-secondary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{h.secondary}</a>
+          <StartCta label={h.primary} lang={t.lang} />
+          <a class="btn btn-secondary btn-lg" data-cta="self-host" href={LINKS.github} rel="noopener"><Icon name="github" />{h.secondary}</a>
         </div>
         <p class="hero-note">{CLOUD_LIVE ? h.noteLive : h.note}</p>
-        <a class="hero-gh" data-cta="self-host" href={LINKS.github} rel="noopener"><Icon name="github" />{h.github}<span aria-hidden="true">→</span></a>
       </div>
       <div class="container b-stage">
         <div class="stage-glow" aria-hidden="true"></div>
@@ -60,178 +56,29 @@ const d = t.devs
       </div>
     </section>
 
-    <!-- any MCP client, as an endless logo marquee (same component and list as variant A) -->
+    <!-- the AI apps it works with, as an endless logo marquee (same component and list as variant A) -->
     <section class="cred mq-band" aria-label={t.clients.title}>
       <div class="container">
         <Marquee title={t.clients.title} items={t.clients.any} note={t.clients.rollout} trademarks={t.clients.trademarks} />
       </div>
     </section>
 
-    <!-- pain in people's own words (public posts, linked) and the one-line answer to each -->
-    <section class="pains" aria-labelledby="pains-title">
-      <div class="container">
-        <h2 class="pains-title" id="pains-title">{t.pains.title}{t.pains.sub && <small>{t.pains.sub}</small>}</h2>
-        <ul class="pains-grid">
-          {t.pains.items.map((p) => (
-            <li class="pain" data-reveal>
-              <figure>
-                <blockquote>“{p.quote}”</blockquote>
-                <figcaption><a href={p.href} rel="noopener nofollow">— {p.where}</a></figcaption>
-              </figure>
-              <p class="pain-answer"><Icon name="check" />{p.answer}</p>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </section>
+    <Products t={t} />
 
     <UseCases t={t} />
 
-    <!-- works where you already work: AI apps ⇄ Trina Drive ⇄ folders -->
-    <section class="section section-tint" id="works" aria-labelledby="works-title">
-      <div class="container">
-        <div class="section-head" data-reveal>
-          <span class="eyebrow">{w.eyebrow}</span>
-          <h2 id="works-title"><Lines text={w.title} /></h2>
-          <p>{w.sub}</p>
-        </div>
-        <div class="wk" data-reveal>
-          <div class="wk-col">
-            <h3 class="wk-title">{w.appsTitle}</h3>
-            <ul class="wk-apps">
-              {w.apps.map((a) => (
-                <li class="wk-app" data-status={a.status}>
-                  <span class="wk-app-main"><ClientMark name={a.name} /><span class="wk-app-name">{a.name}{a.note && <small>{a.note}</small>}</span></span>
-                  <span class="wk-status">{a.status === 'today' ? w.today : w.soon}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div class="wk-hub" aria-hidden="true">
-            <span class="wk-line"></span>
-            <span class="wk-hub-badge"><Logo /><b>{w.center}</b><small>{w.centerNote}</small></span>
-            <span class="wk-line"></span>
-          </div>
-          <div class="wk-col">
-            <h3 class="wk-title">{w.filesTitle}</h3>
-            <ul class="wk-files">
-              {w.files.map((f) => (
-                <li><span class="wk-file-icon"><Icon name={f.icon} /></span><span><b>{f.name}</b><small>{f.note}</small></span></li>
-              ))}
-            </ul>
-            <p class="wk-note">{w.filesNote}</p>
-          </div>
-        </div>
-        <p class="wk-tm">{t.clients.trademarks}</p>
-      </div>
-    </section>
+    <Steps t={t} />
 
-    <!-- one compact comparison: knowledge-base project vs. a drive connector vs. Trina Drive, with one search across folders -->
-    <Compare c={t.compare} tint={false}>
-      <div class="gd-search">
-        <span class="gd-q"><Icon name="search" />“{g.query}”<small>{g.count}</small></span>
-        {g.hits.map((x) => <span class="gd-hit"><code>{x.file}</code><span>{x.line}</span></span>)}
-      </div>
-    </Compare>
-
-    <Safe t={t} />
-
-    <!-- how it works: team space → add files → connect the AI app; self-host / on-site as the alternative -->
-    <section class="section" id="how" aria-labelledby="how-title">
-      <div class="container">
-        <div class="section-head" data-reveal>
-          <span class="eyebrow">{st.eyebrow}</span>
-          <h2 id="how-title"><Lines text={st.title} /></h2>
-          {st.sub && <p>{st.sub}</p>}
-        </div>
-        <ol class="steps">
-          {st.steps.map((s, i) => (
-            <li class="step" data-reveal>
-              <span class="step-num">{i + 1}</span>
-              <h3>{s.title}</h3>
-              <p>{s.body}</p>
-            </li>
-          ))}
-        </ol>
-        <div class="setup-row" data-reveal>
-          {CLOUD_LIVE
-            ? <button class="btn btn-primary btn-lg" type="button" data-plan="team" data-cta="start-trial">{h.primaryLive}<Icon name="arrow" /></button>
-            : <a class="btn btn-primary btn-lg" data-cta="early-access" href={LINKS.earlyAccess(t.lang)}>{h.primary}<Icon name="arrow" /></a>}
-          <p class="setup-self"><b>{st.selfTitle}</b> {st.selfBody} <a href={LINKS.installGuide} rel="noopener">{st.selfLink} →</a></p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Trina Cloud: hosted storage, in four short facts (design commitments while in early access) -->
+    <!-- Trina Cloud: hosted by us, in four short facts (design commitments while in early access) -->
     <CloudTrust t={t} />
 
-    <Pricing t={t} />
+    <OpenSource t={t} tint={false} />
 
-    <!-- for developers: the terminal demo from variant A -->
-    <section class="section section-tint" id="developers" aria-labelledby="dev-title">
-      <div class="container dev-grid">
-        <div class="dev-copy">
-          <div class="section-head" data-reveal>
-            <span class="eyebrow">{d.eyebrow}</span>
-            <h2 id="dev-title"><Lines text={d.title} /></h2>
-            <p>{d.sub}</p>
-          </div>
-          <ul class="wk-dev dev-tools" aria-label={w.devTitle}>
-            {w.devApps.map((a) => <li><ClientMark name={a} />{a}</li>)}
-          </ul>
-          <ul class="dev-points">{d.points.map((p) => <li><Icon name="check" />{p}</li>)}</ul>
-          <div class="install">
-            <code><span class="prompt" aria-hidden="true">$ </span>{d.install}</code>
-            <button class="copy-btn" type="button" data-copy={d.install} data-copied={h.copied}>{h.copy}</button>
-          </div>
-          <p class="dev-link"><a href={LINKS.docs} rel="noopener">{d.link} →</a></p>
-        </div>
-        <div class="dev-term"><Terminal t={t} /></div>
-      </div>
-    </section>
+    <Pricing t={t} tint />
 
-    <!-- faq -->
-    <section class="section" id="faq" aria-labelledby="faq-title">
-      <div class="container faq-grid">
-        <div class="faq-side">
-          <div class="section-head">
-            <span class="eyebrow">{t.faq.eyebrow}</span>
-            <h2 id="faq-title"><Lines text={t.faq.title} /></h2>
-          </div>
-          <div class="faq-more">
-            <p class="faq-more-title">{t.faq.more}</p>
-            <p>{t.faq.moreBody}</p>
-            <a href="mailto:contact@trina.app">contact@trina.app</a>
-          </div>
-        </div>
-        <div class="faq">
-          {t.faq.items.map((i) => (
-            <details>
-              <summary>{i.q}<Icon name="plus" /></summary>
-              <p class="answer">{i.a}</p>
-            </details>
-          ))}
-        </div>
-      </div>
-    </section>
+    <Faq t={t} />
 
-    <!-- final cta -->
-    <section class="section section-cta" id="start" aria-labelledby="start-title">
-      <div class="container">
-        <div class="cta-box" data-reveal>
-          <div class="cta-bg" aria-hidden="true"></div>
-          <span class="cta-logo" aria-hidden="true"><Logo /></span>
-          <h2 id="start-title"><Lines text={t.cta.title} /></h2>
-          <p>{CLOUD_LIVE ? t.cta.subLive : t.cta.sub}</p>
-          <div class="hero-ctas">
-            {CLOUD_LIVE
-              ? <button class="btn btn-primary btn-lg" type="button" data-plan="team" data-cta="start-trial">{t.cta.primaryLive}<Icon name="arrow" /></button>
-              : <a class="btn btn-primary btn-lg" data-cta="early-access" href={LINKS.earlyAccess(t.lang)}>{t.cta.primary}<Icon name="arrow" /></a>}
-            <a class="btn btn-secondary btn-lg" href="#pricing">{t.cta.secondary}</a>
-          </div>
-        </div>
-      </div>
-    </section>
+    <FinalCta t={t} />
   </main>
   <Footer t={t} home={home} />
   <script>

@@ -1,6 +1,6 @@
 # drive.trina.app — Trina Drive marketing site
 
-Static site (Astro 7, no UI framework, no web fonts). English at `/`, Korean at `/ko`. Output: `website/dist`.
+Static site (Astro 7, no UI framework, self-hosted Geist subset). English only (`/ko` redirects to `/`). Output: `website/dist`.
 
 ```sh
 cd website
@@ -9,7 +9,7 @@ bun run dev        # http://localhost:4321
 bun run build      # -> dist/
 bun run preview    # serve dist/ locally
 bun run test       # bun test: Paddle config/checkout routing + webhook (signature, dedup, ordering, adapters)
-bun run og         # re-render public/og.png, og-ko.png and the PNG favicons (needs `brew install librsvg`)
+bun run og         # re-render the social cards (public/og.png, public/og/*.png; needs Chrome + uv) and PNG favicons (needs `brew install librsvg`)
 ```
 
 ## Layout
@@ -26,7 +26,9 @@ bun run og         # re-render public/og.png, og-ko.png and the PNG favicons (ne
 | `src/pages/b.astro`, `src/content/en-b.ts`, `src/components/b/`, `src/styles/b.css`, `src/scripts/b.ts` | A/B variant B at `/b` for non-developer teams (noindex, canonical → `/`): AI chat demo hero, use cases by role, plain-language copy. Shares Nav, Pricing, Footer, Terminal and the security promise with `/`. Main CTAs in both variants carry `data-cta` (get-started, book-call, see-how, checkout-team, checkout-business) |
 | `src/components/` | `Landing.astro` (all sections), `Terminal.astro` (hero demo), `Pricing.astro`, `Nav`, `Footer`, `Legal`, `Thanks` (`/thanks`, Paddle's success page, noindex) |
 | `src/scripts/main.ts` | theme toggle, mobile menu, copy button, KRW/USD and monthly/yearly toggles, checkout buttons, terminal replay |
-| `public/` | favicon, OG images, `robots.txt`, `sitemap.xml`, `theme.js` (applies the saved theme before paint), `_headers` |
+| `public/` | favicon, social cards (`og.png`, `og/`), `robots.txt`, `theme.js` (applies the saved theme before paint), `_headers` |
+| `src/seo.ts`, `src/pages/sitemap.xml.ts`, `llms.txt.ts`, `llms-full.txt.ts` | indexable page list → `/sitemap.xml`; JSON-LD (Organization, WebSite, SoftwareApplication with one offer per shown price, FAQPage = visible FAQ); `/llms.txt` and `/llms-full.txt` for AI search. All built from `content/en.ts`, so they can't drift from the page. See **SEO** below |
+| `src/pages/compare/google-drive.astro` | `/compare/google-drive` (copy: `t.compareGd`). Google facts limited to public docs, with an "as of" note |
 | `RESEARCH.md` | the YC-style landing page survey this design follows |
 
 Prices come from `research/trina-drive/PRICING.md` (2026-10-23). Change them in `src/content/*.ts` — both currencies
@@ -43,7 +45,7 @@ is a quoted human service and never goes through Paddle.
 - The pricing cards have a monthly/yearly toggle and an "AI-connected people" field; people beyond the included
   10/40 are added as extra-seat quantity in the same checkout (seat price of the same cycle required).
 - Paddle sends the buyer to `/thanks?plan=…` (or `/ko/thanks`). The webhook is the record of payment, not that page.
-- Legal pages are live and indexable (in `sitemap.xml`). Each page carries an HTML comment
+- Legal pages are live and indexable (in `/sitemap.xml`). Each page carries an HTML comment
   `draft — lawyer review pending`. Effective date 2026-11-01, last updated 2026-10-23.
 - CSP (`vercel.json` and `public/_headers`, keep them identical) allows exactly what Paddle.js v2 uses:
   `script-src https://cdn.paddle.com`; `frame-src https://buy.paddle.com https://sandbox-buy.paddle.com`;
@@ -110,3 +112,16 @@ add analytics or another widget, add its origin to the CSP or it will be blocked
 Cloudflare Workers Assets / Pages also works for the static pages (the `/api` webhook is Vercel-only; on Workers,
 wrap `api/_lib/paddle-webhook-core.js` in a `fetch` handler): deploy `dist/` (it has `_headers` with the same headers); default
 `html_handling` serves `/ko` from `ko.html` and `/terms` from `terms.html`.
+
+## SEO
+
+- Every indexable page: unique `<title>` ≤ 60 and description ≤ 155 characters (`test/seo.test.ts`), canonical URL
+  without trailing slash, `robots: index, follow, max-image-preview:large`, Open Graph + Twitter card with its own
+  1200×630 card. `/a` and `/b` are `noindex, follow` with canonical `/`; `/thanks` and 404 are `noindex`.
+- New indexable page: add it to `PAGES` in `src/seo.ts` (sitemap), give it `title`/`description`/`ogImage`, add a
+  card to `CARDS` in `scripts/og.ts` and run `bun run og`.
+- `robots.txt` allows everything but `/api/`, and names the AI search / assistant bots explicitly (GPTBot,
+  OAI-SearchBot, ClaudeBot, Claude-SearchBot, PerplexityBot, Google-Extended, …).
+- Prices, plan facts and FAQ answers in JSON-LD and `llms*.txt` come from `content/en.ts`; change them there only.
+- After deploy: submit `https://drive.trina.app/sitemap.xml` in Google Search Console and Bing Webmaster Tools, and
+  check the home page in the Rich Results Test.

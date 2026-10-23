@@ -1,4 +1,23 @@
+# drive.trina.app — everything public is open to search engines and AI search / assistants.
+# /a and /b (A/B variants) and /thanks stay crawlable on purpose: they carry noindex, which crawlers must be able to read.
 User-agent: *
 Allow: /
+Disallow: /api/
+
+# AI search and assistants: welcome. (A named group replaces the * group for that bot, so the rules are repeated.)
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: anthropic-ai
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: Bingbot
+Allow: /
+Disallow: /api/
 
 Sitemap: https://drive.trina.app/sitemap.xml

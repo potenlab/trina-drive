@@ -9,7 +9,7 @@ const { t } = Astro.props
 const u = t.useCases
 const slug = (r: string) => r.toLowerCase().replace(/[^a-z]+/g, '-')
 ---
-<section class="section" id="features" aria-labelledby="uc-title" data-uc>
+<section class="section section-tint" id="use-cases" aria-labelledby="uc-title" data-uc>
   <div class="container">
     <div class="section-head" data-reveal>
       <span class="eyebrow">{u.eyebrow}</span>

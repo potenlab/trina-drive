@@ -1,10 +1,9 @@
-// Client behaviour for every page: theme toggle, mobile menu, copy button, currency/billing toggles, checkout buttons,
-// and the hero terminal replay. No dependencies; everything degrades to static HTML without JS.
+// Client behaviour for every page: theme toggle, mobile menu, copy button, currency/billing toggles and checkout buttons.
+// No dependencies; everything degrades to static HTML without JS.
 import { isPlanId, resumePaymentLink, startCheckout, type Billing, type Currency } from '../checkout'
 
 const root = document.documentElement
 const lang = root.lang === 'ko' ? 'ko' : 'en'
-const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 // ---- theme ----
 const isDark = () =>
@@ -82,66 +81,3 @@ document.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((btn) => {
     }
   })
 })
-
-// ---- hero terminal ----
-const term = document.querySelector<HTMLElement>('[data-term]')
-if (term) {
-  const lines = Array.from(term.querySelectorAll<HTMLElement>('.tl'))
-  const tabs = term.querySelectorAll<HTMLElement>('[data-tab]')
-  const replay = term.querySelector<HTMLButtonElement>('[data-term-replay]')
-  const full = lines.map((l) => l.querySelector('.tl-text')?.textContent ?? '')
-  const caret = document.createElement('span')
-  caret.className = 'caret'
-  let run = 0
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-  const setTab = (who?: string) => {
-    if (who) tabs.forEach((t) => { t.dataset.active = String(t.dataset.tab === who) })
-  }
-  const showAll = () => {
-    lines.forEach((l, i) => { l.dataset.hidden = 'false'; const x = l.querySelector('.tl-text'); if (x) x.textContent = full[i] ?? '' })
-    caret.remove()
-  }
-
-  async function play() {
-    const me = ++run
-    if (replay) replay.hidden = true
-    lines.forEach((l) => { l.dataset.hidden = 'true' })
-    setTab('alex')
-    for (let i = 0; i < lines.length; i++) {
-      if (me !== run) return
-      const line = lines[i]!
-      const text = line.querySelector<HTMLElement>('.tl-text')!
-      const kind = line.dataset.k
-      setTab(line.dataset.who)
-      line.dataset.hidden = 'false'
-      if (kind === 'cmd') {
-        text.textContent = ''
-        text.after(caret)
-        await sleep(350)
-        for (const ch of full[i] ?? '') {
-          if (me !== run) return
-          text.textContent += ch
-          await sleep(22 + Math.random() * 30)
-        }
-        await sleep(380)
-        caret.remove()
-      } else {
-        text.textContent = full[i] ?? ''
-        await sleep(kind === 'comment' ? 500 : 260)
-      }
-    }
-    if (replay) replay.hidden = false
-  }
-
-  if (reduceMotion) {
-    showAll()
-    setTab('sam')
-  } else {
-    // Start when the terminal is on screen (it is, on desktop; on phones it is below the fold).
-    const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) { io.disconnect(); void play() }
-    }, { threshold: 0.3 })
-    io.observe(term)
-    replay?.addEventListener('click', () => { void play() })
-  }
-}
