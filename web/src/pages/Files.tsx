@@ -15,6 +15,8 @@ import { Badge } from '../ui'
 import { ft } from './files-i18n'
 import { ConfirmDialog, errMsg, FolderPicker, Menu, NameDialog, Toast, TrashView, UploadPanel, Versions, type MenuAction, type ToastMsg } from './files-ops'
 import { droppedFiles, pickedFiles, uploadInto, uploads } from './files-upload'
+import { connectGdrive, GdrivePanel, gdriveJobs, gdriveOutcome, importFromGdrive, loadGdrive, useGdrive } from './GDrive'
+import { dt } from './drive-i18n'
 import './files.css'
 
 // ---------- shapes (src/web/files.ts) ----------
@@ -147,8 +149,18 @@ export function Files({ route }: { route: string }) {
   const folderInput = useRef<HTMLInputElement>(null)
   const reload = useCallback(() => setReloadN((n) => n + 1), [])
 
-  // a finished upload into the folder on screen refreshes it
+  // a finished upload (or Google Drive import) into the folder on screen refreshes it
   useEffect(() => { uploads.onChanged((folder) => { if (folder === path) reload() }) }, [path, reload])
+  useEffect(() => { gdriveJobs.onFinished((folder) => { if (folder === path || folder.startsWith(path === '/' ? '/' : path + '/')) reload() }) }, [path, reload])
+  const gd = useGdrive()
+  // back from Google's consent page (#/files?p=…&gdrive=connected): say how it went, then drop the marker
+  useEffect(() => {
+    const o = gdriveOutcome(route)
+    if (!o) return
+    setToast({ text: o.text, error: o.error })
+    void loadGdrive(true)
+    go(filesRoute(path))
+  }, [route, path])
 
   // folder listing
   useEffect(() => {
@@ -329,6 +341,10 @@ export function Files({ route }: { route: string }) {
     { label: ft('new_folder'), icon: '📁', onClick: () => setDialog({ kind: 'newfolder' }) },
     { label: ft('upload_files'), icon: '⤒', onClick: () => filesInput.current?.click() },
     { label: ft('upload_folder'), icon: '🗂', onClick: () => folderInput.current?.click() },
+    ...(gd?.enabled ? [{ label: dt('gd_import'), icon: '⇩', onClick: () => {
+      const run = gd.connected ? importFromGdrive(path) : connectGdrive(filesRoute(path))
+      run.catch((x) => setToast({ text: x instanceof Error && !(x instanceof ApiError) ? x.message : errMsg(x), error: true }))
+    } }] : []),
   ]
 
   return (
@@ -471,6 +487,7 @@ export function Files({ route }: { route: string }) {
       {dialog?.kind === 'delete' && <ConfirmDialog title={ft('delete')} text={ft('confirm_delete', { n: dialog.items.length })} action={ft('delete')} danger onClose={() => setDialog(null)} onConfirm={() => doDelete(dialog.items)} />}
       {toast && <Toast msg={toast} onClose={() => setToast(null)} />}
       <UploadPanel />
+      <GdrivePanel />
     </div>
   )
 }

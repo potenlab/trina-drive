@@ -1,15 +1,19 @@
-// Settings: language, own password, notices (kind, count and a link only — details are on the linked page).
+// Settings: language, own password, notices (kind, count and a link only — details are on the linked page), second
+// factors, and in managed storage: mounting as a drive (app passwords) and the Google Drive connection.
 import { useState } from 'react'
 import { api, get } from '../api'
-import { useSession } from '../App'
+import { useRoute, useSession } from '../App'
 import { fmtDate, LOCALES, setLocale, t, useLocale, type Key } from '../i18n'
 import { ErrorLine, Loading, Page, useAction, useLoad } from '../ui'
 import { SecondFactorSettings } from './SecondFactor'
+import { GdriveSettings } from './GDrive'
+import { MountSettings } from './Mount'
 
 interface Notice { id: number; kind: string; count: number; link: string; created_at: number; read_at: number | null }
 
 export function Settings() {
   const { me, refresh } = useSession()
+  const route = useRoute()
   const locale = useLocale()
   const notices = useLoad(() => get<{ notices: Notice[] }>('/notices'))
   const a = useAction()
@@ -32,6 +36,8 @@ export function Settings() {
         </>}
       </section>
       <SecondFactorSettings />
+      {me?.storage === 'managed' && <MountSettings />}
+      <GdriveSettings route={route} />
       <section className="card">
         <h2>{t('language')}</h2>
         <select value={locale} onChange={(e) => setLocale(e.target.value as 'en' | 'ko')}>{LOCALES.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}</select>

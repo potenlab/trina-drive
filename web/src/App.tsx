@@ -116,7 +116,7 @@ function Shell({ route }: { route: string }) {
   else if (route === '/tokens') page = <Tokens />
   else if (route === '/drafts') page = <Drafts />
   else if (route === '/audit') page = <Audit />
-  else if (route === '/settings') page = <Settings />
+  else if (route === '/settings' || route.startsWith('/settings?')) page = <Settings />
   else page = <Folders />
   const active = (to: string) => route === to || route.startsWith(to + '/') || (to === '/folders' && !files && !approval && !NAV.some((n) => route.startsWith(n.to)))
   return (
