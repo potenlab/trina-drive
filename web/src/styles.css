@@ -364,3 +364,6 @@ details.manual .secret code { white-space: pre-wrap; }
 }
 table.list td { overflow-wrap: anywhere; }
 table.list td .mono { word-break: break-all; }
+.inline-row { display: flex; gap: .6rem; align-items: flex-end; flex-wrap: wrap; }
+.inline-row label { flex: 1 1 16rem; }
+.mount-new button { justify-self: start; }

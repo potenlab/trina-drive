@@ -34,7 +34,7 @@ export interface Me { id: number; name: string; admin: boolean; email: string | 
   /** hosted server: this admin must add a second factor before anything else (src/web/hosted.ts) */
   second_factor_required?: boolean
   /** Trina Cloud mode (src/tdcloud/me.ts, workstream B1): the console's address for "Back to console", the team's name */
-  cloud?: { sso_only?: boolean; console_url?: string; team_name?: string; team_slug?: string }
+  cloud?: { sso_only?: boolean; console_url?: string; managed?: boolean; has_password?: boolean; display_name?: string | null; reauth_url?: string | null; team_name?: string }
   /** sharing (src/share/me.ts, workstream A1) */
   share?: Record<string, unknown> }
 export interface FolderSummary {

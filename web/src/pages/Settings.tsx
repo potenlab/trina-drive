@@ -43,7 +43,8 @@ export function Settings() {
         <select value={locale} onChange={(e) => setLocale(e.target.value as 'en' | 'ko')}>{LOCALES.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}</select>
         <p className="muted small">{t('about_me')}: <strong>{me?.name}</strong> {me?.email && `· ${me.email}`}</p>
       </section>
-      <form className="card" onSubmit={async (e) => {
+      {/* people who sign in with Trina Cloud have no password here (the console keeps it) */}
+      {!me?.cloud?.managed && <form className="card" onSubmit={async (e) => {
         e.preventDefault(); setDone(false)
         if (await a.run(() => api('POST', '/me/password', { current, password: next }))) { setDone(true); setCurrent(''); setNext('') }
       }}>
@@ -54,7 +55,7 @@ export function Settings() {
         <ErrorLine error={a.error} />
         {done && <p className="ok">{t('password_changed')}</p>}
         <button className="btn primary" disabled={a.busy}>{t('save')}</button>
-      </form>
+      </form>}
       <p className="muted small promise">{t('promise')}</p>
     </Page>
   )

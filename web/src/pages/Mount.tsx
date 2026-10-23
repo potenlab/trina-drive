@@ -1,7 +1,9 @@
 // Settings → "Mount as a drive": the WebDAV address (src/dav), how to connect from a Mac or Windows, and the person's
 // app passwords (made here, shown once, revocable). Shown only in managed storage.
 import { useState } from 'react'
-import { api, get } from '../api'
+import { api, ApiError, get } from '../api'
+import { useSession } from '../App'
+import { ReauthBox } from './SecondFactor'
 import { fmtDate } from '../i18n'
 import { CopyButton, ErrorLine, Loading, Secret, useAction, useLoad } from '../ui'
 import './drive.css'
@@ -19,6 +21,19 @@ export function MountSettings({ bare = false }: { bare?: boolean } = {}) {
   const [name, setName] = useState('')
   const [pw, setPw] = useState('')
   const [made, setMade] = useState<{ name: string; password: string } | null>(null)
+  const { me } = useSession()
+  // console people have no password here: the server asks for a fresh passkey / code / console sign-in instead
+  const noPassword = me?.cloud?.has_password === false
+  const [reauth, setReauth] = useState(false)
+  const createNow = async () => {
+    try {
+      const r = await api<{ name: string; password: string }>('POST', '/me/app-passwords', noPassword || !pw ? { name } : { name, password: pw })
+      setMade(r); setName(''); setPw(''); setReauth(false); info.reload()
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'reauth_required') { setReauth(true); return }
+      throw e
+    }
+  }
   if (!info.data) return <section className="card"><h2>{dt('mt_title')}</h2>{info.error ? <ErrorLine error={info.error} /> : <Loading />}</section>
   const d = info.data
   if (!d.enabled) return null
@@ -54,15 +69,16 @@ export function MountSettings({ bare = false }: { bare?: boolean } = {}) {
       )}
       <form className="mount-new" onSubmit={async (e) => {
         e.preventDefault()
-        const r = await a.run(() => api<{ name: string; password: string }>('POST', '/me/app-passwords', { name, password: pw }))
-        if (r) { setMade(r); setName(''); setPw(''); info.reload() }
+        await a.run(createNow)
       }}>
         <h4>{dt('mt_new')}</h4>
         <label>{dt('mt_name')}<input value={name} onChange={(e) => setName(e.target.value)} placeholder={dt('mt_name_ph')} required maxLength={64} /></label>
-        <label>{dt('mt_confirm_pw')}<input type="password" value={pw} onChange={(e) => setPw(e.target.value)} required autoComplete="current-password" /></label>
+        {!noPassword && <label>{dt('mt_confirm_pw')}<input type="password" value={pw} onChange={(e) => setPw(e.target.value)} required autoComplete="current-password" /></label>}
         <ErrorLine error={a.error} />
         <button className="btn primary" disabled={a.busy}>{dt('mt_create')}</button>
       </form>
+      {/* outside the form: it has forms of its own; when it is done, the app password is made */}
+      {reauth && <ReauthBox onDone={() => a.run(createNow).then(() => {})} />}
     </section>
   )
 }
