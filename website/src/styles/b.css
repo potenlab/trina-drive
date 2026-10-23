@@ -281,13 +281,18 @@
 .wk-title { font-size: 15px; font-weight: 600; color: var(--fg-muted); letter-spacing: -0.01em; }
 .wk-apps { margin-top: 10px; }
 .wk-app { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--border); }
+.wk-app-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wk-app-main .cm { --cm-slot: 40px; margin-left: -8px; }
 .wk-app-name { font-size: 19px; font-weight: 650; letter-spacing: -0.03em; }
 .wk-app-name small { display: block; font-size: 12.5px; font-weight: 450; letter-spacing: 0; color: var(--fg-faint); }
 .wk-status { flex: none; padding: 2px 9px; border-radius: 999px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-faint); border: 1px solid var(--border); white-space: nowrap; }
 .wk-app[data-status="today"] .wk-status { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
 .wk-dev-title { margin-top: 18px; font-size: 12.5px; color: var(--fg-faint); }
 .wk-dev { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
-.wk-dev li { padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-soft); font-size: 13px; font-weight: 550; color: var(--fg-muted); }
+.wk-dev li { display: inline-flex; align-items: center; gap: 2px; padding: 2px 11px 2px 3px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg-soft); font-size: 13px; font-weight: 550; color: var(--fg-muted); }
+.wk-dev .cm { --cm-slot: 28px; }
+.wk-tm { margin-top: 18px; text-align: center; font-size: 12px; color: var(--fg-faint); }
+.dev-tools { margin: 0 0 22px; }
 .wk-files { margin-top: 10px; }
 .wk-files li { display: flex; gap: 12px; align-items: flex-start; padding: 13px 0; border-bottom: 1px solid var(--border); }
 .wk-files b { display: block; font-size: 16px; font-weight: 600; letter-spacing: -0.015em; }
@@ -319,7 +324,12 @@
   .wk-hub-badge svg { width: 30px; height: 30px; }
   .wk-hub-badge small { max-width: none; }
 }
-@media (max-width: 640px) { .wk-col { padding: 20px; } }
+@media (max-width: 640px) {
+  .wk-col { padding: 20px; }
+  .wk-app-main { gap: 6px; }
+  .wk-app-main .cm { --cm-slot: 34px; margin-left: -6px; }
+  .wk-app-name { font-size: 17.5px; }
+}
 
 /* ---------- vs a drive connector: a plain search result instead of a terminal ---------- */
 .gd-search { margin-top: 18px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-soft); }

@@ -4,6 +4,7 @@
 //
 // Accuracy rules (same as en.ts): no "real bash"; AI can't change originals *through Trina Drive*; open source =
 // "release coming soon"; never say Drive connectors can't read files; no fake logos, testimonials or YC claims; USD.
+// Client logos: only official files the brand allows (public/logos/SOURCES.md); Claude stays text (needs approval).
 // claude.ai / Claude apps and ChatGPT connect over OAuth in v0.2 ("rolling out"); Codex app, Codex CLI, Claude Code
 // and Cursor connect today. Drafts are Markdown or CSV. PDFs are read by their text layer (no OCR before v0.3).
 // Demo people, companies, files and numbers are fictional.
