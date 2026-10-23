@@ -1,7 +1,7 @@
 ---
-// Plans from research/trina-drive/PRICING.md. Both currencies and both billing periods are in the HTML; the toggles
-// flip data-currency / data-billing on the section. Buttons with data-plan call startCheckout() (src/checkout.ts)
-// from main.ts: USD → Paddle overlay checkout when it is configured at build time, KRW → bank transfer by email.
+// Plans from research/trina-drive/PRICING.md. We sell in USD only (Paddle checkout, Korean customers pay with a card
+// that allows international payments). Both billing periods are in the HTML; the toggle flips data-billing on the
+// section. Buttons with data-plan call startCheckout() (src/checkout.ts) from main.ts.
 import type { Copy } from '../content/en'
 import { canSellOnline } from '../paddle'
 import { PADDLE } from '../paddle-env'
@@ -10,7 +10,7 @@ import Icon from './Icon.astro'
 interface Props { t: Copy }
 const { t } = Astro.props
 const p = t.pricing
-const defaultCurrency = t.lang === 'ko' ? 'KRW' : 'USD'
+const defaultCurrency = 'USD'
 const CUR = ['USD', 'KRW'] as const
 const BILL = ['monthly', 'yearly'] as const
 const curClass = (c: 'USD' | 'KRW') => (c === 'USD' ? 'price-usd' : 'price-krw')
@@ -25,10 +25,6 @@ const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bi
     </div>
     <div class="pricing-top">
       <div class="pricing-toggles">
-        <div class="seg" role="group" aria-label={p.currencyLabel}>
-          <button type="button" data-currency-btn="KRW" aria-pressed={defaultCurrency === 'KRW' ? 'true' : 'false'}>KRW ₩</button>
-          <button type="button" data-currency-btn="USD" aria-pressed={defaultCurrency === 'USD' ? 'true' : 'false'}>USD $</button>
-        </div>
         <div class="seg" role="group" aria-label={p.billingLabel}>
           <button type="button" data-billing-btn="monthly" aria-pressed="true">{p.monthly}</button>
           <button type="button" data-billing-btn="yearly" aria-pressed="false">{p.yearly}</button>
@@ -36,7 +32,7 @@ const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bi
       </div>
       <div class="pricing-notes">
         <span>{p.trialNote}</span>
-        <span class="price-krw">{p.vatNote} {p.krwNote}</span>
+        <span>{p.usdNote}</span>
       </div>
     </div>
     <div class="plans">

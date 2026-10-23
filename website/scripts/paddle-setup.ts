@@ -47,16 +47,15 @@ const PRODUCTS = [
 ] as const
 
 type Interval = 'month' | 'year'
-// krw: what a buyer in Korea pays (KRW has no minor unit in Paddle), set as a KR country override on the USD price.
-const PRICES: { env: string; product: string; cents: number; krw: number; interval: Interval; trial?: boolean; seats?: boolean; label: string }[] = [
-  { env: 'PUBLIC_PADDLE_PRICE_TEAM_MONTHLY', product: 'team', cents: 9900, krw: 129000, interval: 'month', trial: true, label: 'Team — monthly' },
-  { env: 'PUBLIC_PADDLE_PRICE_TEAM_YEARLY', product: 'team', cents: 99000, krw: 1290000, interval: 'year', trial: true, label: 'Team — yearly' },
-  { env: 'PUBLIC_PADDLE_PRICE_BUSINESS_MONTHLY', product: 'business', cents: 34900, krw: 449000, interval: 'month', label: 'Business — monthly' },
-  { env: 'PUBLIC_PADDLE_PRICE_BUSINESS_YEARLY', product: 'business', cents: 349000, krw: 4490000, interval: 'year', label: 'Business — yearly' },
-  { env: 'PUBLIC_PADDLE_PRICE_EXTRA_SEAT_TEAM', product: 'seat-team', cents: 900, krw: 12000, interval: 'month', seats: true, label: 'Team extra person — monthly' },
-  { env: 'PUBLIC_PADDLE_PRICE_EXTRA_SEAT_TEAM_YEARLY', product: 'seat-team', cents: 9000, krw: 120000, interval: 'year', seats: true, label: 'Team extra person — yearly' },
-  { env: 'PUBLIC_PADDLE_PRICE_EXTRA_SEAT_BUSINESS', product: 'seat-business', cents: 700, krw: 9000, interval: 'month', seats: true, label: 'Business extra person — monthly' },
-  { env: 'PUBLIC_PADDLE_PRICE_EXTRA_SEAT_BUSINESS_YEARLY', product: 'seat-business', cents: 7000, krw: 90000, interval: 'year', seats: true, label: 'Business extra person — yearly' },
+const PRICES: { env: string; product: string; cents: number; interval: Interval; trial?: boolean; seats?: boolean; label: string }[] = [
+  { env: 'PUBLIC_PADDLE_PRICE_TEAM_MONTHLY', product: 'team', cents: 9900, interval: 'month', trial: true, label: 'Team — monthly' },
+  { env: 'PUBLIC_PADDLE_PRICE_TEAM_YEARLY', product: 'team', cents: 99000, interval: 'year', trial: true, label: 'Team — yearly' },
+  { env: 'PUBLIC_PADDLE_PRICE_BUSINESS_MONTHLY', product: 'business', cents: 34900, interval: 'month', label: 'Business — monthly' },
+  { env: 'PUBLIC_PADDLE_PRICE_BUSINESS_YEARLY', product: 'business', cents: 349000, interval: 'year', label: 'Business — yearly' },
+  { env: 'PUBLIC_PADDLE_PRICE_EXTRA_SEAT_TEAM', product: 'seat-team', cents: 900, interval: 'month', seats: true, label: 'Team extra person — monthly' },
+  { env: 'PUBLIC_PADDLE_PRICE_EXTRA_SEAT_TEAM_YEARLY', product: 'seat-team', cents: 9000, interval: 'year', seats: true, label: 'Team extra person — yearly' },
+  { env: 'PUBLIC_PADDLE_PRICE_EXTRA_SEAT_BUSINESS', product: 'seat-business', cents: 700, interval: 'month', seats: true, label: 'Business extra person — monthly' },
+  { env: 'PUBLIC_PADDLE_PRICE_EXTRA_SEAT_BUSINESS_YEARLY', product: 'seat-business', cents: 7000, interval: 'year', seats: true, label: 'Business extra person — yearly' },
 ]
 
 const EVENTS = ['subscription.created', 'subscription.trialing', 'subscription.activated', 'subscription.updated', 'subscription.past_due',
@@ -89,11 +88,9 @@ for (const p of PRICES) {
     custom_data: { env: p.env, app: 'trina-drive' },
   })).id
   env[p.env] = id
-  const override = { country_codes: ['KR'], unit_price: { amount: String(p.krw), currency_code: 'KRW' } }
-  const current = found?.unit_price_overrides ?? []
-  const hasKr = current.some((o: any) => o.country_codes?.includes('KR') && o.unit_price?.currency_code === 'KRW' && o.unit_price?.amount === String(p.krw))
-  if (!hasKr) await api('PATCH', `/prices/${id}`, { unit_price_overrides: [...current.filter((o: any) => !o.country_codes?.includes('KR')), override] })
-  console.log(`${found ? 'found  ' : 'created'} price ${p.label}${hasKr ? '' : ' (+ KRW for KR)'}`)
+  // USD only, everywhere (owner's decision 2026-10-23): drop any country override left from earlier runs
+  if (found?.unit_price_overrides?.length) await api('PATCH', `/prices/${id}`, { unit_price_overrides: [] })
+  console.log(`${found ? 'found  ' : 'created'} price ${p.label}${found?.unit_price_overrides?.length ? ' (overrides removed)' : ''}`)
 }
 
 // webhook destination
