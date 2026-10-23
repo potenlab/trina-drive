@@ -1,15 +1,27 @@
 ---
-// Wordmark: a folder-shaped mark with a key slot, plus "Trina Drive". Same mark as public/favicon.svg.
+// The Trina Drive mark, "Star Pillar": a flat four-point star extruded into a short pillar, ink sides and a Signal
+// Orange top (paper sides on dark). Same geometry as public/favicon.svg and docs/assets/logo.svg. The knockout between
+// the top and the sides is a real mask, so the mark sits on any background; each instance gets its own mask id.
+import { nextMarkId } from './mark-id'
+const n = nextMarkId()
 ---
-<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-  <rect x="1" y="1" width="30" height="30" rx="8" class="logo-bg" />
-  <path d="M8 11.5a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2V21a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2z" class="logo-fold" />
-  <circle cx="16" cy="16.5" r="1.9" class="logo-key" />
-  <path d="M16 18v2.4" class="logo-keyline" />
+<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false" class="mark">
+  <defs>
+    <mask id={n} maskUnits="userSpaceOnUse" x="-8" y="-8" width="48" height="48">
+      <rect x="-8" y="-8" width="48" height="48" fill="#fff" />
+      <path d="M16 19.028L11.497 13.85L2.528 11.25L11.497 8.65L16 3.472L20.503 8.65L29.472 11.25L20.503 13.85Z" fill="#000" stroke="#000" stroke-width="3" stroke-linejoin="round" />
+      <path d="M16 19.028L16 29.528" stroke="#000" stroke-width="1.65" />
+    </mask>
+  </defs>
+  <g class="mark-side" stroke-width="0.25" stroke-linejoin="round" mask={`url(#${n})`}>
+    <path d="M29.472 11.25L20.503 13.85L20.503 23.35L29.472 20.75Z" />
+    <path d="M11.497 13.85L2.528 11.25L2.528 20.75L11.497 23.35Z" />
+    <path d="M16 19.028L11.497 13.85L11.497 23.35L16 28.528Z" />
+    <path d="M20.503 13.85L16 19.028L16 28.528L20.503 23.35Z" />
+  </g>
+  <path class="mark-top" d="M16 19.028L11.497 13.85L2.528 11.25L11.497 8.65L16 3.472L20.503 8.65L29.472 11.25L20.503 13.85Z" />
 </svg>
 <style is:global>
-  .logo-bg { fill: var(--btn); }
-  .logo-fold { fill: none; stroke: var(--btn-fg); stroke-width: 1.8; stroke-linejoin: round; }
-  .logo-key { fill: var(--logo-key); }
-  .logo-keyline { stroke: var(--logo-key); stroke-width: 1.8; stroke-linecap: round; }
+  .mark-side { fill: var(--logo-ink); stroke: var(--logo-ink); }
+  .mark-top { fill: var(--logo-top); }
 </style>
