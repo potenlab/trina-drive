@@ -25,6 +25,8 @@ const HELP = `Trina Cloud control plane
 
   serve                                   HTTP (signup, dashboard, Paddle webhook, Caddy ask) + the job loop
   teams list | show <slug> | usage
+  teams create <slug> --owner EMAIL [--name N] [--plan team|business] [--allow-reserved]
+                                          a team without a Paddle subscription (dogfood, pilots): provisioned now
   teams suspend <slug> | resume <slug>    stop / start the instance (audited)
   teams backup <slug>                     a backup now (product archive + sealed files) to the backup target
   teams export <slug> --out DIR           backup, then download and decrypt it into DIR for the customer
@@ -175,6 +177,17 @@ export async function main(argv: string[]): Promise<number> {
       return 0
     }
     case 'teams usage': for (const u of await cloud.measure()) console.log(`${u.slug.padEnd(20)} ${u.bytes ?? '?'} / ${u.quota}${u.over ? '  OVER QUOTA' : ''}`); return 0
+    case 'teams create': {
+      const owner = take(rest, '--owner'), name = take(rest, '--name'), plan = take(rest, '--plan')
+      const allowReserved = rest.includes('--allow-reserved')
+      const slug = rest.find((a) => !a.startsWith('--'))
+      if (!slug || !owner) throw new CloudError('usage', 'teams create <slug> --owner EMAIL [--name NAME] [--plan team|business] [--allow-reserved]')
+      if (plan && plan !== 'team' && plan !== 'business') throw new CloudError('usage', '--plan team or business')
+      const t = await cloud.adminCreateTeam({ email: owner, slug, name, plan: plan as 'team' | 'business' | undefined, allowReserved, actor })
+      await cloud.runDueJobs()
+      console.log(teamLine(cloud, teamBySlug(cloud.db, t.slug)!))
+      return 0
+    }
     case 'teams suspend': await cloud.suspend(team(), 'admin', actor); console.log('suspended'); return 0
     case 'teams resume': await cloud.resume(team(), actor); console.log('resumed'); return 0
     case 'teams backup': for (const p of await cloud.backup(team(), 'manual', actor)) console.log(`${p.part}\t${p.bytes}\t${p.key}`); return 0
