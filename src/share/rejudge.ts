@@ -203,7 +203,9 @@ export function withRejudge<T>(db: DB, change: () => T, opts: RejudgeOpts<T>): {
     applyJudgement(db, before, j, opts.confirmBy ?? null)
     opts.after?.(j, value)
     return { value, judgement: j }
-  })()
+  // IMMEDIATE: it reads (the snapshot) before it writes; a deferred transaction would get SQLITE_BUSY at once (no
+  // busy_timeout wait) when another connection — the tdrive CLI, the member sync — wrote in between
+  }).immediate()
 }
 
 /** After the commit: source managers hear "N widened drafts to review" (kind + count + link only, R11). */
