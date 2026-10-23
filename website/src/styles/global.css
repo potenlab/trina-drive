@@ -231,6 +231,9 @@ figure, blockquote { margin: 0; }
 }
 .btn-primary:hover { background: var(--cta-hover); }
 .btn-primary:active, .btn-secondary:active { transform: translateY(1px); }
+/* an orange ring would vanish against the orange button: ink (paper on dark) instead */
+.btn-primary:focus-visible { outline-color: var(--fg); }
+.cta-box .btn-primary:focus-visible { outline-color: #f6f2ea; }
 .btn-primary .icon-arrow, .btn-primary svg { transition: transform 0.15s; }
 .btn-primary:hover svg { transform: translateX(2px); }
 .btn-secondary { background: var(--bg-elev); color: var(--fg); border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
