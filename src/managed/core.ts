@@ -345,6 +345,11 @@ export function dropGrantsOf(db: DB, files: { dev: string | bigint; ino: string 
   return n
 }
 
+/** A group was deleted: its file shares go with it (inside the caller's transaction). Returns grant rows removed. */
+export function dropGrantsForGroup(db: DB, groupId: number): number {
+  return db.query("DELETE FROM file_grants WHERE subject_type = 'group' AND subject_id = ?").run(groupId).changes
+}
+
 /**
  * A folder became personal (My files restored from Former members, src/tdcloud/my-files.ts): every file share inside it
  * is removed (A2: a personal folder holds no shares, and moving it out again must not share anything again). Files are
