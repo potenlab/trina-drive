@@ -13,14 +13,16 @@ interface Props {
   preloadHero?: boolean
   /** Canonical URL to emit even on a noindex page (A/B variants point at the original). */
   canonicalHref?: string
+  /** Home-page A/B variant; turns on the A/B measurement script. */
+  variant?: 'a' | 'b'
 }
-const { t, title = t.meta.title, description = t.meta.description, noindex = false, jsonLd, preloadHero = false, canonicalHref } = Astro.props
+const { t, title = t.meta.title, description = t.meta.description, noindex = false, jsonLd, preloadHero = false, canonicalHref, variant } = Astro.props
 const path = Astro.url.pathname.replace(/\.html$/, '').replace(/\/index$/, '/')
 const canonical = canonicalHref ?? new URL(path, SITE_URL).href
 const ogImage = new URL(t.meta.ogImage, SITE_URL).href
 ---
 <!doctype html>
-<html lang={t.lang}>
+<html lang={t.lang} data-variant={variant}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -52,6 +54,8 @@ const ogImage = new URL(t.meta.ogImage, SITE_URL).href
     <meta name="twitter:image" content={ogImage} />
     <!-- Applies a saved light/dark choice before first paint. External file: the CSP allows no inline script. -->
     <script is:inline src="/theme.js"></script>
+    <script is:inline defer src="/ab.js"></script>
+    <script is:inline defer src="/_vercel/insights/script.js"></script>
     {jsonLd && <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
   </head>
   <body>

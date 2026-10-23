@@ -10,6 +10,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@vercel/functions": "3",
     "astro": "7.3.8"
   }
 }
