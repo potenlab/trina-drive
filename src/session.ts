@@ -44,7 +44,7 @@ export interface DraftItem { rel: string; own: boolean; draft?: Draft; pending?:
 
 export class Session {
   readonly access: Access
-  private readonly folderTouches = new Map<string, { node: Node; strong: boolean }>()
+  private readonly folderTouches = new Map<string, { node: Node; strong: boolean; via: boolean }>()
   private readonly srcTouches = new Map<number, boolean>()
   readonly files = new Set<string>()
   readonly notes = new Set<string>()
@@ -66,15 +66,23 @@ export class Session {
   }
 
   // ---------- provenance (R3) ----------
-  touchNode(node: Node, strong: boolean) {
+  /**
+   * `viaFile`: the touch comes from a file read through a file share (A2 F9). Its folder is recorded as a source even
+   * when the token reads that folder only as a bare path — else a draft made from a shared file would carry no source
+   * and promote anywhere as non-widening. Such a source is marked via_file (R4: src/drafts.ts canSeeDraft); a read
+   * of the folder by rule makes it a direct source.
+   */
+  touchNode(node: Node, strong: boolean, viaFile = false) {
+    const direct = this.access.canRead(node)
     // a folder shown only as a path to something readable below it gives nothing away about itself
-    if (!this.access.canRead(node)) return
+    if (!direct && !viaFile) return
     const k = identityKey(node.dev, node.ino)
     const t = this.folderTouches.get(k)
-    if (!t || (strong && !t.strong)) this.folderTouches.set(k, { node, strong: strong || !!t?.strong })
+    const via = !direct && (t ? t.via : true)
+    if (!t || (strong && !t.strong) || t.via !== via) this.folderTouches.set(k, { node, strong: strong || !!t?.strong, via })
   }
   touchFile(f: FileEntry, strong: boolean) {
-    this.touchNode(f.parent, strong)
+    this.touchNode(f.parent, strong, true)
     this.files.add(f.vpath)
     if (strong) this.contentFiles.set(f.vpath, { size: f.size, folder: identityKey(f.parent.dev, f.parent.ino) })
     // a NAS copy of a draft (R6, tracked or confirmed) passes the draft's sources on to whoever reads it
@@ -144,11 +152,15 @@ export class Session {
 
   /** The token's window now: stored touches in the last 8 hours plus this call's. */
   window(now = this.ctx.now()): Map<number, boolean> {
+    return new Map([...this.windowVia(now)].map(([id, t]) => [id, t.strong]))
+  }
+  /** The window with how each source was reached (via: only through file shares, A2). */
+  windowVia(now = this.ctx.now()): Map<number, { strong: boolean; via: boolean }> {
     const cutoff = now - LIMITS.windowMs
-    const out = new Map<number, boolean>()
-    for (const r of this.ctx.db.query<{ folder_id: number; strong_at: number | null; weak_at: number | null }, [number, number, number]>(
-      'SELECT folder_id, strong_at, weak_at FROM touches WHERE token_id = ? AND (strong_at > ? OR weak_at > ?)').all(this.token.id, cutoff, cutoff)) {
-      out.set(r.folder_id, (r.strong_at ?? 0) > cutoff)
+    const out = new Map<number, { strong: boolean; via: boolean }>()
+    for (const r of this.ctx.db.query<{ folder_id: number; strong_at: number | null; weak_at: number | null; via_file: number | null }, [number, number, number]>(
+      'SELECT folder_id, strong_at, weak_at, via_file FROM touches WHERE token_id = ? AND (strong_at > ? OR weak_at > ?)').all(this.token.id, cutoff, cutoff)) {
+      out.set(r.folder_id, { strong: (r.strong_at ?? 0) > cutoff, via: r.via_file === 1 })
     }
     return out
   }
@@ -160,18 +172,22 @@ export class Session {
     for (const [rel, c] of this.pending) if (c) shas.set(rel, this.ctx.blobs.put(c))
     db.transaction(() => {
       const now = this.ctx.now()
-      const touched = new Map(this.srcTouches)
-      for (const { node, strong } of this.folderTouches.values()) {
+      // folder id -> strong, via (sources from drafts and draft copies are direct)
+      const touched = new Map([...this.srcTouches].map(([id, strong]) => [id, { strong, via: false }]))
+      for (const { node, strong, via } of this.folderTouches.values()) {
         const id = ensureFolder(db, node.real, node.dev, node.ino, node.birth)
-        touched.set(id, strong || !!touched.get(id))
+        const t = touched.get(id)
+        touched.set(id, { strong: strong || !!t?.strong, via: via && (t ? t.via : true) })
       }
-      for (const [id, strong] of touched) {
-        db.query(`INSERT INTO touches (token_id, folder_id, strong_at, weak_at) VALUES (?, ?, ?, ?)
-          ON CONFLICT DO UPDATE SET strong_at = coalesce(excluded.strong_at, strong_at), weak_at = coalesce(excluded.weak_at, weak_at)`)
-          .run(this.token.id, id, strong ? now : null, strong ? null : now)
+      for (const [id, { strong, via }] of touched) {
+        // via_file survives only while every touch of the folder came through a file share (a direct read wins)
+        db.query(`INSERT INTO touches (token_id, folder_id, strong_at, weak_at, via_file) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT DO UPDATE SET strong_at = coalesce(excluded.strong_at, strong_at), weak_at = coalesce(excluded.weak_at, weak_at),
+            via_file = CASE WHEN via_file = 1 AND excluded.via_file = 1 THEN 1 ELSE 0 END`)
+          .run(this.token.id, id, strong ? now : null, strong ? null : now, via ? 1 : 0)
       }
       if (this.pending.size) {
-        const win = this.window(now)
+        const win = this.windowVia(now)
         for (const [rel, content] of this.pending) {
           let existing = db.query<{ id: number }, [number, string]>('SELECT id FROM drafts WHERE token_id = ? AND path = ? AND deleted_at IS NULL').get(this.token.id, rel)
           // R4: an own draft this token cannot see now is not there for it. Writing its path starts a new draft (its own
@@ -189,8 +205,10 @@ export class Session {
           const v = (db.query<{ v: number | null }, [number]>('SELECT max(version) AS v FROM draft_versions WHERE draft_id = ?').get(id)?.v ?? 0) + 1
           db.query('INSERT INTO draft_versions (draft_id, version, sha256, size, created_at) VALUES (?, ?, ?, ?, ?)').run(id, v, shas.get(rel)!, content.length, now)
           db.query('DELETE FROM draft_versions WHERE draft_id = ? AND version <= ?').run(id, v - LIMITS.draftVersionsKept)
-          for (const [f, strong] of win) {
-            db.query('INSERT INTO draft_src (draft_id, folder_id, strong) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET strong = max(strong, excluded.strong)').run(id, f, strong ? 1 : 0)
+          for (const [f, { strong, via }] of win) {
+            db.query(`INSERT INTO draft_src (draft_id, folder_id, strong, via_file) VALUES (?, ?, ?, ?)
+              ON CONFLICT DO UPDATE SET strong = max(strong, excluded.strong), via_file = CASE WHEN via_file = 1 AND excluded.via_file = 1 THEN 1 ELSE 0 END`)
+              .run(id, f, strong ? 1 : 0, via ? 1 : 0)
           }
         }
       }

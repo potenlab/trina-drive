@@ -150,3 +150,74 @@ export function shareClient(call: Fetcher) {
     directory: () => call('GET', '/api/directory') as Promise<{ status: number; data: Directory }>,
   }
 }
+
+// ---------- files (workstream A2: file-level sharing in managed storage; docs/SHARING-API.md "Files") ----------
+/** One person or group on a file's share list. */
+export interface FileShareEntry {
+  subject: { type: 'person' | 'group'; id: number; name: string; email?: string | null; members?: number }
+  /** a file has Viewers and Editors; 'manager' only appears on inherited entries (the folder's managers) */
+  role: 'viewer' | 'editor' | 'manager'
+  /** direct = shared on this file; inherited = from its folder (shown only to people who read the folder, and admins) */
+  source: 'direct' | 'inherited'
+  from_path?: string
+  /** a direct entry whose subject also has this role from the folder */
+  inherited_role?: 'viewer' | 'editor' | 'manager'
+  granted_by?: { id: number; name: string } | null
+  granted_at?: number
+  editable: boolean
+}
+
+export interface FileShareView {
+  /** 'inplace': NAS files are not shared one by one; 'personal': move it to a team folder to share it */
+  mode: 'managed' | 'inplace' | 'personal'
+  item: { path: string; kind: 'file'; name: string }
+  my_role?: 'viewer' | 'editor' | 'manager' | 'admin' | null
+  /** false: the caller cannot share this file (entries and general are empty) */
+  can_manage?: boolean
+  manage_as?: 'admin' | 'manager' | 'editor'
+  can_grant_manager?: false
+  can_invite?: boolean
+  can_confirm_widening?: boolean
+  can_ai_off?: false
+  editors_can_share?: { effective: boolean; from_path: string | null }
+  general?: {
+    /** what "Anyone in Trina" gets on this file, and from where (the file's own path, or the folder it comes from) */
+    effective: { role: 'viewer' | 'editor'; from_path: string } | null
+    own: 'viewer' | 'editor' | null
+    /** false: General access comes from the folder; a file cannot be narrower than its folder */
+    can_restrict: boolean
+    /** an Editor needs a step-up (POST /api/share/step-up with this file's path) to open the file to the whole team */
+    editor_step_up: boolean
+  } | null
+  entries: FileShareEntry[]
+  /** hidden: the caller reads only this file (a file-only Editor), so the folder's readers are not listed */
+  inherited?: 'shown' | 'hidden'
+  /** a file follows its folder's "No AI" (no per-file switch) */
+  ai?: { no_ai: boolean; inherited_no_ai_from: string | null }
+  /** the dialog says: "People you add will see the folder names <path_names_visible>" */
+  path_names_visible?: string
+  /** draft_copy: this file is a copy of an AI draft (sharing it wider may need a manager's confirm) */
+  warnings?: { code: 'draft_copy' }[]
+}
+
+export interface FileShareChange {
+  path: string
+  add?: { subject: SubjectRef | { email: string }; role: 'viewer' | 'editor' }[]
+  set?: { subject: SubjectRef; role: 'viewer' | 'editor' | 'remove' }[]
+  general?: { mode: 'restricted' } | { mode: 'team'; role: 'viewer' | 'editor' }
+  /** remove my own share on this file */
+  leave?: true
+  notify?: boolean
+  confirm_widening?: boolean
+  step_up?: string
+}
+
+export interface FileSharedItem {
+  kind: 'file'; path: string; name: string; role: 'viewer' | 'editor'
+  shared_by: { id: number; name: string } | null
+  shared_at: number
+  size: number; mtime: number
+}
+
+/** GET /api/recent: files this person opened or changed on the web or a mounted drive, newest first. */
+export interface RecentItem { path: string; name: string; kind: 'file'; at: number; action: 'opened' | 'edited'; size: number; mtime: number }

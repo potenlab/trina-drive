@@ -39,6 +39,7 @@ import { inviteHandler } from './invite'
 import { copiesUnder, notifyWidened, withRejudge, type Judgement } from './rejudge'
 import { everyoneGroup } from './rules'
 import { isSkillLibrary } from '../skills/core'
+import { applyFileShare, fileAt, fileKind, fileShareView, fileStepKey, sharedFilesWithMe, type FileChangeDeps } from './file-grants'
 
 export type Kind = 'admin' | 'manager' | 'editor' | 'none'
 const ROLE_LEVEL: Record<Role, number> = { viewer: 1, editor: 2, manager: 2 }
@@ -130,7 +131,7 @@ const emailOf = (db: DB, id: number) => {
   try { return db.query<{ email: string | null }, [number]>('SELECT email FROM accounts WHERE person_id = ?').get(id)?.email ?? undefined } catch { return undefined }
 }
 
-function entriesOf(db: DB, r: Rights, f: FolderRow, a: Actor, kind: Kind, E: number | null): ShareEntry[] {
+export function entriesOf(db: DB, r: Rights, f: FolderRow, a: Actor, kind: Kind, E: number | null): ShareEntry[] {
   const subjects = new Map<string, { type: 'person' | 'group'; id: number }>()
   const chain = r.chain(f)
   for (let i = chain.length - 1; i >= 0; i--) {
@@ -172,7 +173,13 @@ function entriesOf(db: DB, r: Rights, f: FolderRow, a: Actor, kind: Kind, E: num
   return [...out.values()].sort((x, y) => order[x.role] - order[y.role] || x.subject.type.localeCompare(y.subject.type) || x.subject.name.localeCompare(y.subject.name))
 }
 
-export function shareView(w: WebCtx, a: Actor, vpath: unknown): ShareView | { mode: 'inplace'; item: ShareView['item'] } {
+/** A2: the folder's entries as a file's dialog shows them ("inherited", for people who read the folder). */
+const fileDeps = (db: DB): FileChangeDeps['folderEntries'] => (_db, r, f, a) => entriesOf(db, r, f, a, kindOf(r, a, f), everyoneId(db))
+
+export function shareView(w: WebCtx, a: Actor, vpath: unknown): ShareView | { mode: 'inplace'; item: ShareView['item'] } | ReturnType<typeof fileShareView> {
+  // a file this person sees: file-level sharing (./file-grants.ts, A2); anything else is a folder or 404
+  const file = fileAt(w, a, vpath)
+  if (file) return fileShareView(w, a, file, { folderEntries: fileDeps(w.db) })
   const it = resolveFolder(w, a, vpath)
   const { f, r } = it
   const name = it.vpath.slice(it.vpath.lastIndexOf('/') + 1)
@@ -479,8 +486,9 @@ function refusal(db: DB, a: Actor, kind: Kind, j: Judgement) {
 }
 
 // ---------- step-up (an Editor opening a folder to the whole team) ----------
-const stepSha = (folderId: number, general: unknown) => 'share-' + sha256(JSON.stringify({ folder: folderId, general }))
-const binding = (sessionHash: string, a: Actor, folderId: number, general: unknown): StepUpBinding =>
+const stepSha = (folderId: number | string, general: unknown) => 'share-' + sha256(JSON.stringify({ folder: folderId, general }))
+/** `folderId`: a folder row's id, or a file's key (`file:<uid>`, A2) */
+const binding = (sessionHash: string, a: Actor, folderId: number | string, general: unknown): StepUpBinding =>
   ({ sessionHash, personId: a.personId, approvalId: 0, sha256: stepSha(folderId, general) })
 
 function stepUpMethod(w: WebCtx, personId: number): { method: 'passkey' | 'totp' | null; missing: 'passkey' | 'totp' | null } {
@@ -489,27 +497,37 @@ function stepUpMethod(w: WebCtx, personId: number): { method: 'passkey' | 'totp'
   return totpEnabled(w.db, personId) ? { method: 'totp', missing: null } : { method: null, missing: 'totp' }
 }
 
+/** The step-up target: a file this person may share (A2: bound to the file's uid), or a folder. */
+function stepTarget(w: WebCtx, a: Actor, vpath: unknown): number | string {
+  const file = fileAt(w, a, vpath)
+  if (file) {
+    if (fileKind(file, a) === 'none') throw err(403, 'not_manager', 'you cannot change sharing on this file')
+    return fileStepKey(w.db, file.e)
+  }
+  const it = resolveFolder(w, a, vpath)
+  if (kindOf(it.r, a, it.f) === 'none') throw err(403, 'not_manager', 'you cannot change sharing on this folder')
+  return it.f.id
+}
+
 export async function shareStepUpOptions(op: Op, sessionHash: string, body: { path?: unknown; general?: unknown }) {
-  const it = resolveFolder(op.w, op.actor, body.path)
-  if (kindOf(it.r, op.actor, it.f) === 'none') throw err(403, 'not_manager', 'you cannot change sharing on this folder')
+  const key = stepTarget(op.w, op.actor, body.path)
   const general = normGeneral(body.general)
   if (!general || general.mode !== 'team') throw bad('bad_general', "the step-up is for { mode: 'team', role }")
   const m = stepUpMethod(op.w, op.actor.personId)
   if (!m.method) throw err(409, m.missing === 'passkey' ? 'passkey_required' : 'totp_required',
     m.missing === 'passkey' ? 'opening a folder to the whole team needs a passkey on this server: add one in Settings' : 'opening a folder to the whole team needs an authenticator app: set one up in Settings')
   if (m.method === 'totp') return { method: 'totp' }
-  return { method: 'passkey', options: await passkeyAssertionOptions(op.w.db, pkConfig(op.w)!, op.actor.personId, 'stepup', stepUpChallengeBinding(binding(sessionHash, op.actor, it.f.id, general))) }
+  return { method: 'passkey', options: await passkeyAssertionOptions(op.w.db, pkConfig(op.w)!, op.actor.personId, 'stepup', stepUpChallengeBinding(binding(sessionHash, op.actor, key, general))) }
 }
 
 export async function shareStepUp(op: Op, sessionHash: string, body: { path?: unknown; general?: unknown; response?: unknown; code?: unknown }) {
   const { w, actor } = op
   const key = `stepup:${actor.personId}`
   if (w.loginByName.blocked(key)) throw new ApiError(429, 'rate_limited', 'too many tries; wait a few minutes', { 'retry-after': String(w.loginByName.retryAfter(key)) })
-  const it = resolveFolder(w, actor, body.path)
-  if (kindOf(it.r, actor, it.f) === 'none') throw err(403, 'not_manager', 'you cannot change sharing on this folder')
+  const target = stepTarget(w, actor, body.path)
   const general = normGeneral(body.general)
   if (!general || general.mode !== 'team') throw bad('bad_general', "the step-up is for { mode: 'team', role }")
-  const b = binding(sessionHash, actor, it.f.id, general)
+  const b = binding(sessionHash, actor, target, general)
   const m = stepUpMethod(w, actor.personId)
   try {
     if (m.method === 'passkey' && body.response !== undefined) await passkeyVerify(w.db, pkConfig(w)!, actor.personId, 'stepup', stepUpChallengeBinding(b), body.response)
@@ -528,6 +546,13 @@ export async function shareStepUp(op: Op, sessionHash: string, body: { path?: un
 export async function changeShare(op: Op, sessionHash: string, body: Record<string, unknown>): Promise<unknown> {
   const { w, actor: a } = op
   const db = w.db
+  // a file this person sees: file-level sharing (./file-grants.ts, A2)
+  const file = fileAt(w, a, body.path)
+  if (file) return applyFileShare(op, file, body, {
+    folderEntries: fileDeps(db),
+    consumeStepUp: (key, general, token) => consumeStepUp(db, token, binding(sessionHash, a, key, normGeneral(general))),
+    emit: w.opts.emit ?? (w as { emit?: WebCtx['opts']['emit'] }).emit,
+  })
   const it = resolveFolder(w, a, body.path)
   if (!it.managed) throw bad('inplace', 'this folder is on the NAS (in place): who reads it is set on its folder page')
   const { f, r } = it
@@ -654,8 +679,10 @@ export function sharedWithMe(w: WebCtx, a: Actor) {
     items.push({ path: n.vpath, kind: 'folder', name: n.vpath.slice(n.vpath.lastIndexOf('/') + 1), role,
       shared_by: g.by == null ? null : { id: g.by, name: personName(db, g.by) }, shared_at: g.at })
   }
-  items.sort((x, y) => (y.shared_at ?? 0) - (x.shared_at ?? 0) || x.path.localeCompare(y.path))
-  return { items }
+  // A2: files shared with this person (directly or through a group, not Everyone) that they can open now
+  const all: (typeof items[number] | ReturnType<typeof sharedFilesWithMe>[number])[] = [...items, ...sharedFilesWithMe(w, a, E)]
+  all.sort((x, y) => (y.shared_at ?? 0) - (x.shared_at ?? 0) || x.path.localeCompare(y.path))
+  return { items: all }
 }
 
 /** People and groups for the share dialog's picker: names for every member, addresses for the admin only (finding 11). */

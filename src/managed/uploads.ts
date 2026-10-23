@@ -33,7 +33,8 @@ const view = (u: UploadRow, m: Managed) => ({ id: u.id, name: u.name, folder: u.
   chunk_size: MANAGED_LIMITS.chunkBytes, expires_at: u.expires_at, path: u.result_path, quota: m.s.quotaBytes })
 
 export function startUpload(m: Managed, body: { path?: unknown; name?: unknown; size?: unknown; sha256?: unknown; conflict?: unknown }) {
-  const node = m.writable(body.path, 'upload-start')
+  // a file Editor (file share, A2) may upload a new version of that file into a folder they cannot write
+  const node = m.writableFor(body.path, body.name, asConflict(body.conflict), 'upload-start')
   const name = checkName(body.name, 'file name')
   const size = Number(body.size)
   if (!Number.isSafeInteger(size) || size < 0) throw new ManagedError(400, 'bad_size', 'give the file size in bytes')

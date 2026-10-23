@@ -13,7 +13,7 @@ import path from 'node:path'
 import type { DB } from '../db'
 import { isSystemName, nfc } from '../names'
 import type { FileEntry, Node } from '../policy'
-import { sha256 } from '../store'
+import { ensureFolder, sha256 } from '../store'
 import { ensureRoot, MANAGED_LIMITS } from './settings'
 
 export class ManagedError extends Error {
@@ -250,7 +250,16 @@ export function placeReplace(root: string, node: Node, old: FileEntry, staged: S
 const exists = (name: string) => new ManagedError(409, 'exists', `${name} already exists here`)
 
 // ---------- file rows ----------
-export interface FileRow { id: number; dev: string; ino: string; size: number; mtime_ns: string; sha256: string; version: number; created_at: number; created_by: number | null; updated_at: number; updated_by: number | null }
+export interface FileRow {
+  id: number; dev: string; ino: string; size: number; mtime_ns: string; sha256: string; version: number; created_at: number; created_by: number | null; updated_at: number; updated_by: number | null
+  /** identity for file grants (src/share/file-grants.ts): random, never reused; NULL only on a row an older image made before the next open */
+  uid?: string | null
+  /** where a shared file was last seen: its parent folder row and on-disk name (NULL: never shared). Finds; never opens. */
+  folder_id?: number | null; name?: string | null
+}
+
+/** A new file uid: 128 random bits, hex (never reused, never shown to clients). */
+export const newUid = () => crypto.randomBytes(16).toString('hex')
 
 /** The row of a file as it is on disk now (same identity, size and mtime), if the server wrote it. */
 export function fileRowOf(db: DB, f: { dev: bigint | string; ino: bigint | string; size: number; mtimeNs: bigint | string }): FileRow | undefined {
@@ -258,12 +267,24 @@ export function fileRowOf(db: DB, f: { dev: bigint | string; ino: bigint | strin
   return r && r.size === f.size && r.mtime_ns === String(f.mtimeNs) ? r : undefined
 }
 
+/** The uid of the file named `name` (NFC/case as the folder lists it) in folder `dir`, if the server tracks it as it is. */
+export function fileUidAt(db: DB, dir: string, name: string): string | null {
+  let there: string | null = null
+  try { there = taken(dir, name) } catch { return null }
+  if (!there) return null
+  try {
+    const st = fs.lstatSync(path.join(dir, there), { bigint: true })
+    if (!st.isFile()) return null
+    return fileRowOf(db, { dev: st.dev, ino: st.ino, size: Number(st.size), mtimeNs: st.mtimeNs })?.uid ?? null
+  } catch { return null }
+}
+
 /** Inside the caller's transaction: the row for a newly placed file. */
 export function trackNew(db: DB, p: Placed, by: number | null, now: number): number {
   // a stale row on the same identity (a reused inode number, or a file changed by hand) is another file: drop it
   dropRow(db, p.dev, p.ino)
-  return Number(db.query('INSERT INTO mfiles (dev, ino, size, mtime_ns, sha256, version, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)')
-    .run(p.dev, p.ino, p.size, p.mtimeNs, p.sha256, now, by, now, by).lastInsertRowid)
+  return Number(db.query('INSERT INTO mfiles (dev, ino, size, mtime_ns, sha256, version, created_at, created_by, updated_at, updated_by, uid) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)')
+    .run(p.dev, p.ino, p.size, p.mtimeNs, p.sha256, now, by, now, by, newUid()).lastInsertRowid)
 }
 
 /**
@@ -276,8 +297,8 @@ export function trackReplace(db: DB, p: Placed, by: number | null, now: number, 
   if (!row) {
     // a file the server did not write (put there by hand before): it starts its history now
     dropRow(db, old.dev, old.ino)
-    const id = Number(db.query('INSERT INTO mfiles (dev, ino, size, mtime_ns, sha256, version, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, NULL)')
-      .run(old.dev, old.ino, old.size, old.mtimeNs, old.sha256, now, now).lastInsertRowid)
+    const id = Number(db.query('INSERT INTO mfiles (dev, ino, size, mtime_ns, sha256, version, created_at, created_by, updated_at, updated_by, uid) VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, NULL, ?)')
+      .run(old.dev, old.ino, old.size, old.mtimeNs, old.sha256, now, now, newUid()).lastInsertRowid)
     row = db.query<FileRow, [number]>('SELECT * FROM mfiles WHERE id = ?').get(id)!
   }
   dropRow(db, p.dev, p.ino, row.id)
@@ -291,14 +312,85 @@ export function trackReplace(db: DB, p: Placed, by: number | null, now: number, 
   return { fileId: row.id, version, dropped }
 }
 
-/** Forget a row (and its earlier versions) at an identity, except row `keepId`. Returns the version hashes dropped. */
+/**
+ * Forget a row (and its earlier versions and its file grants) at an identity, except row `keepId`. Returns the version
+ * hashes dropped. The ONLY place mfiles rows are deleted (trackNew, trackReplace, purge, expiry, rescan): a file's
+ * grants never outlive its row (there is no foreign key, so an older image's delete can never fail on them either).
+ */
 export function dropRow(db: DB, dev: string, ino: string, keepId?: number): string[] {
-  const r = db.query<{ id: number }, [string, string]>('SELECT id FROM mfiles WHERE dev = ? AND ino = ?').get(dev, ino)
+  const r = db.query<{ id: number; uid: string | null }, [string, string]>('SELECT id, uid FROM mfiles WHERE dev = ? AND ino = ?').get(dev, ino)
   if (!r || r.id === keepId) return []
   const shas = db.query<{ sha256: string }, [number]>('SELECT sha256 FROM mversions WHERE file_id = ?').all(r.id).map((x) => x.sha256)
+  if (r.uid != null) db.query('DELETE FROM file_grants WHERE file_uid = ?').run(r.uid)
   db.query('DELETE FROM mversions WHERE file_id = ?').run(r.id)
   db.query('DELETE FROM mfiles WHERE id = ?').run(r.id)
   return shas
+}
+
+// ---------- where shared files are (location: finds, never opens) ----------
+/** A shared file moved or was renamed: its remembered location follows (a no-op for files never shared). */
+export function relocate(db: DB, dev: string, ino: string, folderId: () => number, name: string) {
+  const r = db.query<{ id: number }, [string, string]>('SELECT id FROM mfiles WHERE dev = ? AND ino = ? AND folder_id IS NOT NULL').get(dev, ino)
+  if (r) db.query('UPDATE mfiles SET folder_id = ?, name = ? WHERE id = ?').run(folderId(), name, r.id)
+}
+
+/** Delete the grants of files (by identity); returns how many grant rows went. Inside the caller's transaction. */
+export function dropGrantsOf(db: DB, files: { dev: string | bigint; ino: string | bigint }[]): number {
+  let n = 0
+  const q = db.query<{ uid: string | null }, [string, string]>('SELECT uid FROM mfiles WHERE dev = ? AND ino = ?')
+  for (const f of files) {
+    const uid = q.get(String(f.dev), String(f.ino))?.uid
+    if (uid != null) n += db.query('DELETE FROM file_grants WHERE file_uid = ?').run(uid).changes
+  }
+  return n
+}
+
+/** How many grant rows the files hold (a move response's `shared_with`, so the app can warn first). */
+export function grantsOn(db: DB, files: { dev: string | bigint; ino: string | bigint }[]): number {
+  let n = 0
+  const q = db.query<{ n: number }, [string, string]>('SELECT count(*) AS n FROM file_grants g JOIN mfiles m ON m.uid = g.file_uid WHERE m.dev = ? AND m.ino = ?')
+  for (const f of files) n += q.get(String(f.dev), String(f.ino))!.n
+  return n
+}
+
+/**
+ * Bring shared files' locations in line with the disk (at boot, after rescan): a file that moved without its location
+ * following (an older image renamed or moved it, a restore from backup) is found by identity in one walk of the managed
+ * folders and its location updated. Nothing is dropped; when a walk stops early (too many entries), nothing changes at
+ * all. Until this runs, a stale location opens nothing (fail closed: the grant only opens the file the walk finds).
+ */
+export function relocateShared(db: DB): { checked: number; moved: number; partial: boolean } {
+  const rows = db.query<{ id: number; dev: string; ino: string; name: string | null; path: string | null }, []>(`
+    SELECT m.id, m.dev, m.ino, m.name, f.path FROM mfiles m LEFT JOIN folders f ON f.id = m.folder_id
+    WHERE m.folder_id IS NOT NULL AND m.uid IN (SELECT file_uid FROM file_grants)`).all()
+  const out = { checked: rows.length, moved: 0, partial: false }
+  const there = (real: string, dev: string, ino: string) => {
+    try { const st = fs.lstatSync(real, { bigint: true }); return st.isFile() && String(st.dev) === dev && String(st.ino) === ino } catch { return false }
+  }
+  const stale = rows.filter((r) => !(r.path != null && r.name != null && there(path.join(r.path, r.name), r.dev, r.ino)))
+  if (!stale.length) return out
+  const tops = db.query<{ path: string }, []>('SELECT f.path FROM managed_mounts m JOIN folders f ON f.id = m.folder_id').all().map((r) => r.path)
+  const byIdentity = new Map<string, string>()
+  for (const top of tops) {
+    if (!fs.existsSync(top)) continue
+    const w = diskWalk(top)
+    if (w.partial) { out.partial = true; return out }
+    for (const f of w.files) byIdentity.set(`${f.dev}:${f.ino}`, f.real)
+  }
+  db.transaction(() => {
+    for (const r of stale) {
+      const real = byIdentity.get(`${r.dev}:${r.ino}`)
+      if (!real) continue
+      const dir = path.dirname(real)
+      let st: fs.BigIntStats
+      try { st = fs.lstatSync(dir, { bigint: true }) } catch { continue }
+      if (!st.isDirectory()) continue
+      const fid = ensureFolder(db, dir, st.dev, st.ino, st.birthtimeNs)
+      db.query('UPDATE mfiles SET folder_id = ?, name = ? WHERE id = ?').run(fid, path.basename(real), r.id)
+      out.moved++
+    }
+  })()
+  return out
 }
 
 // ---------- folder rows follow a moved folder ----------

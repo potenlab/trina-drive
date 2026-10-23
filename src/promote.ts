@@ -21,10 +21,10 @@ import type { DB } from './db'
 import { sourcesFor, type Blobs, type Draft } from './drafts'
 import { sniffLink, SNIFF_BYTES } from './inplace/linkish'
 import { ext, isSystemName, nfc, splitVirtual } from './names'
-import { Access, isWidening, readersSource, readersTarget, type FileEntry, type Node } from './policy'
+import { Access, isWidening, widenedReaders, type FileEntry, type Node } from './policy'
 import { Rights } from './rights'
 import { ensureFolder, sha256, type FolderRow } from './store'
-import { dropStaged, gcBlobs, inManaged, managedMountIds, ManagedError, placeNew, placeReplace, stageBytes, taken as mTaken, trackNew, trackReplace, type Placed as ManagedPlaced } from './managed/core'
+import { dropStaged, fileUidAt, gcBlobs, inManaged, managedMountIds, ManagedError, placeNew, placeReplace, stageBytes, taken as mTaken, trackNew, trackReplace, type Placed as ManagedPlaced } from './managed/core'
 import { indexLater } from './managed/ops'
 import { versionsKept } from './managed/settings'
 import type { Mirror } from './mirror'
@@ -150,15 +150,8 @@ export function promoteTargets(db: DB, personId: number) {
 
 // ---------- readers ----------
 /** R5/R6: people who would read the file at `target` but cannot read some source S ≠ target. */
-export function readerGain(db: DB, src: Iterable<number>, target: number): number[] {
-  const rt = readersTarget(db, target)
-  const out = new Set<number>()
-  for (const s of src) {
-    if (s === target) continue
-    const rs = readersSource(db, s)
-    for (const u of rt) if (!rs.has(u)) out.add(u)
-  }
-  return [...out].sort((a, b) => a - b)
+export function readerGain(db: DB, src: Iterable<number>, target: number, fileUid?: string | null): number[] {
+  return [...widenedReaders(db, src, target, fileUid)]
 }
 
 // ---------- the draft ----------
@@ -307,8 +300,10 @@ export function planPromote(db: DB, blobs: Blobs, p: Promoter, draft: Draft, fol
     replace = true
   }
   const src = [...draft.src.keys()]
-  const widening = src.length > 0 && isWidening(db, src, target.folderId)
-  return widening ? { kind: 'approval', target, bytes, draft, name: n, gain: readerGain(db, src, target.folderId), overwrite: replace } : { kind: 'write', target, bytes, draft, name: n, overwrite: replace }
+  // overwriting a shared file (A2 W1): its readers are the folder's plus the people it is shared with
+  const uid = replace ? fileUidAt(db, target.node.real, n) : null
+  const widening = src.length > 0 && isWidening(db, src, target.folderId, uid)
+  return widening ? { kind: 'approval', target, bytes, draft, name: n, gain: readerGain(db, src, target.folderId, uid), overwrite: replace } : { kind: 'write', target, bytes, draft, name: n, overwrite: replace }
 }
 
 /** Right before writing: the draft is still at the version planned (base-hash check). */
@@ -498,7 +493,7 @@ export function approve(db: DB, blobs: Blobs, id: number, approverId: number, sh
   if (sha256(bytes) !== a.sha256) throw new PromoteError('blob', 'the stored draft bytes do not match their hash', 500)
   checkContent(bytes)
   const draft = db.query<{ token_id: number; person_id: number }, [number]>('SELECT token_id, person_id FROM drafts WHERE id = ?').get(a.draft_id)!
-  const widening = isWidening(db, approvalSources(db, a), a.target_folder_id)
+  const widening = isWidening(db, approvalSources(db, a), a.target_folder_id, a.overwrite ? fileUidAt(db, node.real, a.name) : null)
   let placed: Placed
   try { placed = place(db, node, a.name, bytes, !!a.overwrite && !!nameTakenSafe(node.real, a.name), server) } catch (e) {
     if (e instanceof PromoteError && e.code === 'exists') db.query("UPDATE approvals SET status = 'failed', decided_at = ?, decided_by = ?, decision_reason = 'a file with that name exists now' WHERE id = ?").run(now, approverId, a.id)
@@ -610,13 +605,15 @@ export function approvalDetail(db: DB, blobs: Blobs, id: number, personId: numbe
   }
   const s = sourcesFor(access, new Map((JSON.parse(a.src) as [number, number][]).map(([id, strong]) => [id, !!strong])))
   const extra = src.filter((x) => !(JSON.parse(a.src) as [number, number][]).some(([id]) => id === x))
-  const gain = readerGain(db, src, a.target_folder_id)
+  const tnode = a.overwrite ? new Access(db, { personId: -1 }).nodeForFolder(a.target_folder_id) : null
+  const uid = tnode ? fileUidAt(db, tnode.real, a.name) : null
+  const gain = readerGain(db, src, a.target_folder_id, uid)
   const pv = previewOf(blobs.get(a.sha256))
   return {
     ...base,
     sources: s.shown.map((x) => ({ folder: x.folder, strong: x.strong })), hidden_sources: s.hidden + extra.length,
     gainers: { count: gain.length, names: gain.map((g) => nameOf(db, g)!).sort() },
-    widening_now: isWidening(db, src, a.target_folder_id),
+    widening_now: isWidening(db, src, a.target_folder_id, uid),
     requester_token: tokenName(db, a.requester_token_id),
     agent_claim: a.reason,
     preview: pv, diff: pv.binary ? null : diffAgainstNothing(pv.text, `${a.target_vpath}/${a.name}`),
