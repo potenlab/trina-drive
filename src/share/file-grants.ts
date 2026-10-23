@@ -238,7 +238,7 @@ function judgeCopies(db: DB, e: FileEntry, F: FolderRow, before: Set<number>, af
     }
     if (!gained.size) continue
     const l = located.get(w.id)
-    snap.set(w.id, { w, real: l?.real ?? e.real, folderId: l?.folderId ?? F.id, src, excess: new Set() })
+    snap.set(w.id, { w, real: l?.real ?? e.real, folderId: l?.folderId ?? F.id, src, excess: new Set(), readers: before })
     j.copies.push({ id: w.id, folderId: l?.folderId ?? F.id, sources: src, gained: [...gained] })
     gained.forEach((u) => j.people.add(u))
     src.forEach((s) => j.sources.add(s))
