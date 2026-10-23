@@ -57,7 +57,10 @@ export async function virtualAuthenticator(page: PW) {
 export async function shot(page: PW, name: string): Promise<string> {
   fs.mkdirSync(OUT, { recursive: true })
   const file = path.join(OUT, `${name}.png`)
-  await page.screenshot({ path: file, fullPage: false })
+  // animations off (a spinner or marquee never lets a frame settle); a busy machine (the whole gate at once) can still
+  // stall one capture: once more before it counts as a failure
+  const take = (timeout: number) => page.screenshot({ path: file, fullPage: false, animations: 'disabled', caret: 'hide', timeout })
+  try { await take(20_000) } catch { await take(30_000) }
   const extra = process.env.E2E_SHOTS_DIR
   if (extra) { fs.mkdirSync(extra, { recursive: true }); fs.copyFileSync(file, path.join(extra, `${name}.png`)) }
   return file
