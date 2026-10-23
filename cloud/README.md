@@ -1,7 +1,7 @@
 # Trina Cloud — hosted Trina Drive, one isolated instance per team
 
-A team signs up, pays through Paddle, and gets its own Trina Drive at `https://<team>.cloud.trina.app` with a real
-certificate, so Claude.ai and ChatGPT connectors (OAuth, v0.2) work right away. Each team runs the unchanged
+A team signs up — [free](#free-plan) with just an email, or paying through Paddle — and gets its own Trina Drive at
+`https://<team>.cloud.trina.app` with a real certificate, so Claude.ai and ChatGPT connectors (OAuth, v0.2) work right away. Each team runs the unchanged
 `trina-drive` image in its own container, on its own network, with its own volume, uid, limits and keys.
 
 ```
@@ -13,9 +13,10 @@ cloud/
   infra/     Terraform for AWS (applied once, 2026-10-23: test deploy, now on hold)
 
   control/src/scaler.ts   the host scaler: team hosts start when a paid team needs one and go when empty
+  control/src/free.ts     the Free plan: sign-up without Paddle, waitlist, inactivity pause, wake, deletion
 ```
 
-Status: **runs end to end locally** (four teams on simulated hosts, 179 checks), with every team in hosted mode (admins enrol a
+Status: **runs end to end locally** (four paid teams and a free one on simulated hosts, 229 checks), with every team in hosted mode (admins enrol a
 second factor), behind Caddy as its one trusted proxy, on managed storage with the plan's quota, and sending its own
 mail through the host's mail relay. The AWS path (driver, host agent, mail relay → Resend or SES, Terraform) is written and
 unit-tested against fake AWS endpoints, and was **deployed once to AWS on 2026-10-23** (one control instance, one
@@ -72,6 +73,9 @@ flowchart LR
 6. **Use**: people sign in on the team's address; AI apps connect to `https://acme.cloud.trina.app/mcp` with OAuth
    (Claude.ai, ChatGPT) or a personal token (Claude Code, Codex, Cursor).
 
+Free teams skip steps 1–3: email + team name at `https://cloud.trina.app/free`, a confirmation link, then step 4
+([Free plan](#free-plan)).
+
 ### Billing lifecycle
 
 | Paddle subscription status | Team |
@@ -86,17 +90,24 @@ flowchart LR
 
 Paddle has no "deleted" event; "deleted" here is the end of the 30-day window after a cancellation.
 
+A free team has no subscription: its lifecycle is inactivity ([Free plan](#free-plan)). A subscription for it (checkout
+from the dashboard) turns it into a paid team in place; there is no way back to Free.
+
 ### What each team gets
 
-| | Team | Business |
-|---|---|---|
-| Files (the product's storage quota: files, trash, versions, uploads) | 100 GB | 1 TB |
-| CPU / memory / processes | 1 vCPU / 2 GiB (no swap) / 512 | 2 vCPU / 4 GiB / 1024 |
-| Disk cap (XFS: files + 20 GB database/drafts + one backup's staging) | 220 GB | 2,020 GB |
-| Worker scratch (`/tmp` tmpfs) | 256 MB | 512 MB |
-| Host capacity used | 1 slot | 2 slots |
+| | Free | Team | Business |
+|---|---|---|---|
+| Files (the product's storage quota: files, trash, versions, uploads) | 1 GB | 100 GB | 1 TB |
+| People | 3 active (`TDRIVE_MAX_PEOPLE`, enforced by the product) | billed by Paddle | billed by Paddle |
+| CPU / memory / processes | 0.5 vCPU / 768 MiB / 256 | 1 vCPU / 2 GiB (no swap) / 512 | 2 vCPU / 4 GiB / 1024 |
+| Disk cap (XFS: files + database/drafts headroom + one backup's staging) | 6 GB (4 GB headroom) | 220 GB (20 GB) | 2,020 GB (20 GB) |
+| Worker scratch (`/tmp` tmpfs) | 128 MB | 256 MB | 512 MB |
+| Host capacity used | 0.25 slot | 1 slot | 2 slots |
+| Daily backups kept | 3 (`TDCLOUD_FREE_BACKUP_KEEP`) | `TDCLOUD_BACKUP_KEEP` | `TDCLOUD_BACKUP_KEEP` |
+| Pauses when nobody uses it | after 7 days; deleted after 90 days paused | never | never |
 
-Limits are in `control/src/plans.ts`. The plan comes from the Paddle price id (`PADDLE_PRICE_*`).
+Limits are in `control/src/plans.ts`. The plan comes from the Paddle price id (`PADDLE_PRICE_*`); Free from the free
+sign-up.
 
 ### Per-team settings
 
@@ -182,6 +193,95 @@ AWS denied SES production access, so mail leaves through **Resend** (`control/sr
 - **SES stays available** (`mail_upstream = "ses"` in Terraform, `TDCLOUD_MAILER=ses`, `TDCLOUD_MAIL_UPSTREAM=ses`):
   the identity, DKIM records and IAM statements are kept. `smtp` (default: Resend's SMTP `smtp.resend.com:465`, user
   `resend`, the same key as password) is there for a network that blocks the API.
+
+## Free plan
+
+`control/src/free.ts`; the website's pricing card (Free $0: 1 GB, up to 3 people, pauses after 7 days without
+activity) links its "Start free" button to `https://cloud.trina.app/free`.
+
+**Sign-up without Paddle.** `/free` asks for a work email, a team name and optionally an address (else made from the
+name). The control plane mails a one-time confirmation link (`/free/verify?token=…`: 256 random bits, only the hash
+is stored, works once, for `TDCLOUD_FREE_VERIFY_TTL` = 24 h; the link page shows a button so mail scanners do not use it
+up; a newer request for the same mailbox replaces an older link). Confirmed: the owner's control-plane account is made
+(confirmed, no password: they sign in with an **email link**, `/login` → "Email me a sign-in link", 15 minutes, once),
+the team is created with plan `free` in `provisioning`, and the usual provisioning runs — host, container, setup mail
+with `#token=` (it also explains the free limits). JSON: `POST /api/free/signup`, `/api/free/verify`,
+`/api/login/link`, `/api/login/link/confirm`.
+
+**Abuse limits.**
+- **One free team per mailbox**: `email_key` = lower case, no `+tag`, `googlemail.com` = `gmail.com`, no dots in a
+  Gmail local part. A second request gets a reminder mail with the existing team's address (no link; the page answers
+  the same either way: nothing to enumerate); a link raced past it is refused at confirmation. Paid teams do not count.
+- **Per client address**: `TDCLOUD_FREE_SIGNUPS_PER_IP_HOUR` (5) and `_PER_IP_DAY` (20) sign-up requests, keyed on the
+  client address Caddy hands over (`X-Forwarded-For` from the trusted proxy only; [Client addresses](#client-addresses)).
+- **Disposable mail**: a built-in list of ~60 throwaway services (subdomains too), plus `TDCLOUD_FREE_BLOCKED_DOMAINS`.
+- **Cloudflare Turnstile** (optional): with `TDCLOUD_TURNSTILE_SITE_KEY` + `TDCLOUD_TURNSTILE_SECRET` the form shows
+  the widget and the control plane checks the token with `siteverify` (with the client address) before anything else;
+  unset = off. The CSP allows `challenges.cloudflare.com` for its script and frame.
+
+**The cap and the waitlist.** At most `TDCLOUD_MAX_FREE_TEAMS` (50) free teams exist (any state but deleted). A sign-up
+confirmed past it joins the **waitlist** (status `waitlisted`, the person is told), and ops get "free waitlist: <email>
+(N waiting)". `free waitlist` lists it; `free admit <email|id>` creates the team (past the cap only with `--force`).
+
+**Activity.** A running free team is asked when people last used it: `tdrive activity --json` run in its container
+over `docker exec` on its host (SSM on AWS) — never over the network — every `TDCLOUD_FREE_ACTIVITY_EVERY` (1 h), and
+every minute once it is close to a step. The product answers from what it already records: web sessions
+(`last_seen_at`, refreshed by any signed-in request, at most once a minute), access tokens (`last_used_at`: every MCP call, personal or
+OAuth) and WebDAV app passwords (`last_used_at`). Nothing is decided when the answer cannot be read. The idle clock
+starts when the team first runs.
+
+**Lifecycle** (paid plans never pause for inactivity; the sweep runs every minute):
+
+| | |
+|---|---|
+| 6 days without activity (`TDCLOUD_FREE_IDLE_WARN`) | the owner is warned once ("pauses on …") |
+| 7 days (`TDCLOUD_FREE_IDLE_PAUSE`) | **paused**: container stopped, data kept (status `suspended`, reason `inactive`; `teams list` shows `paused`), owner mailed. The address keeps its certificate and shows the paused page |
+| **Wake up** | the paused page's button (it links to `https://cloud.trina.app/wake/<slug>`, the team's address minus its first label), the dashboard's button, or the owner signing in to the control plane: a `wake` job starts the same container; the wake page polls `/api/wake/<slug>` and opens the team when it runs (a few seconds). Limited to 20 per client address and 12 per team an hour |
+| woken, then used | a normal running free team again (the deletion clock stops) |
+| woken, not used within `TDCLOUD_FREE_WAKE_GRACE` (1 h) | paused again, quietly; the deletion clock keeps counting from the first pause (a stranger pressing Wake up keeps nothing alive) |
+| paused 60 and 83 days (`TDCLOUD_FREE_DELETE_WARNINGS`) | the owner is warned ("deleted on …") |
+| paused 90 days (`TDCLOUD_FREE_DELETE_AFTER`) | a **final encrypted backup** (the container is started for it), then the team and its data are deleted; the owner is told |
+| 30 days after that (`TDCLOUD_FREE_FINAL_BACKUP_KEEP`) | the final backup and the team's other backups are removed from the backup target (S3 keeps a deleted object 7 more days as a noncurrent version) |
+
+**Upgrade** keeps the team: the dashboard shows "Upgrade to Team/Business (monthly/yearly)" on a free team, and the
+Paddle checkout carries `custom_data.tdcloud_team` = that team. `subscription.created`/`activated` with an active or
+trialing status and a Team/Business price changes the plan in place (same id, address, host, data, tokens and
+sessions): the inactivity state is cleared, a paused team is resumed, and the container is made again with the new
+limits and env (the usual plan-change path; on a suspended team it is made again and left stopped until the resume).
+Any other event for a free team (no price we know, not paying) is not applied and ops are told. **Downgrade from a paid
+plan to Free is not supported**: a canceled paid team follows the paid lifecycle (grace, suspension, deletion); a
+person who wants Free again signs up anew (one free team per mailbox). `teams set-plan` refuses free teams.
+
+**On hosts.** A free team takes a quarter slot. It goes on a ready host with room, preferring hosts that already hold
+paid teams (their spare), then the fullest; never past `TDCLOUD_FREE_HOST_SHARE` (0.5) of a host's slots, so half of
+every host stays for paid teams. Free teams may make the scaler launch a host, but never one of the last
+`TDCLOUD_FREE_RESERVE_HOSTS` (1) the limit allows: that headroom is for paid scale-out (a free team that finds no room
+waits in `provisioning` without a "host limit" alert; ops hear after `TDCLOUD_HOST_WAIT_ALERT`). With
+`TDCLOUD_FREE_RESERVE_HOSTS` = `TDCLOUD_MAX_HOSTS`, free teams only ever use paid hosts' spare and never start a host
+(from hold mode the first free sign-up then waits for the first paying team). Paused free teams **count as occupying**
+(their data is on the host), so a host that holds only paused free teams is not scaled in; moving them off (a
+`teams move`: backup → restore elsewhere → DNS) is not built — a known gap. An upgraded team stays on its host: if
+the bigger plan no longer fits, the host runs over its slots and ops are told.
+
+**Making it live on AWS** (nothing in Terraform's resources changes; `control_env_template` gains three lines):
+
+1. Build and push three images with new tags (Deploy step 4) — `trina-drive` (the product's `tdrive activity` and
+   `TDRIVE_MAX_PEOPLE`), `tdcloud-control` (this code), `tdcloud-caddy` (the paused page's Wake up button) — and set
+   `trina_image_tag` / `control_image_tag` / `caddy_image_tag`.
+2. Add to `/tdcloud/control/env`: `TDCLOUD_MAX_FREE_TEAMS=50`, `TDCLOUD_FREE_RESERVE_HOSTS=1` (or `= TDCLOUD_MAX_HOSTS`
+   so free teams never start a host by themselves), optionally the two Turnstile values; set `TDCLOUD_IMAGE` to the new
+   product tag; roll the control image (Operations). `terraform apply` puts the new tags in the hosts' launch template
+   (on hold there are no hosts: new ones start with them; a running host needs its `host.conf` edited and the
+   bootstrap rerun, as in Operations).
+3. Existing teams get the new product image with `teams upgrade --all` (free teams also need it for `tdrive activity`;
+   until then their activity cannot be read and nothing is paused).
+4. The landing page's Free card: "Start free" → `https://cloud.trina.app/free`.
+
+**Numbers**: `free stats` (free teams by state against the cap, waitlist, unconfirmed sign-ups, the idle rules, free
+slots per host, the next deletions, a rough monthly cost); `/internal/metrics` has `tdcloud_free_teams{state}` and
+`tdcloud_free_teams_cap`. Every step is in the audit log (`free.signup`, `free.waitlisted`, `free.admitted`,
+`free.idle_warned`, `free.paused`, `free.wake_requested`, `free.woke`, `free.repaused`, `free.active_again`,
+`free.delete_warned`, `free.deleted_inactive`, `free.backups_removed`, `free.upgraded`).
 
 ## Security
 
@@ -269,9 +369,26 @@ survive, same address and env); the audit chain verifies and has every action; *
 team, each team waits in `provisioning` until a host was launched and finished booting for it, a third team takes the
 last host, a fourth waits at the limit (ops alerted, no setup mail yet), takes the host the third leaves when it is
 deleted, and once it is deleted too that emptied host is scaled in after the grace period while the hosts of acme and
-of the suspended globex stay. Last run: **179/179 passed in 199 s** (most of it waiting for hosts and grace periods).
+of the suspended globex stay; **Free plan** (compose.yml: cap 1, activity every 3 s, warned after 25 s idle, paused
+after 45 s): a disposable address is refused, email + team name → confirmation link (works once) → a free team on a
+host launched for it, a quarter of its slot, 0.5 vCPU / 768 MiB / 256 processes, `TDRIVE_STORAGE_QUOTA=1GB` and
+`TDRIVE_MAX_PEOPLE=3` → setup link → a fourth person refused by the product; the same mailbox again gets a reminder, a
+second mailbox past the cap is waitlisted (ops told); the owner signs in with an email link; nobody uses it → warned →
+paused (container stopped, the team address shows the paused page with Wake up, its host still counts it) → Wake up
+on the control plane runs it again in a few seconds, the old session still works → an MCP call makes it a normal team
+again → a signed `subscription.created` for it upgrades it to Team on the same host with the same id, address, data,
+people and session, now 2 GiB and 100 GB without a people limit, its slot full; `free stats` and the audit agree.
+Last run: **229/229 passed in 212 s**, waking a paused team in 5 s (most of it waiting for hosts, grace periods and the idle timers).
 
-Unit tests (`cd cloud/control && bun test`, 56 tests): the host scaler with a fake pool (scale-out from 0 with the team
+Unit tests (`cd cloud/control && bun test`, 93 tests): the Free plan (`test/free.test.ts`: sign-up → one-time link →
+provisioned free team with its limits and env, link expiry and replacement, addresses; disposable domains, the
+per-address rate, one team per mailbox with +tags and Gmail dots folded, Turnstile with a fake `siteverify`; the cap,
+the waitlist and `free admit`; 6-day warning, 7-day pause, Wake up page/API/job, quiet re-pause keeping the deletion
+clock, wake by an email-link sign-in, active again on use, no decision on unreadable activity, paid teams never asked;
+60/83-day warnings, the 90-day final backup and deletion, backups removed 30 days later; upgrade of a paused and of a
+running free team through Paddle on the same team, events that are not a paying subscription refused; quarter slots,
+the free share per host, the reserved host, paid teams first and free teams in their spare, paused free teams keeping
+their host; the settings), the host scaler with a fake pool (scale-out from 0 with the team
 waiting and the ready mail last, concurrent sign-ups and a second process, Business slots, the host limit, failed
 bootstraps replaced and the stop after three, spare slots, scale-in only of hosts no team names — suspended and failed
 teams keep theirs — and never of a host that holds unknown data or does not answer, a draining host, a lost host),
@@ -602,6 +719,21 @@ takes roughly a quarter off EC2, and **incremental backups** (instead of 7 full 
 at 200 teams $700 → ~$140. At 10 teams one host is a single point of failure (recovery = restore from S3 onto a new
 host; RPO 24 h). An m7g.large host (10 slots, $73) halves the 10-team compute but leaves no headroom.
 
+### Free teams
+
+A free team takes a quarter slot (0.5 vCPU / 768 MiB caps; ~170 MiB when idle) and keeps 3 daily backups:
+
+| | per free team, per month |
+|---|---|
+| **active** | a quarter slot of a host (~$180 / 20 slots = $9 a slot) **≈ $2.25**, plus up to 1 GB × ~10 backup copies in S3 (3 dailies + 7 days of noncurrent versions) ≤ $0.25: **≈ $2.5** |
+| **paused** | no CPU or memory; its last backups (≤ $0.08) and its data on the host volume. It still holds its quarter slot (its data is on that host): **≈ $0.1–0.3** while it sits in paid hosts' spare, up to $2.25 on a host that is there only for free teams |
+| deleted | its backups for 30 more days (+7 days noncurrent), then nothing |
+
+The cap bounds it: 50 free teams are at most 12.5 slots (~$113/month) even if all are active and none fits in paid
+hosts' spare; the free share and the reserve host keep them from pushing paid teams onto new hosts. The real exposure
+is the first host: from hold mode (no host) the first free sign-up launches one (+~$180/month) unless
+`TDCLOUD_FREE_RESERVE_HOSTS` = `TDCLOUD_MAX_HOSTS`. Data out for 1 GB teams is negligible.
+
 ## Configuration (control plane environment)
 
 | Variable | Default | |
@@ -636,7 +768,18 @@ host; RPO 24 h). An m7g.large host (10 slots, $73) halves the 10-team compute bu
 | `TDCLOUD_LOCAL_HOST_BOOT` | `5s` | local driver: a simulated host's boot time |
 | `TDCLOUD_ROUTE53_ZONE_ID`, `TDCLOUD_SSM_PREFIX`, `TDCLOUD_AWS_HOST_TAG`, `AWS_REGION` | —, `/tdcloud`, `host`, `ap-northeast-2` | AWS driver |
 | `PADDLE_ENV`, `PADDLE_WEBHOOK_SECRET`, `PADDLE_CLIENT_TOKEN`, `PADDLE_CHECK_IP`, `PADDLE_WEBHOOK_TOLERANCE_SEC` | sandbox, —, —, off, 5 | |
-| `PADDLE_PRICE_{TEAM,BUSINESS}_{MONTHLY,YEARLY}` | — | price id → plan, and the dashboard's checkout buttons |
+| `PADDLE_PRICE_{TEAM,BUSINESS}_{MONTHLY,YEARLY}` | — | price id → plan, and the dashboard's checkout buttons (also a free team's upgrade buttons) |
+| `TDCLOUD_MAX_FREE_TEAMS` | 50 | free teams that may exist; confirmed sign-ups past it join the waitlist ([Free plan](#free-plan)) |
+| `TDCLOUD_FREE_HOST_SHARE`, `TDCLOUD_FREE_RESERVE_HOSTS` | 0.5, 1 | the share of a host's slots free teams may take; the last hosts of the limit free teams may not launch |
+| `TDCLOUD_FREE_VERIFY_TTL` | `24h` | the free sign-up's confirmation link |
+| `TDCLOUD_FREE_SIGNUPS_PER_IP_HOUR`, `_PER_IP_DAY` | 5, 20 | free sign-up requests per client address |
+| `TDCLOUD_FREE_BLOCKED_DOMAINS` | — | more disposable-mail domains (comma-separated) on top of the built-in list |
+| `TDCLOUD_TURNSTILE_SITE_KEY`, `TDCLOUD_TURNSTILE_SECRET` | — | Cloudflare Turnstile on `/free` (both or neither; off when unset) |
+| `TDCLOUD_FREE_ACTIVITY_EVERY` | `1h` | how often a running free team is asked for its last activity |
+| `TDCLOUD_FREE_IDLE_WARN`, `TDCLOUD_FREE_IDLE_PAUSE` | `6d`, `7d` | warn, then pause (bare number = days; dev: `25s`, `45s`) |
+| `TDCLOUD_FREE_WAKE_GRACE` | `1h` | a woken team nobody uses is paused again after this |
+| `TDCLOUD_FREE_DELETE_WARNINGS`, `TDCLOUD_FREE_DELETE_AFTER` | `60d,83d`, `90d` | warnings while paused; deletion (after a final backup) |
+| `TDCLOUD_FREE_FINAL_BACKUP_KEEP`, `TDCLOUD_FREE_BACKUP_KEEP` | `30d`, 3 | a deleted free team's backups are removed after this; daily backups kept per free team |
 
 The mail relay (`mail-relay`, on each host): `TDCLOUD_TEAM_MAIL_FROM`, `TDCLOUD_TEAM_SUBNETS`,
 `TDCLOUD_MAIL_RELAY_LISTEN` (`0.0.0.0:8025`), `TDCLOUD_MAIL_UPSTREAM` (`resend`, `ses`, `smtp`, or `outbox:<file>` in
@@ -697,7 +840,7 @@ Before a real AWS launch:
 7. One control instance; one host per team (no failover). Control DB copied nightly.
 8. Monitoring: `/internal/metrics` (Prometheus text: teams by status, disk per team, pending/failed jobs, backup age)
    exists but nothing scrapes it; no CloudWatch alarms yet.
-9. Seats (AI-connected people) are billed by Paddle, not enforced in the instance.
+9. Paid seats (AI-connected people) are billed by Paddle, not enforced in the instance (Free's 3 people are: `TDRIVE_MAX_PEOPLE`).
 10. Local driver: no hard disk quota (named volumes have none); the product's storage quota still applies, and the
     metrics loop flags `/data` beyond it plus 20 GB.
 11. A plan change recreates the container (a few seconds of downtime) because the storage quota is an env value.
@@ -705,9 +848,16 @@ Before a real AWS launch:
     `-e USER=<you>` to `docker exec`.
 13. A team container can also reach the relay port on the host's VPC address (not only its gateway); the relay still
     accepts only a team container's address and the team From.
-14. No `teams restore`: bringing a team back after hold mode or a lost host is the manual procedure above.
+14. No `teams restore`: bringing a team back after hold mode or a lost host is the manual procedure above. Free teams'
+    final backups are restored the same way within their 30 days.
 15. Hosts are packed (the fullest host that fits) but teams are never moved: a host with one team left stays until
     that team goes. A `teams move` (backup → restore on another host → DNS) would let the scaler consolidate.
 16. The scaler's first AWS run is still ahead: it is tested locally (simulated hosts) and against fake Auto Scaling /
     EC2 endpoints. Watch the first scale-out and scale-in (`hosts list`, the audit log), and the Elastic IP quota
     (5 per region by default: `host_max` + the control instance's).
+17. Free plan: a host that holds only paused free teams is never scaled in (they count as occupying; no `teams move`
+    to consolidate them onto a paid host's spare). An upgraded free team stays on its host even when its new plan
+    overfills it (ops alerted). The waitlist is admitted by hand (`free admit`), not automatically when room frees up.
+    Activity is one `docker exec` per running free team per hour (an SSM command each on AWS: fine for the 50-team cap,
+    worth batching per host beyond a few hundred). Turnstile is wired but needs a Cloudflare site key to be on.
+    Downgrading a paid team to Free is not supported.

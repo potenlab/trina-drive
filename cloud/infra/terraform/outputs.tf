@@ -62,6 +62,12 @@ output "control_env_template" {
     TDCLOUD_MAX_HOSTS=${var.host_max}
     TDCLOUD_SPARE_SLOTS=0
     TDCLOUD_EMPTY_HOST_GRACE=6h
+    # Free plan (cloud/README.md "Free plan"): the cap; free teams never launch the last host of TDCLOUD_MAX_HOSTS
+    TDCLOUD_MAX_FREE_TEAMS=50
+    TDCLOUD_FREE_RESERVE_HOSTS=1
+    # optional, both or neither: Cloudflare Turnstile on /free
+    # TDCLOUD_TURNSTILE_SITE_KEY=<0x…>
+    # TDCLOUD_TURNSTILE_SECRET=<0x…>
     TDCLOUD_ROUTE53_ZONE_ID=${aws_route53_zone.cloud.zone_id}
     TDCLOUD_SSM_PREFIX=/${var.name}
     AWS_REGION=${var.region}
