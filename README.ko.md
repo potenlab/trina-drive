@@ -216,7 +216,7 @@ flowchart LR
   `tdrive mcp add`, 웹 관리, 알림, 암호화 백업이 있는 macOS 설치기.
 - [x] **v0.2: 모든 AI, 승인을 거친 반영** (완성, 순차 제공 중). Claude 앱·claude.ai·ChatGPT용 OAuth 2.1 커넥터,
   패스키와 TOTP, 승인을 거친 초안 반영, 웹 파일 브라우저, 리눅스 Docker 이미지.
-- [ ] **v0.3 (사용자와 함께 정해요):** 구글 드라이브 연결 · 스캔 PDF OCR · 의미 검색 · 웹에서 올리기 · OIDC 로그인 ·
+- [ ] **v0.3 (사용자와 함께 정해요):** 구글 드라이브 연결 · 스캔 PDF OCR · 의미 검색 · WebDAV · OIDC 로그인 ·
   더 많은 파일 형식. 필요한 것을 [Discussions](https://github.com/potenlab/trina-drive/discussions/categories/ideas)에 남겨 주세요.
 
 ## 자주 묻는 질문
