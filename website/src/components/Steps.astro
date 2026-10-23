@@ -1,0 +1,27 @@
+---
+// "How it works" (both variants): three short steps, then the Trina Cloud call to action.
+import Lines from './Lines.astro'
+import type { Copy } from '../content/en'
+import StartCta from './StartCta.astro'
+interface Props { t: Pick<Copy, 'how' | 'hero' | 'lang'> }
+const { t } = Astro.props
+const h = t.how
+---
+<section class="section" id="how" aria-labelledby="how-title">
+  <div class="container">
+    <div class="section-head" data-reveal>
+      <span class="eyebrow">{h.eyebrow}</span>
+      <h2 id="how-title"><Lines text={h.title} /></h2>
+    </div>
+    <ol class="steps">
+      {h.steps.map((s, i) => (
+        <li class="step" data-reveal>
+          <span class="step-num">{i + 1}</span>
+          <h3>{s.title}</h3>
+          <p>{s.body}</p>
+        </li>
+      ))}
+    </ol>
+    <div class="steps-cta" data-reveal><StartCta label={t.hero.primary} lang={t.lang} size="md" /></div>
+  </div>
+</section>

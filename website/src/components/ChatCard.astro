@@ -1,0 +1,31 @@
+---
+// Variant A hero, beside the Files mock: a neutral AI app (no vendor branding) where Sam (Finance) gets an answer with
+// its sources and Alex (Design) asks the same and finds nothing, because Finance does not exist for Alex's AI.
+// Static: no script. The visual is aria-hidden; the figure's label says it in words.
+import type { Copy } from '../content/en'
+import Icon from './Icon.astro'
+interface Props { t: Copy }
+const { t } = Astro.props
+const c = t.chatCard
+---
+<figure class="cc" aria-label={c.label}>
+  <div class="cc-bar" aria-hidden="true">
+    <span class="cc-app"><span class="cc-mark"><Icon name="sparkle" /></span>{c.app}</span>
+    <span class="cc-conn"><span class="cc-conn-dot"></span>{c.connected}</span>
+  </div>
+  <div class="cc-body" aria-hidden="true">
+    {c.turns.map((turn) => (
+      <div class="cc-turn" data-empty={String(turn.sources.length === 0)}>
+        <p class="cc-who"><span class="cc-avatar">{turn.who.slice(0, 1)}</span>{turn.who}<small>{turn.team}</small></p>
+        <p class="cc-q">{turn.q}</p>
+        <div class="cc-a">
+          <p class="cc-status"><Icon name="search" />{turn.status}</p>
+          <p>{turn.a}</p>
+          {turn.sources.length > 0 && (
+            <p class="cc-sources"><span>{c.sourcesLabel}</span>{turn.sources.map((s) => <span class="cc-src"><Icon name="draft" />{s}</span>)}</p>
+          )}
+        </div>
+      </div>
+    ))}
+  </div>
+</figure>

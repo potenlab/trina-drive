@@ -1,28 +1,29 @@
 ---
-// Plans from research/trina-drive/PRICING.md. We sell in USD only (Paddle checkout, Korean customers pay with a card
-// that allows international payments). Both billing periods are in the HTML; the toggle flips data-billing on the
-// section. Buttons with data-plan call startCheckout() (src/checkout.ts) from main.ts. While CLOUD_LIVE is false
-// (src/site.ts) the Cloud Team/Business buttons read "Join early access" and startCheckout() sends an email instead.
+// Pricing, shaped like supabase.com/pricing: Free, Team, Business and Enterprise as cards, self-hosting as a bar under
+// them. Plans and limits: research/trina-drive/PRICING.md. USD only (Paddle is Merchant of Record). Both billing
+// periods are in the HTML; the toggle flips data-billing on the section.
+//
+// Buttons with data-plan call startCheckout() (src/checkout.ts) from scripts/main.ts: Team and Business open the
+// Paddle checkout once CLOUD_LIVE is true (src/site.ts) and ask for early access by email while it is false;
+// Enterprise ('setup') always emails. Free is a link: early access by email.
+// TODO(launch): point Free at the Trina Cloud sign-up page when it opens.
 import Lines from './Lines.astro'
 import type { Copy } from '../content/en'
 import { canSellOnline } from '../paddle'
 import { PADDLE } from '../paddle-env'
-import { CLOUD_LIVE, LINKS } from '../site'
+import { CLOUD_LIVE, LINKS, earlyAccessMailto } from '../site'
 import Icon from './Icon.astro'
-interface Props { t: Copy }
-const { t } = Astro.props
+interface Props { t: Pick<Copy, 'pricing' | 'lang'>; tint?: boolean }
+const { t, tint = false } = Astro.props
 const p = t.pricing
-const defaultCurrency = 'USD'
-const CUR = ['USD', 'KRW'] as const
-const BILL = ['monthly', 'yearly'] as const
 // Analytics hook names for the A/B test (attributes only; no visual effect).
-const CTA: Record<string, string | undefined> = CLOUD_LIVE
-  ? { team: 'checkout-team', business: 'checkout-business', setup: 'contact-onsite' }
-  : { team: 'early-access-team', business: 'early-access-business', setup: 'contact-onsite' }
-const curClass = (c: 'USD' | 'KRW') => (c === 'USD' ? 'price-usd' : 'price-krw')
-const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bill-y')
+const CTA: Record<string, string> = CLOUD_LIVE
+  ? { free: 'early-access-free', team: 'checkout-team', business: 'checkout-business', setup: 'contact-enterprise' }
+  : { free: 'early-access-free', team: 'early-access-team', business: 'early-access-business', setup: 'contact-enterprise' }
+const label = (plan: (typeof p.plans)[number]) =>
+  plan.id === 'setup' ? plan.cta : CLOUD_LIVE && (plan.id === 'free' || canSellOnline(PADDLE, plan.id)) ? plan.ctaLive : plan.cta
 ---
-<section class="section" id="pricing" aria-labelledby="pricing-title" data-pricing data-currency={defaultCurrency} data-billing="monthly">
+<section class={`section${tint ? ' section-tint' : ''}`} id="pricing" aria-labelledby="pricing-title" data-pricing data-currency="USD" data-billing="monthly">
   <div class="container">
     <div class="section-head center">
       <span class="eyebrow">{p.eyebrow}</span>
@@ -36,51 +37,37 @@ const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bi
           <button type="button" data-billing-btn="yearly" aria-pressed="false">{p.yearly} <span class="seg-badge">{p.yearlyBadge}</span></button>
         </div>
       </div>
-      <div class="pricing-notes">
-        <span>{CLOUD_LIVE ? p.trialNote : p.earlyNote}</span>
-        <span>{p.specNote} {p.usdNote}</span>
-      </div>
+      <p class="pricing-notes">{CLOUD_LIVE ? p.trialNote : p.earlyNote} {p.usdNote}</p>
     </div>
     <div class="plans">
-      {p.plans.map((plan) => {
-        const online = CLOUD_LIVE && canSellOnline(PADDLE, plan.id)
-        const label = !CLOUD_LIVE && 'ctaEarly' in plan && plan.ctaEarly ? plan.ctaEarly : online && plan.ctaPay ? plan.ctaPay : plan.cta
-        return (
+      {p.plans.map((plan) => (
         <article class={`plan${plan.featured ? ' plan-featured' : ''}`} aria-labelledby={`plan-${plan.id}`}>
           {plan.featured && <span class="plan-badge">{p.popular}</span>}
           <div class="plan-head">
             <h3 class="plan-name" id={`plan-${plan.id}`}>{plan.name}</h3>
             <p class="plan-kind">{plan.kind}</p>
           </div>
-          {CUR.map((cur) => (
-            <div class={curClass(cur)}>
-              {plan.yearly
-                ? <>
-                    <div class="bill-m">
-                      <p class="plan-price"><span class="plan-amount">{plan.price[cur]}</span>{plan.unit[cur] && <span class="plan-unit">{plan.unit[cur]}</span>}</p>
-                      <p class="plan-annual">{plan.annual[cur]}</p>
-                    </div>
-                    <div class="bill-y">
-                      <p class="plan-price"><span class="plan-amount">{plan.yearly.price[cur]}</span><span class="plan-unit">{plan.yearly.unit[cur]}</span></p>
-                      <p class="plan-annual">{plan.yearly.note[cur]}</p>
-                    </div>
-                  </>
-                : <>
-                    <p class="plan-price"><span class="plan-amount">{plan.price[cur]}</span>{plan.unit[cur] && <span class="plan-unit">{plan.unit[cur]}</span>}</p>
-                    <p class="plan-annual">{plan.annual[cur]}</p>
-                  </>}
-            </div>
-          ))}
+          {plan.yearly
+            ? <>
+                <div class="bill-m">
+                  <p class="plan-price"><span class="plan-amount">{plan.price}</span><span class="plan-unit">{plan.unit}</span></p>
+                  <p class="plan-annual">{p.monthlyNote.replace('{yearly}', `${plan.yearly.price} ${plan.yearly.unit}`)}</p>
+                </div>
+                <div class="bill-y">
+                  <p class="plan-price"><span class="plan-amount">{plan.yearly.price}</span><span class="plan-unit">{plan.yearly.unit}</span></p>
+                  <p class="plan-annual">{p.yearlyNote}</p>
+                </div>
+              </>
+            : <>
+                <p class="plan-price"><span class="plan-amount">{plan.price}</span>{plan.unit && <span class="plan-unit">{plan.unit}</span>}</p>
+                <p class="plan-annual"></p>
+              </>}
           <ul>
             {plan.features.map((f) => (
               <li>
                 <Icon name="check" />
                 {f.includes('{extra}') && plan.extra
-                  ? <span>{CUR.map((cur) => (
-                      <span class={curClass(cur)}>{BILL.map((b) => (
-                        <span class={billClass(b)}>{f.replace('{extra}', plan.extra![b][cur])}</span>
-                      ))}</span>
-                    ))}</span>
+                  ? <span><span class="bill-m">{f.replace('{extra}', plan.extra.monthly)}</span><span class="bill-y">{f.replace('{extra}', plan.extra.yearly)}</span></span>
                   : f}
               </li>
             ))}
@@ -91,14 +78,22 @@ const billClass = (b: 'monthly' | 'yearly') => (b === 'monthly' ? 'bill-m' : 'bi
               <input type="number" inputmode="numeric" min="1" max="10000" step="1" value={plan.seats} data-seats={plan.id} />
             </label>
           )}
-          {plan.ctaKind === 'link'
-            ? <a class="btn btn-secondary btn-block" href={LINKS.github} rel="noopener">{plan.cta}</a>
+          {plan.id === 'free'
+            ? <a class="btn btn-block btn-secondary" data-cta={CTA.free} href={earlyAccessMailto(t.lang, plan.name)}>{label(plan)}</a>
             : <button type="button" class={`btn btn-block ${plan.featured ? 'btn-primary' : 'btn-secondary'}`} data-plan={plan.id} data-cta={CTA[plan.id]}>
-                {label}
+                {label(plan)}
               </button>}
         </article>
-        )
-      })}
+      ))}
+    </div>
+    <div class="plan-self">
+      <div class="plan-self-name">
+        <Icon name="github" />
+        <h3>{p.self.name}</h3>
+        <p class="plan-self-price"><b>{p.self.price}</b> {p.self.unit}</p>
+      </div>
+      <p class="plan-self-body">{p.self.body}</p>
+      <a class="btn btn-secondary" data-cta="self-host" href={LINKS.github} rel="noopener">{p.self.cta}</a>
     </div>
   </div>
 </section>

@@ -1,22 +1,25 @@
 ---
-import Lines from './Lines.astro'
+// Home page, variant A (/ and /a). Structure after supabase.com: hero (Trina Cloud first, self-host second) → the AI
+// apps it works with → product grid → how it works → Trina Cloud → open source → pricing → FAQ → final CTA.
 import type { Copy } from '../content/en'
 import Base from '../layouts/Base.astro'
 import { CLOUD_LIVE, LINKS, SITE_URL, CONTACT_EMAIL } from '../site'
-import CloudTrust from './CloudTrust.astro'
 import Benchmark from './Benchmark.astro'
-import Bento from './Bento.astro'
-import Compare from './Compare.astro'
+import ChatCard from './ChatCard.astro'
+import CloudTrust from './CloudTrust.astro'
 import Competitors from './Competitors.astro'
+import Faq from './Faq.astro'
 import FilesMock from './FilesMock.astro'
-import Flow from './Flow.astro'
+import FinalCta from './FinalCta.astro'
 import Footer from './Footer.astro'
-import Marquee from './Marquee.astro'
 import Icon from './Icon.astro'
-import Logo from './Logo.astro'
+import Marquee from './Marquee.astro'
 import Nav from './Nav.astro'
+import OpenSource from './OpenSource.astro'
 import Pricing from './Pricing.astro'
-import Terminal from './Terminal.astro'
+import Products from './Products.astro'
+import StartCta from './StartCta.astro'
+import Steps from './Steps.astro'
 
 interface Props { t: Copy; /** Served at /a: same page, noindex with canonical → / (A/B link). */ abLink?: boolean }
 const { t, abLink = false } = Astro.props
@@ -41,10 +44,12 @@ const jsonLd = {
       applicationCategory: 'BusinessApplication',
       operatingSystem: 'Web, macOS, Linux',
       description: t.meta.description,
+      license: 'https://www.apache.org/licenses/LICENSE-2.0',
       publisher: { '@id': `${SITE_URL}/#org` },
       offers: [
-        { '@type': 'Offer', name: 'Cloud Team', price: '99', priceCurrency: 'USD' },
-        { '@type': 'Offer', name: 'Cloud Business', price: '349', priceCurrency: 'USD' },
+        { '@type': 'Offer', name: 'Free', price: '0', priceCurrency: 'USD' },
+        { '@type': 'Offer', name: 'Team', price: '99', priceCurrency: 'USD' },
+        { '@type': 'Offer', name: 'Business', price: '349', priceCurrency: 'USD' },
         { '@type': 'Offer', name: 'Self-hosted', price: '0', priceCurrency: 'USD' },
       ],
     },
@@ -58,146 +63,51 @@ const jsonLd = {
 <Base t={t} jsonLd={abLink ? undefined : jsonLd} preloadHero variant="a" noindex={abLink} canonicalHref={abLink ? `${SITE_URL}/` : undefined}>
   <Nav t={t} home={home} />
   <main id="main">
-    <!-- hero: copy centred over the key visual, then the product stage (Files view + the Alex/Sam terminal) -->
+    <!-- hero: Trina Cloud first, self-host second; then the drive (Files view) and an AI app answering from it -->
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-bg" aria-hidden="true"></div>
       <div class="container hero-copy">
-        <a class="pill" href="#cloud"><span class="pill-dot" aria-hidden="true"></span>{h.pill}<span class="pill-arrow" aria-hidden="true">→</span></a>
+        <a class="pill" href="#pricing"><span class="pill-dot" aria-hidden="true"></span>{h.pill}<span class="pill-arrow" aria-hidden="true">→</span></a>
         <h1 id="hero-title">{h.title} <span class="accent-text">{h.titleAccent}</span></h1>
         <p class="hero-sub">{h.sub}</p>
         <div class="hero-ctas">
-          {CLOUD_LIVE
-            ? <button class="btn btn-primary btn-lg" type="button" data-plan="team" data-cta="start-trial">{h.primaryLive}<Icon name="arrow" /></button>
-            : <a class="btn btn-primary btn-lg" data-cta="early-access" href={LINKS.earlyAccess(t.lang)}>{h.primary}<Icon name="arrow" /></a>}
-          <a class="btn btn-secondary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{h.secondary}</a>
+          <StartCta label={h.primary} lang={t.lang} />
+          <a class="btn btn-secondary btn-lg" data-cta="self-host" href={LINKS.github} rel="noopener"><Icon name="github" />{h.secondary}</a>
         </div>
         <p class="hero-note">{CLOUD_LIVE ? h.noteLive : h.note}</p>
-        <div class="hero-meta">
-          <a class="hero-gh" data-cta="self-host" href={LINKS.github} rel="noopener"><Icon name="github" />{h.github}<span aria-hidden="true">→</span></a>
-        </div>
       </div>
       <div class="container hero-stage">
         <div class="stage-glow" aria-hidden="true"></div>
         <div class="stage-files"><FilesMock t={t} /></div>
-        <div class="stage-term"><Terminal t={t} /></div>
+        <div class="stage-chat"><ChatCard t={t} /></div>
       </div>
     </section>
 
-    <!-- credibility: any MCP client, as an endless logo marquee (official logo where the brand allows it, name always as text) + three plain facts -->
+    <!-- the AI apps it works with, as an endless logo marquee (official logo where the brand allows it, name always as text) -->
     <section class="cred" aria-label={t.clients.title}>
       <div class="container">
         <Marquee title={t.clients.title} items={t.clients.any} note={t.clients.rollout} trademarks={t.clients.trademarks} />
-        <ul class="proof">
-          {t.proof.map((p) => <li><Icon name={p.icon} />{p.text}</li>)}
-        </ul>
       </div>
     </section>
 
-    <!-- one compact comparison: ontology/RAG vs. a drive connector vs. Trina Drive, with the one-search demo -->
-    <Compare c={t.compare}>
-      <pre class="cmp-term">{t.compare.demo.map((l, i) => <span class={i === 0 ? 'cmp-cmd' : ''}>{l}</span>)}</pre>
-    </Compare>
+    <Products t={t} tint />
 
     {t.benchmark.enabled && <Benchmark t={t} />}
 
-    <!-- what you get -->
-    <section class="section" id="features" aria-labelledby="features-title">
-      <div class="container">
-        <div class="section-head" data-reveal>
-          <span class="eyebrow">{t.features.eyebrow}</span>
-          <h2 id="features-title"><Lines text={t.features.title} /></h2>
-        </div>
-        <Bento t={t} items={t.features.items} />
-      </div>
-    </section>
+    <Steps t={t} />
 
-    <!-- safe to share: three pillars with their command, then the limits in three lines (full promise on /security) -->
-    <section class="section section-tint" id="security" aria-labelledby="pillars-title">
-      <div class="container">
-        <div class="section-head" data-reveal>
-          <span class="eyebrow">{t.pillars.eyebrow}</span>
-          <h2 id="pillars-title"><Lines text={t.pillars.title} /></h2>
-        </div>
-        <Bento t={t} items={t.pillars.items} variant="pillars" />
-        <div class="lim" data-reveal>
-          <p class="lim-title"><Icon name="eye" />{t.security.limitsTitle}</p>
-          <ul>{t.security.limits.map((s) => <li>{s}</li>)}</ul>
-          <a class="lim-link" href="/security">{t.security.link}<span aria-hidden="true">→</span></a>
-        </div>
-      </div>
-    </section>
-
-    <!-- how it works -->
-    <section class="section" id="how" aria-labelledby="how-title">
-      <div class="container">
-        <div class="section-head" data-reveal>
-          <span class="eyebrow">{t.how.eyebrow}</span>
-          <h2 id="how-title"><Lines text={t.how.title} /></h2>
-        </div>
-        <ol class="steps">
-          {t.how.steps.map((s, i) => (
-            <li class="step" data-reveal>
-              <span class="step-num">{i + 1}</span>
-              <h3>{s.title}</h3>
-              <p>{s.body}</p>
-              {s.code && <pre><span class="tl-prompt" aria-hidden="true">$ </span>{s.code}</pre>}
-            </li>
-          ))}
-        </ol>
-        <Flow t={t} />
-      </div>
-    </section>
-
-    <!-- Trina Cloud: hosted storage, in four short facts (design commitments while in early access) -->
+    <!-- Trina Cloud: hosted by us, in four short facts (design commitments while in early access) -->
     <CloudTrust t={t} />
+
+    <OpenSource t={t} tint={false} />
 
     {t.competitors.enabled && <Competitors t={t} />}
 
-    <Pricing t={t} />
+    <Pricing t={t} tint />
 
-    <!-- faq -->
-    <section class="section section-tint" id="faq" aria-labelledby="faq-title">
-      <div class="container faq-grid">
-        <div class="faq-side">
-          <div class="section-head">
-            <span class="eyebrow">{t.faq.eyebrow}</span>
-            <h2 id="faq-title"><Lines text={t.faq.title} /></h2>
-          </div>
-          <div class="faq-more">
-            <p class="faq-more-title">{t.faq.more}</p>
-            <p>{t.faq.moreBody}</p>
-            <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
-          </div>
-        </div>
-        <div class="faq">
-          {t.faq.items.map((i) => (
-            <details>
-              <summary>{i.q}<Icon name="plus" /></summary>
-              <p class="answer">{i.a}{'link' in i && i.link && <> <a href={i.link.href} rel="noopener">{i.link.text}</a></>}</p>
-            </details>
-          ))}
-        </div>
-      </div>
-    </section>
+    <Faq t={t} />
 
-    <!-- final cta -->
-    <section class="section section-cta" id="start" aria-labelledby="start-title">
-      <div class="container">
-        <div class="cta-box" data-reveal>
-          <div class="cta-bg" aria-hidden="true"></div>
-          <span class="cta-logo" aria-hidden="true"><Logo /></span>
-          <h2 id="start-title"><Lines text={t.cta.title} /></h2>
-          <p>{CLOUD_LIVE ? t.cta.subLive : t.cta.sub}</p>
-          <div class="hero-ctas">
-            {CLOUD_LIVE
-              ? <button class="btn btn-primary btn-lg" type="button" data-plan="team" data-cta="start-trial">{t.cta.primaryLive}<Icon name="arrow" /></button>
-              : <a class="btn btn-primary btn-lg" data-cta="early-access" href={LINKS.earlyAccess(t.lang)}>{t.cta.primary}<Icon name="arrow" /></a>}
-            <a class="btn btn-secondary btn-lg" data-cta="self-host" href={LINKS.github} rel="noopener"><Icon name="github" />{t.cta.secondary}</a>
-          </div>
-          <p class="cta-install"><a href={LINKS.installGuide} rel="noopener">{t.cta.install} →</a></p>
-        </div>
-      </div>
-    </section>
+    <FinalCta t={t} />
   </main>
   <Footer t={t} home={home} />
   <script>

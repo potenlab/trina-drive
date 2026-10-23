@@ -1,6 +1,6 @@
 ---
 import type { Copy } from '../content/en'
-import { CLOUD_LIVE, LINKS } from '../site'
+import { LINKS } from '../site'
 import Icon from './Icon.astro'
 import Logo from './Logo.astro'
 
@@ -14,29 +14,30 @@ const securityPage = '/security'
   <div class="container nav-inner">
     <a class="logo" href={home} aria-label="Trina Drive home"><Logo /><span>Trina Drive</span></a>
     <nav class="nav-links" aria-label="Main">
-      <a href={LINKS.docs} rel="noopener">{n.docs}</a>
-      <a class="nav-gh" href={LINKS.github} rel="noopener"><Icon name="github" />{n.github}</a>
+      <a href={a('product')}>{n.product}</a>
+      <a href={a('open-source')}>{n.openSource}</a>
       <a href={a('pricing')}>{n.pricing}</a>
       <a href={securityPage}>{n.security}</a>
-      <a href={a('faq')}>{n.faq}</a>
+      <a href={LINKS.docs} rel="noopener">{n.docs}</a>
     </nav>
     <div class="nav-right">
+      <a class="icon-btn nav-gh-btn" href={LINKS.github} rel="noopener" aria-label={n.github} title={n.github}><Icon name="github" /></a>
       <button class="icon-btn" type="button" data-theme-toggle aria-label={n.theme} title={n.theme}>
         <Icon name="moon" class="theme-icon-light" /><Icon name="sun" class="theme-icon-dark" />
       </button>
-      <a class="btn btn-secondary btn-sm nav-book" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{n.book}</a>
-      <a class="btn btn-primary btn-sm nav-start" data-cta={CLOUD_LIVE ? 'get-started' : 'early-access'} href={a('start')}>{CLOUD_LIVE ? n.startLive : n.start}</a>
+      <a class="btn btn-primary btn-sm nav-start" data-cta="get-started" href={a('pricing')}>{n.start}</a>
       <button class="icon-btn menu-btn" type="button" data-menu-toggle aria-expanded="false" aria-controls="mobile-menu" aria-label={n.menu}>
         <Icon name="menu" />
       </button>
     </div>
   </div>
   <div class="mobile-menu" id="mobile-menu" data-open="false">
-    <a href={LINKS.docs} rel="noopener">{n.docs}</a>
-    <a href={LINKS.github} rel="noopener">{n.github}</a>
+    <a href={a('product')}>{n.product}</a>
+    <a href={a('open-source')}>{n.openSource}</a>
     <a href={a('pricing')}>{n.pricing}</a>
     <a href={securityPage}>{n.security}</a>
+    <a href={LINKS.docs} rel="noopener">{n.docs}</a>
     <a href={a('faq')}>{n.faq}</a>
-    <a class="btn btn-secondary" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{n.book}</a>
+    <a class="btn btn-primary" data-cta="get-started" href={a('pricing')}>{n.start}</a>
   </div>
 </header>

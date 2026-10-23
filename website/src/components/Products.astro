@@ -1,0 +1,46 @@
+---
+// Product grid (both variants), shaped like supabase.com's product cards: one wide card for the drive itself (with a
+// small upload illustration and its features as chips), one card per AI/security feature, and "Soon" cards for what is
+// still being built. Then the limits in three lines (full promise on /security). Copy: t.product, t.security.
+import Lines from './Lines.astro'
+import type { Copy } from '../content/en'
+import Icon from './Icon.astro'
+interface Props { t: Pick<Copy, 'product' | 'security'>; tint?: boolean }
+const { t, tint = false } = Astro.props
+const p = t.product
+---
+<section class={`section${tint ? ' section-tint' : ''}`} id="product" aria-labelledby="product-title">
+  <div class="container">
+    <div class="section-head" data-reveal>
+      <span class="eyebrow">{p.eyebrow}</span>
+      <h2 id="product-title"><Lines text={p.title} /></h2>
+    </div>
+    <ul class="pgrid">
+      {p.items.map((it) => (
+        <li class={`pcard${it.wide ? ' pcard-wide' : ''}${it.soon ? ' pcard-soon' : ''}`} data-reveal>
+          <div class="pcard-text">
+            <span class="pcard-top">
+              <span class="bento-icon"><Icon name={it.icon} /></span>
+              {it.soon && <span class="pcard-badge">{p.soon}</span>}
+            </span>
+            <h3>{it.title}</h3>
+            <p>{it.body}</p>
+            {it.chips && <ul class="pcard-chips">{it.chips.map((c) => <li><Icon name="check" />{c}</li>)}</ul>}
+          </div>
+          {it.wide && (
+            <div class="pcard-art" aria-hidden="true">
+              <div class="up-drop"><Icon name="upload" /><span>{p.art.drop}</span></div>
+              <div class="up-row"><Icon name="folder" /><span>{p.art.folder}</span><span class="up-bar"><span style="width:64%"></span></span><small>{p.art.progress}</small></div>
+              {p.art.docs.map(([f, v]) => <div class="up-row"><Icon name="draft" /><span>{f}</span><small class="up-ver">{v}</small></div>)}
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+    <div class="lim" data-reveal>
+      <p class="lim-title"><Icon name="eye" />{t.security.limitsTitle}</p>
+      <ul>{t.security.limits.map((s) => <li>{s}</li>)}</ul>
+      <a class="lim-link" href="/security">{t.security.link}<span aria-hidden="true">→</span></a>
+    </div>
+  </div>
+</section>

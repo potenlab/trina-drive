@@ -1,0 +1,41 @@
+---
+// "Open source" section (both variants), like supabase.com's open-source / self-hosting block: the license and what
+// self-hosting means on the left, the repository and the Docker commands (docs/DOCKER.md) on the right.
+import Lines from './Lines.astro'
+import type { Copy } from '../content/en'
+import { LINKS } from '../site'
+import Icon from './Icon.astro'
+interface Props { t: Pick<Copy, 'openSource' | 'hero'>; tint?: boolean }
+const { t, tint = true } = Astro.props
+const o = t.openSource
+---
+<section class={`section${tint ? ' section-tint' : ''}`} id="open-source" aria-labelledby="os-title">
+  <div class="container os">
+    <div class="os-copy">
+      <div class="section-head" data-reveal>
+        <span class="eyebrow">{o.eyebrow}</span>
+        <h2 id="os-title"><Lines text={o.title} /></h2>
+        <p>{o.sub}</p>
+      </div>
+      <ul class="os-points">{o.points.map((x) => <li><Icon name="check" />{x}</li>)}</ul>
+      <div class="os-ctas">
+        <a class="btn btn-secondary" data-cta="self-host" href={LINKS.github} rel="noopener"><Icon name="github" />{o.primary}</a>
+        <a class="btn btn-ghost" href={LINKS.installGuide} rel="noopener">{o.secondary}<span aria-hidden="true">→</span></a>
+      </div>
+    </div>
+    <div class="os-repo" data-reveal>
+      <div class="os-repo-head">
+        <span class="os-repo-name"><Icon name="github" />{o.repo}</span>
+        <span class="os-tags"><span>{o.license}</span><span>{o.lang}</span></span>
+      </div>
+      <pre class="os-term">{o.cmds.map((c) => <span><span class="tl-prompt" aria-hidden="true">$ </span>{c}</span>)}</pre>
+      <div class="os-dev">
+        <p><b>{o.devLabel}</b> {o.dev}</p>
+        <div class="install">
+          <code><span class="prompt" aria-hidden="true">$ </span>{o.devCmd}</code>
+          <button class="copy-btn" type="button" data-copy={o.devCmd} data-copied={t.hero.copied}>{t.hero.copy}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

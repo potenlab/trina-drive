@@ -1,6 +1,6 @@
 ---
-// Hero product mock: the web app's Files view with the "who can see" panel for the selected folder.
-// Plain HTML/CSS so it stays crisp at any size and follows light/dark. It is an illustration: one figure with a
+// Hero product mock: the web app's Files view (a Drive-like file browser) with the "who can see" panel for the selected
+// folder. Plain HTML/CSS so it stays crisp at any size and follows light/dark. It is an illustration: one figure with a
 // text label for screen readers, the inner UI is aria-hidden.
 import type { Copy } from '../content/en'
 import Icon from './Icon.astro'
@@ -20,14 +20,16 @@ const p = m.panel
       <span class="mock-brand"><Logo /><b>Trina Drive</b></span>
       <ul>
         {m.nav.map((n, i) => (
-          <li data-active={String(i === 0)}><Icon name={['folder', 'draft', 'log', 'filter'][i] ?? 'folder'} />{n}</li>
+          <li data-active={String(i === 0)}><Icon name={['folder', 'draft', 'x', 'log'][i] ?? 'folder'} />{n}</li>
         ))}
       </ul>
+      <div class="mock-storage"><span class="mock-meter"><span></span></span><small>{m.storage}</small></div>
     </aside>
     <div class="mock-main">
       <div class="mock-top">
         <span class="mock-crumb">{m.crumb}</span>
         <span class="mock-search"><Icon name="search" />{m.search}</span>
+        <span class="mock-upload"><Icon name="upload" />{m.upload}</span>
       </div>
       <div class="mock-table">
         <div class="mock-row mock-head">
@@ -45,10 +47,9 @@ const p = m.panel
     <div class="mock-panel">
       <p class="mock-panel-title"><Icon name="eye" />{p.title}</p>
       <dl>
-        <div><dt>{p.nasLabel}</dt><dd class="mock-people">{p.nas.map((n) => <span class="mock-avatar">{n.slice(0, 1).toUpperCase()}</span><span>{n}</span>)}</dd></div>
+        <div><dt>{p.openLabel}</dt><dd class="mock-people">{p.open.map((n) => <span class="mock-avatar">{n.slice(0, 1).toUpperCase()}</span><span>{n}</span>)}</dd></div>
         <div><dt>{p.aiLabel}</dt><dd><span class="mock-ai mock-ai-on">{p.ai}</span></dd></div>
         <div><dt>{p.hiddenLabel}</dt><dd class="mock-hidden"><Icon name="eyeoff" />{p.hidden}</dd></div>
-        <div><dt>{p.draftLabel}</dt><dd class="mock-draft"><Icon name="draft" /><code>{p.draft}</code><span class="mock-prov">{p.draftFrom}</span></dd></div>
         <div><dt>{p.logLabel}</dt><dd><code class="mock-log">{p.log}</code></dd></div>
       </dl>
     </div>
