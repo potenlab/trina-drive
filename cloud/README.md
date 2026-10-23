@@ -888,7 +888,7 @@ writes the team's env itself: `set-plan` queues the `limits` job and `retry` the
 plane runs through `Cloud.writeSpec` (a new drive callback token with every env write).
 
 **A6 — owner, by hand** (~10 min): the owner `contact@trina.app` has no console password (the account was made by
-`teams create`): at `https://cloud.trina.app/login` → "No password?" → **email sign-in link** (one Resend mail), then
+`teams create`): at `https://cloud.trina.app/login` → **"Email me a sign-in link"** (one Resend mail), then
 **enrol TOTP** (Account → two-step verification; Open drive refuses an owner/admin without it and sends them there
 first), save the recovery codes, then Open drive → SSO → the drive's own second factor; folders 공용, 경영 (No AI),
 프로젝트, 인사. The CEO's personal account: invite it from Members as admin (it enrols TOTP the same way). The smoke account:
