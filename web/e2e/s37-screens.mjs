@@ -16,6 +16,8 @@ const SCREENS = [
   ['connect', 'boss', '/connect', '.cai-panel'],
   ['mount', 'boss', '/mount', '.mount-facts'],
   ['trash', 'boss', '/trash', '.fv-trash p'],
+  ['skills', 'lee', '/skills', '.card'],
+  ['skill-review', 'lee', '/approvals', '.ap-skills', async (p) => { await p.click('.ap-skills a.btn'); await p.waitForSelector('.card.highlight') }],
   ['drafts', 'boss', '/drafts', '.page'],
   ['approvals', 'boss', '/approvals', '.page'],
   ['people', 'boss', '/people', '.page'],

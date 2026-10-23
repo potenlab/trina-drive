@@ -5,3 +5,4 @@ pre.plain-text.diff { color: var(--text); }
 details.card > summary { cursor: pointer; font-weight: 600; }
 form.inline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: flex-end; margin-top: .5rem; }
 .promote-form { display: grid; gap: .5rem; margin-top: .5rem; }
+.ap-skills { margin-top: 1.5rem; }

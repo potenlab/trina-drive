@@ -14,9 +14,10 @@ import { Icon, type IconName } from './Icon'
 import { Mark } from './Mark'
 import { openNew, useHere } from './store'
 import { setTheme, useTheme, type ThemeChoice } from './theme'
+import { st } from './SkillsText'
 import { Tree, filesHref } from './Tree'
 
-export type Section = 'files' | 'trash' | 'shared' | 'drafts' | 'approvals' | 'connect' | 'mount' | 'people' | 'folders' | 'audit' | 'settings' | 'other'
+export type Section = 'files' | 'trash' | 'shared' | 'skills' | 'drafts' | 'approvals' | 'connect' | 'mount' | 'people' | 'folders' | 'audit' | 'settings' | 'other'
 
 interface Storage { quota: number | null; usage: { total: number } }
 let storageCache: Promise<Storage | null> | null = null
@@ -170,6 +171,7 @@ function Sidebar({ me, section, filesPath, onPick, onError }: { me: Me; section:
         </div>
         {treeOpen && <Tree current={section === 'files' ? filesPath : null} onPick={onPick} onError={onError} />}
         <Item href="#/shared" icon="shared" label={t('swm_title')} on={section === 'shared'} onPick={onPick} />
+        <Item href="#/skills" icon="skill" label={st('sk_nav')} on={section === 'skills'} onPick={onPick} />
         {/* Recent (#/recent) arrives in Phase 2 with its API (plan 10.1) */}
         <Item href="#/drafts" icon="drafts" label={t('nav_ai_drafts')} on={section === 'drafts'} onPick={onPick} />
         <Item href="#/approvals" icon="approvals" label={at('nav_approvals')} on={section === 'approvals'} count={me.approvals} onPick={onPick} />

@@ -9,6 +9,7 @@ import { MountPage } from './drive/MountPage'
 import { resetShareBackend } from './drive/share-api'
 import { SharedWithMe } from './drive/SharedWithMe'
 import { Shell, type Section } from './drive/Shell'
+import { Skills } from './drive/Skills'
 import { LOCALES, setLocale, t, useLocale } from './i18n'
 import { Approvals } from './pages/Approvals'
 import { EnrollSecondFactor, SecondFactorSettings } from './pages/SecondFactor'
@@ -113,7 +114,7 @@ export function routeOf(route: string, admin: boolean): { section: Section; file
   }
   const map: [RegExp, Section][] = [
     [/^\/trash$/, 'trash'], [/^\/shared$/, 'shared'], [/^\/drafts$/, 'drafts'], [/^\/approvals(\/\d+)?$/, 'approvals'],
-    [/^\/(connect|tokens)$/, 'connect'], [/^\/mount$/, 'mount'], [/^\/(admin\/)?people$/, 'people'],
+    [/^\/skills(\/v\/\d+)?$/, 'skills'], [/^\/(connect|tokens)$/, 'connect'], [/^\/mount$/, 'mount'], [/^\/(admin\/)?people$/, 'people'],
     [/^\/(admin\/)?folders(\/\d+)?$/, 'folders'], [/^\/(admin\/)?audit$/, 'audit'], [/^\/settings$/, 'settings'],
   ]
   for (const [re, sec] of map) if (re.test(bare)) return { section: sec, filesPath: null }
@@ -133,6 +134,7 @@ function DriveShell({ route }: { route: string }) {
     case 'shared': page = <SharedWithMe />; break
     case 'drafts': page = <Drafts />; break
     case 'approvals': page = <Approvals id={approval?.[1] ? Number(approval[1]) : undefined} />; break
+    case 'skills': page = <Skills route={bare} />; break
     case 'connect': page = <ConnectAI />; break
     case 'mount': page = <MountPage />; break
     case 'people': page = <People />; break

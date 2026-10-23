@@ -43,6 +43,12 @@ export async function s15(browser, fx) {
   check(!(await ai.locator('input').isChecked()) && await ai.locator('input').isDisabled(), 'A: lee turned "No AI" on and cannot turn it off')
   check((await ai.textContent()).includes('Only an admin can turn it off'), 'A: the dialog says only an admin turns it off')
   await shot(lee, 's15-manager-legacy')
+  // the Approvals inbox lists the team-skill change lee may decide, and opens its review
+  await lee.goto(fx.base + '/#/approvals')
+  await lee.locator('.ap-skills li', { hasText: 'team/proposal' }).waitFor()
+  await lee.locator('.ap-skills a.btn').click()
+  await lee.waitForURL(/#\/skills\/v\/\d+$/)
+  check(await lee.locator('.card.highlight', { hasText: 'Approve or reject' }).waitFor().then(() => true, () => false), 'Approvals: lee (Manager of /Skills) reviews the pending skill change')
   await lee.context().close()
 
   const kim = await signedIn(browser, fx, 'kim')

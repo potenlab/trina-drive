@@ -2,6 +2,7 @@
 // and people who sign in with a password. Serves the built app (web/dist) over plain HTTP on 127.0.0.1.
 //   bun web/e2e/fixture.ts [--port 0]   → prints one JSON line {"base": "...", "dir": "...", "password": "..."}, keeps serving
 // People: boss (admin), mina, sam (재무 group), kim (Editor of 프로젝트), lee (Manager of 프로젝트, not an admin).
+// Skills: a skill library (team/proposal: approved, with a change waiting for lee's approval).
 // Folders: 공용 (Anyone in the team · Editor), 재무 (restricted: nobody yet), 경영 (경영 group · Editor, No AI),
 //          프로젝트 (Anyone · Viewer; kim Editor; lee Manager), 프로젝트/비밀 (restricted here: lee only).
 import fs from 'node:fs'
@@ -12,6 +13,7 @@ import { createManagedFolder } from '../../src/managed/folders'
 import { metaSet } from '../../src/managed/settings'
 import { makeCtx } from '../../src/session'
 import { addGroup, addMember, addPerson, grantManage, setFlag, setRule } from '../../src/store'
+import { approveVersion, designate, folderRowAt, libraries, pendingOf, scan } from '../../src/skills/core'
 import { hashPassword } from '../../src/web/auth'
 import { OutboxMailer } from '../../src/web/mail'
 import { makeWebCtx, serveWeb } from '../../src/web/server'
@@ -34,10 +36,11 @@ const pid = (n: string) => db.query<{ id: number }, [string]>('SELECT id FROM pe
 for (const [n] of people) db.query('INSERT INTO accounts (person_id, email, password_hash, created_at, password_set_at) VALUES (?, ?, ?, ?, ?)').run(pid(n), `${n}@trina.test`, hash, Date.now(), Date.now())
 
 const mk = (name: string) => createManagedFolder(db, dir, { name })
-const common = mk('공용'), fin = mk('재무'), exec = mk('경영'), proj = mk('프로젝트')
+const common = mk('공용'), fin = mk('재무'), exec = mk('경영'), proj = mk('프로젝트'), skills = mk('Skills')
 setRule(db, common.path, '@전체', 'write')
 setRule(db, exec.path, '@경영', 'write'); setFlag(db, exec.path, 'no_ai', true)
 setRule(db, proj.path, '@전체', 'read'); setRule(db, proj.path, 'kim', 'write'); setRule(db, proj.path, 'lee', 'write'); grantManage(db, proj.path, 'lee')
+setRule(db, skills.path, '@전체', 'read'); setRule(db, skills.path, 'boss', 'write'); setRule(db, skills.path, 'lee', 'write'); grantManage(db, skills.path, 'lee')
 // boss puts the files in (an admin does not read folders by default), then loses that access again
 setRule(db, fin.path, 'boss', 'write'); setRule(db, proj.path, 'boss', 'write')
 
@@ -75,6 +78,18 @@ await folder('/프로젝트', '비밀')
 await upload('/프로젝트/비밀', '계약.docx', 'docx')
 setRule(db, path.join(proj.path, '비밀'), 'lee', 'write', { breakInherit: true })
 db.query("DELETE FROM rules WHERE subject_type = 'person' AND subject_id = ? AND folder_id IN (?, ?)").run(pid('boss'), fin.id, proj.id)
+
+// team skills (workstream I1): /Skills is a library; team/proposal approved by lee, then changed by boss (pending)
+const md = (d: string) => `---\nname: proposal\ndescription: ${d}\n---\n# Proposal\n\n1. Read the brief.\n2. Draft in /drafts.\n`
+await folder('/Skills', 'proposal')
+await upload('/Skills/proposal', 'SKILL.md', md('Write a client proposal the Trina way'))
+designate(db, folderRowAt(db, skills.path), 'team', pid('boss'))
+scan(db, dir)
+const lib = libraries(db).find((l) => l.slug === 'team')!
+const v1 = pendingOf(db, lib.folder_id, 'proposal')!
+approveVersion(db, dir, v1.id, pid('lee'), v1.digest)
+await fetch(`${base}/api/files/upload?path=${encodeURIComponent('/Skills/proposal')}&conflict=replace`, { method: 'POST', headers: h, body: (() => { const f = new FormData(); f.append('file', new File([md('Write a client proposal the Trina way, with pricing')], 'SKILL.md')); return f })() })
+scan(db, dir)
 
 console.log(JSON.stringify({ base, dir, password: PASSWORD }))
 process.on('SIGTERM', () => { server.stop(true); fs.rmSync(dir, { recursive: true, force: true }); process.exit(0) })
