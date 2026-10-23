@@ -29,7 +29,9 @@ const en = {
   },
   hero: {
     pill: 'Open-source release coming soon',
-    title: 'Give your team’s AI agents your company files.',
+    // The H1 is two parts so the second can carry the accent gradient. Either part can be swapped freely.
+    title: 'Give your team’s AI agents',
+    titleAccent: 'your company files.',
     sub: 'They only see what each person is allowed to see, never touch originals, and everything is logged. Open source, on your own Mac mini, over the folders you already have.',
     primary: 'Get started',
     secondary: 'Book a setup call',
@@ -57,6 +59,43 @@ const en = {
       { k: 'ok', text: '✓ Saved to /drafts/q3.md — contains content from 경영' },
     ] as TermLine[],
   },
+  // Product mock in the hero: the web app's Files view. Folder names stay Korean (the demo is a Korean office).
+  mock: {
+    label: 'Trina Drive web app: the Files view, with who can see the 경영 folder',
+    url: 'drive.office.lan',
+    nav: ['Files', 'Drafts', 'Audit log', 'Connections'],
+    crumb: 'All folders',
+    search: 'Search inside PDF, HWP, Office…',
+    cols: { name: 'Name', access: 'Opens on the NAS', ai: 'AI' },
+    rows: [
+      { name: '경영', access: '경영 group', ai: 'on', selected: true },
+      { name: '프로젝트', access: 'Everyone', ai: 'on' },
+      { name: '공용', access: 'Everyone', ai: 'on' },
+      { name: '인사', access: 'HR', ai: 'off' },
+      { name: '개인_kim', access: 'kim only', ai: 'on' },
+    ],
+    aiOn: 'AI on',
+    aiOff: 'No AI',
+    panel: {
+      title: 'Who can see 경영',
+      nasLabel: 'Opens on the NAS',
+      nas: ['boss', 'lee'],
+      aiLabel: 'Whose AI may read it',
+      ai: '경영 group',
+      hiddenLabel: 'Hidden from',
+      hidden: 'Everyone outside 경영 — for them it does not exist',
+      draftLabel: 'Latest draft',
+      draft: '/drafts/q3.md',
+      draftFrom: 'from 경영',
+      logLabel: 'Last access',
+      log: 'boss · Claude Code · grep -ri revenue /',
+    },
+  },
+  proof: [
+    { icon: 'code', text: 'Open source' },
+    { icon: 'mac', text: 'Runs on your Mac mini' },
+    { icon: 'folder', text: 'Your folders stay where they are' },
+  ],
   clients: {
     title: 'Works with the AI tools your team already uses',
     today: 'today',
@@ -83,6 +122,49 @@ const en = {
   features: {
     eyebrow: 'What you get',
     title: 'Agents work the way they already do. People stay in control.',
+    // Text inside the small product illustrations on each bento card (decorative; the card text says it in words).
+    minis: {
+      filter: {
+        cmd: 'ls /',
+        rows: [
+          { who: 'kim', role: 'member', out: '개인_kim/  공용/  프로젝트/' },
+          { who: 'boss', role: '경영', out: '개인_boss/  경영/  공용/  프로젝트/' },
+        ],
+        rule: 'person’s rules ∩ token scope',
+      },
+      draft: {
+        file: 'q3.md',
+        path: '/drafts/',
+        sourcesLabel: 'Sources',
+        sources: ['경영', '프로젝트'],
+        visible: 'Visible only to tokens that can read both',
+        move: 'Move to 공용',
+        moveNote: 'needs a person',
+      },
+      shell: {
+        lines: ['$ grep -rl 견적 /프로젝트 | head -2', '/프로젝트/A사/견적서_v3.xlsx', '/프로젝트/B사/견적서.hwpx'],
+        chips: ['no network', 'time limit', 'memory limit', 'ripgrep'],
+      },
+      log: {
+        rows: [
+          { t: '14:02:11', who: 'boss', via: 'Claude Code', cmd: 'grep -ri revenue /', h: 'a41f' },
+          { t: '14:02:48', who: 'boss', via: 'Claude Code', cmd: 'cat /경영/이사회_메모.pdf', h: '9c07' },
+          { t: '14:05:30', who: 'kim', via: 'Cursor', cmd: 'ls /프로젝트', h: 'e2d8' },
+        ],
+        anchor: 'Chain head signed and sent out daily',
+      },
+      nas: {
+        device: 'Mac mini in the office',
+        shares: ['NAS · 경영', 'NAS · 프로젝트', 'NAS · 공용', 'Mac · 스캔'],
+        apps: 'Finder · Explorer · Office · Hangul',
+      },
+      search: {
+        types: ['PDF', 'DOCX', 'XLSX', 'PPTX', 'HWP', 'HWPX'],
+        query: 'grep -r 하자보수 /',
+        hit: '/프로젝트/계약서_2026.hwp',
+        line: '…하자보수 기간은 준공일로부터…',
+      },
+    },
     items: [
       {
         icon: 'filter',
@@ -136,6 +218,8 @@ const en = {
       folderNote: 'People keep using Finder, Office, Hangul',
       arrow1: 'MCP',
       arrow2: 'read-only',
+      noAi: '“No AI” folders — never reached',
+      label: 'How a request flows: your people’s AI tools connect over MCP to Trina Drive on your Mac mini, which checks permissions and reads your folders read-only.',
     },
   },
   security: {
@@ -261,6 +345,8 @@ const en = {
   faq: {
     eyebrow: 'FAQ',
     title: 'Questions, answered plainly',
+    more: 'Something else?',
+    moreBody: 'Write to us and a person answers within one business day.',
     items: [
       {
         q: 'Do my files leave the office?',

@@ -24,7 +24,8 @@ const ko: Copy = {
   },
   hero: {
     pill: '오픈소스 공개 준비 중',
-    title: '팀 AI에게 회사 파일을, 볼 수 있는 만큼만',
+    title: '팀 AI에게 회사 파일을,',
+    titleAccent: '볼 수 있는 만큼만',
     sub: '에이전트는 그 사람이 볼 수 있는 파일만 보고, 원본은 건드리지 않아요. 무엇을 읽고 썼는지는 전부 기록돼요. 오픈소스라 사무실 맥 미니에 설치하고, 지금 쓰는 폴더를 그대로 연결하면 돼요.',
     primary: '시작하기',
     secondary: '설치 상담 예약하기',
@@ -53,6 +54,42 @@ const ko: Copy = {
       { k: 'ok', text: '✓ /drafts/요약.md에 저장 — 경영 폴더 내용 포함' },
     ] as TermLine[],
   },
+  mock: {
+    label: 'Trina Drive 웹 화면: 파일 목록과 경영 폴더를 볼 수 있는 사람',
+    url: 'drive.office.lan',
+    nav: ['파일', '초안함', '기록', '연결'],
+    crumb: '전체 폴더',
+    search: 'PDF, 한글, 오피스 본문까지 검색',
+    cols: { name: '이름', access: 'NAS에서 여는 사람', ai: 'AI' },
+    rows: [
+      { name: '경영', access: '경영 그룹', ai: 'on', selected: true },
+      { name: '프로젝트', access: '전체', ai: 'on' },
+      { name: '공용', access: '전체', ai: 'on' },
+      { name: '인사', access: '인사팀', ai: 'off' },
+      { name: '개인_kim', access: 'kim만', ai: 'on' },
+    ],
+    aiOn: 'AI 허용',
+    aiOff: 'AI 연결 금지',
+    panel: {
+      title: '경영 폴더를 볼 수 있는 사람',
+      nasLabel: 'NAS에서 여는 사람',
+      nas: ['boss', 'lee'],
+      aiLabel: '읽어도 되는 AI',
+      ai: '경영 그룹의 AI',
+      hiddenLabel: '안 보이는 사람',
+      hidden: '경영 그룹이 아닌 모두 — 이들에겐 없는 폴더예요',
+      draftLabel: '최근 초안',
+      draft: '/drafts/요약.md',
+      draftFrom: '출처 경영',
+      logLabel: '최근 접근',
+      log: 'boss · Claude Code · grep -r 매출 /',
+    },
+  },
+  proof: [
+    { icon: 'code', text: '오픈소스' },
+    { icon: 'mac', text: '사무실 맥 미니에 설치' },
+    { icon: 'folder', text: '지금 폴더 그대로' },
+  ],
   clients: {
     title: '지금 쓰는 AI 그대로',
     today: '지금',
@@ -79,6 +116,48 @@ const ko: Copy = {
   features: {
     eyebrow: '기능',
     title: '에이전트는 하던 대로, 통제는 사람이',
+    minis: {
+      filter: {
+        cmd: 'ls /',
+        rows: [
+          { who: 'kim', role: '팀원', out: '개인_kim/  공용/  프로젝트/' },
+          { who: 'boss', role: '경영', out: '개인_boss/  경영/  공용/  프로젝트/' },
+        ],
+        rule: '사람 권한 ∩ 토큰 범위',
+      },
+      draft: {
+        file: '요약.md',
+        path: '/drafts/',
+        sourcesLabel: '출처',
+        sources: ['경영', '프로젝트'],
+        visible: '두 폴더를 모두 읽을 수 있는 토큰에만 보여요',
+        move: '공용으로 옮기기',
+        moveNote: '사람이 확인',
+      },
+      shell: {
+        lines: ['$ grep -rl 견적 /프로젝트 | head -2', '/프로젝트/A사/견적서_v3.xlsx', '/프로젝트/B사/견적서.hwpx'],
+        chips: ['네트워크 없음', '시간 한도', '메모리 한도', 'ripgrep'],
+      },
+      log: {
+        rows: [
+          { t: '14:02:11', who: 'boss', via: 'Claude Code', cmd: 'grep -r 매출 /', h: 'a41f' },
+          { t: '14:02:48', who: 'boss', via: 'Claude Code', cmd: 'cat /경영/손익.csv', h: '9c07' },
+          { t: '14:05:30', who: 'kim', via: 'Cursor', cmd: 'ls /프로젝트', h: 'e2d8' },
+        ],
+        anchor: '체인 끝은 매일 서명해서 밖으로 보내요',
+      },
+      nas: {
+        device: '사무실 맥 미니',
+        shares: ['NAS · 경영', 'NAS · 프로젝트', 'NAS · 공용', '맥 · 스캔'],
+        apps: 'Finder · 탐색기 · 오피스 · 한글',
+      },
+      search: {
+        types: ['PDF', 'DOCX', 'XLSX', 'PPTX', 'HWP', 'HWPX'],
+        query: 'grep -r 하자보수 /',
+        hit: '/프로젝트/계약서_2026.hwp',
+        line: '…하자보수 기간은 준공일로부터…',
+      },
+    },
     items: [
       {
         icon: 'filter',
@@ -132,6 +211,8 @@ const ko: Copy = {
       folderNote: '팀원은 Finder, 오피스, 한글 그대로',
       arrow1: 'MCP',
       arrow2: '읽기 전용',
+      noAi: '"AI 연결 금지" 폴더 — 닿지 않아요',
+      label: '요청 흐름: 팀원의 AI가 MCP로 사무실 맥 미니의 Trina Drive에 연결하고, Trina Drive가 권한을 판단해 폴더를 읽기 전용으로 읽어요.',
     },
   },
   security: {
@@ -257,6 +338,8 @@ const ko: Copy = {
   faq: {
     eyebrow: '자주 묻는 질문',
     title: '자주 묻는 질문',
+    more: '다른 질문이 있으신가요?',
+    moreBody: '메일 주시면 영업일 하루 안에 사람이 답해 드려요.',
     items: [
       {
         q: '파일이 사무실 밖으로 나가나요?',
