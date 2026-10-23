@@ -78,6 +78,8 @@ export class DockerDriver implements Driver {
   readonly name: string
   constructor(private readonly o: DockerDriverOptions) { this.name = o.name }
 
+  runOnHost(host: string, argv: string[], o: { timeoutS?: number } = {}) { return this.o.runner.run(host, argv, o) }
+
   pickHost() { return this.o.pickHost() }
 
   private async docker(host: string, argv: string[], o: RunOpts & { ok?: boolean; what?: string } = {}): Promise<ExecResult> {
@@ -166,6 +168,19 @@ export class DockerDriver implements Driver {
     await this.docker(host, ['start', n.container], { what: 'start' })
     await this.connectCaddy(host, n.network, spec.net.caddyIp)
     await this.waitHealthy(host, n.container)
+  }
+
+  /** Caddy leaves the team's network: its requests fail over to the paused page (503) while the container runs. The
+   * next start / serveTraffic joins it again. */
+  async holdTraffic(host: string, spec: TeamSpec) {
+    const n = names(spec.slug, spec.number)
+    const r = await this.docker(host, ['network', 'disconnect', '-f', n.network, this.o.caddyContainer], { ok: false })
+    if (r.code !== 0 && !/is not connected|not found|No such/i.test(r.stderr)) throw new DriverError('taking Caddy off the team network failed', r.stderr)
+  }
+
+  async serveTraffic(host: string, spec: TeamSpec) {
+    const n = names(spec.slug, spec.number)
+    await this.connectCaddy(host, n.network, spec.net.caddyIp)
   }
 
   /** Caddy on the team network at its fixed address (the team trusts X-Forwarded-For from that address only). */

@@ -71,6 +71,7 @@ resource "aws_launch_template" "host" {
     mail_key_param     = local.ssm_hosts_mail_key
     team_subnets       = var.team_subnets
     front_proxies      = join(" ", var.front_proxies)
+    office_cidrs       = join(" ", var.office_cidrs)
   }))
 
   tag_specifications {

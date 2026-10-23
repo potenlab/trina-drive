@@ -6,7 +6,13 @@
 //
 //   bun cloud/scripts/resend-domain.ts                    print the records to add and check public DNS for them
 //                                                          (no API key used): DKIM TXT resend._domainkey.<domain>,
-//                                                          MX + SPF TXT on send.<domain> (bounces), DMARC TXT
+//                                                          MX + SPF TXT on send.<domain> (bounces), DMARC TXT.
+//                                                          Resend's records today point at its own MTA
+//                                                          (send.<domain> MX 10 feedback.forge.rmta.net, SPF with its
+//                                                          ip4: ranges; or send.<domain> CNAME send.forge.rmta.net);
+//                                                          domains added earlier use Amazon SES's (MX
+//                                                          feedback-smtp.<region>.amazonses.com, include:amazonses.com).
+//                                                          Both pass.
 //   … --records                                           also ask Resend for the exact values (GET /domains: needs a
 //                                                          full-access key; a sending-only key gets 401/403 and the
 //                                                          script says so)
@@ -120,6 +126,14 @@ export function planChanges(records: ResendRecord[], domain: string, root: strin
 
 export interface Check { name: string; type: 'TXT' | 'MX'; want: string; ok: boolean; found: string }
 
+/** Resend's own bounce MTA (the current style, e.g. feedback.forge.rmta.net) or, for domains added before it, SES's */
+export const bounceHostOk = (exchange: string, region: string) => {
+  const x = exchange.replace(/\.$/, '').toLowerCase()
+  return /(^|\.)rmta\.net$/.test(x) || x === `feedback-smtp.${region}.amazonses.com`
+}
+/** an SPF record that authorizes senders: Resend's MTA as ip4/ip6 ranges (current) or include:amazonses.com (earlier) */
+export const spfOk = (v: string) => /^v=spf1\b/.test(v) && (/\binclude:amazonses\.com\b/.test(v) || /\b(ip4|ip6):\S+/.test(v) || /\binclude:\S*rmta\.net\b/.test(v))
+
 /** What Resend needs in public DNS (values as far as they are known without the API) and whether it is there. */
 export async function checkDns(o: Pick<Options, 'domain' | 'region'>, r: Resolver): Promise<Check[]> {
   const txt = async (n: string) => { try { return (await r.resolveTxt(n)).map((p) => p.join('')) } catch { return [] } }
@@ -128,11 +142,10 @@ export async function checkDns(o: Pick<Options, 'domain' | 'region'>, r: Resolve
   const spf = await txt(`send.${o.domain}`)
   const bounce = await mx(`send.${o.domain}`)
   const dmarc = await txt(`_dmarc.${o.domain}`)
-  const feedback = `feedback-smtp.${o.region}.amazonses.com`
   return [
     { name: `resend._domainkey.${o.domain}`, type: 'TXT', want: 'p=… (DKIM public key from the Resend dashboard)', ok: dkim.some((v) => /^p=[A-Za-z0-9+/=]{100,}/.test(v.replace(/\s/g, ''))), found: dkim.join(' | ') },
-    { name: `send.${o.domain}`, type: 'MX', want: `10 ${feedback}`, ok: bounce.some((m) => m.exchange.replace(/\.$/, '').toLowerCase() === feedback), found: bounce.map((m) => `${m.priority} ${m.exchange}`).join(' | ') },
-    { name: `send.${o.domain}`, type: 'TXT', want: 'v=spf1 include:amazonses.com ~all', ok: spf.some((v) => /^v=spf1\b.*\binclude:amazonses\.com\b/.test(v)), found: spf.join(' | ') },
+    { name: `send.${o.domain}`, type: 'MX', want: '10 feedback.forge.rmta.net (as the Resend dashboard shows it)', ok: bounce.some((m) => bounceHostOk(m.exchange, o.region)), found: bounce.map((m) => `${m.priority} ${m.exchange}`).join(' | ') },
+    { name: `send.${o.domain}`, type: 'TXT', want: 'v=spf1 ip4:… ~all (the ranges the Resend dashboard shows)', ok: spf.some(spfOk), found: spf.join(' | ') },
     { name: `_dmarc.${o.domain}`, type: 'TXT', want: 'v=DMARC1; p=quarantine; adkim=r; aspf=r; rua=mailto:contact@trina.app (recommended)', ok: dmarc.some((v) => /^v=DMARC1\b/.test(v)), found: dmarc.join(' | ') },
   ]
 }
@@ -170,8 +183,8 @@ export async function run(o: Options, d: Deps): Promise<{ checks: Check[]; domai
   } else {
     d.log('Add at Cloudflare the records the Resend dashboard shows for the domain (no API call made: run with --records and a full-access key to print them here):')
     d.log(`  ${relative(`resend._domainkey.${o.domain}`, o.root).padEnd(28)} TXT   p=…  (DKIM)`)
-    d.log(`  ${relative(`send.${o.domain}`, o.root).padEnd(28)} MX    10 feedback-smtp.${o.region}.amazonses.com`)
-    d.log(`  ${relative(`send.${o.domain}`, o.root).padEnd(28)} TXT   v=spf1 include:amazonses.com ~all`)
+    d.log(`  ${relative(`send.${o.domain}`, o.root).padEnd(28)} MX    10 feedback.forge.rmta.net  (bounces; the value the dashboard shows)`)
+    d.log(`  ${relative(`send.${o.domain}`, o.root).padEnd(28)} TXT   v=spf1 ip4:… ip4:… ~all  (Resend's sending ranges, from the dashboard)`)
   }
   d.log(`  ${relative(`_dmarc.${o.domain}`, o.root).padEnd(28)} TXT   v=DMARC1; p=quarantine; adkim=r; aspf=r; rua=mailto:contact@trina.app  (recommended)`)
 

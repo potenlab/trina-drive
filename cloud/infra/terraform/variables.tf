@@ -50,15 +50,15 @@ variable "host_max" {
 }
 
 variable "host_instance_type" {
-  description = "Team host size (arm64). m7g.xlarge = 4 vCPU / 16 GiB: 20 slots (a Team-plan team is 1 slot, Business 2; README, Sizing)."
+  description = "Team host size (arm64). m7g.large = 2 vCPU / 8 GiB: 10 slots; m7g.xlarge = 4 vCPU / 16 GiB: 20 slots (a Team-plan team is 1 slot, Business 2; README, Sizing). TDCLOUD_MAX_TEAMS_PER_HOST in control_env_template follows it."
   type        = string
-  default     = "m7g.xlarge"
+  default     = "m7g.large"
 }
 
 variable "host_data_gb" {
   description = "Team data volume per host (gp3, XFS with per-team project quotas). Plans include 100 GB (Team) and 1 TB (Business) of files (XFS caps 220 GB / 2,020 GB with database and backup staging), but most teams use far less: size for actual use and grow the volume online."
   type        = number
-  default     = 300
+  default     = 100
 }
 
 variable "control_instance_type" {
@@ -110,6 +110,16 @@ variable "team_subnets" {
   description = "Pool for the team networks on the hosts: one /28 per team (gateway = mail relay, .2 = Caddy, .3 = the team). Must not overlap vpc_cidr. Same value as the control plane's TDCLOUD_TEAM_SUBNETS."
   type        = string
   default     = "10.128.0.0/11"
+}
+
+variable "office_cidrs" {
+  description = "Client ranges (an office's NAT address, /32) that get the higher per-address rate limits in front of every team: one address carries a whole team there (caddy/team_routes.caddy: sign-in 300/min, MCP 1,500/min, all 6,000/min instead of 30/300/1,200). Not secret, but keep it in terraform.tfvars, not the repository. Reaches new hosts (launch template); running hosts: OFFICE_CIDRS in host.conf + bootstrap rerun."
+  type        = list(string)
+  default     = []
+  validation {
+    condition     = alltrue([for c in var.office_cidrs : can(cidrhost(c, 0))])
+    error_message = "office_cidrs are CIDR ranges, e.g. 203.0.113.7/32."
+  }
 }
 
 variable "front_proxies" {

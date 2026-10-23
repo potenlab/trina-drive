@@ -64,6 +64,14 @@ export interface Driver {
   backup(host: string, spec: TeamSpec, o: { filesRecipient: string; stamp: string; keyPrefix: string }): Promise<BackupArtifact[]>
   /** the product CLI inside the running container (admin CLI passthrough, the end-to-end test) */
   exec(host: string, slug: string, args: string[]): Promise<ExecResult>
+  /** Take the team off the host's Caddy (requests get the paused page, 503) / put it back. The member sync's gate
+   * (sync.ts serveHooks, review finding 5) holds a woken or restarted team this way until the drive has applied the
+   * current membership; cli/ops-serve.ts registers the hook. */
+  holdTraffic?(host: string, spec: TeamSpec): Promise<void>
+  serveTraffic?(host: string, spec: TeamSpec): Promise<void>
+  /** a command on the host itself (AWS: as root over SSM, e.g. /usr/local/sbin/tdcloud-host info; local: this machine,
+   * which has no host agent). Operator checks only (`hosts check`). */
+  runOnHost?(host: string, argv: string[], o?: { timeoutS?: number }): Promise<ExecResult>
 }
 
 export class DriverError extends Error {

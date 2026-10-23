@@ -10,7 +10,23 @@ export class FakeDriver implements Driver {
   readonly calls: string[] = []
   readonly instances = new Map<string, { state: InstanceState; spec: TeamSpec; setupDone: boolean; disk: number }>()
   failCreate = false
+  /** teams whose traffic is held (holdTraffic) */
+  readonly held = new Set<string>()
+  holdTraffic?: (h: string, spec: TeamSpec) => Promise<void>
+  serveTraffic?: (h: string, spec: TeamSpec) => Promise<void>
+  /** the traffic hold (cli/ops-serve.ts) is off on the fake driver unless a test turns it on, so tests that list the
+   * driver's calls see the same sequence whether or not the hook is registered in this process */
+  enableTrafficHold() {
+    this.holdTraffic = async (_h, spec) => { this.calls.push(`hold ${spec.slug}`); this.held.add(spec.slug) }
+    this.serveTraffic = async (_h, spec) => { this.calls.push(`serve ${spec.slug}`); this.held.delete(spec.slug) }
+  }
+  /** what `runOnHost` answers per host and argv[1] (e.g. 'info', 'check'); unset = exit 1 */
+  readonly hostAnswers = new Map<string, ExecResult>()
   constructor(private readonly dir?: string) {}
+  async runOnHost(host: string, argv: string[]): Promise<ExecResult> {
+    this.calls.push(`host ${host} ${argv.slice(1).join(' ')}`)
+    return this.hostAnswers.get(`${host} ${argv[1] ?? ''}`) ?? this.hostAnswers.get(host) ?? { code: 1, stdout: '', stderr: 'unreachable' }
+  }
   async pickHost() { return 'fake-host' }
   async create(_host: string, spec: TeamSpec): Promise<CreateResult> {
     this.calls.push(`create ${spec.slug}`)

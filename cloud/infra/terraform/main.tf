@@ -35,4 +35,7 @@ locals {
   # (and for sandbox recipients) it checks identity/<address> (first AWS run: AccessDenied on identity/drive@...). The
   # roles may therefore use any identity of the account, and the ses:FromAddress condition is what limits them.
   ses_identity_arns = ["arn:${local.partition}:ses:${var.region}:${local.account}:identity/*"]
+  # TDCLOUD_MAX_TEAMS_PER_HOST: slots per host size (a Team-plan team is 1 slot: 1 vCPU / 2 GiB as caps; idle teams use
+  # ~170 MiB, so the memory caps of a full host add up to more than it has, on purpose). Other sizes: 10 per 2 vCPU.
+  host_slots = lookup({ "m7g.large" = 10, "m7g.xlarge" = 20, "m7g.2xlarge" = 40, "m8g.large" = 10, "m8g.xlarge" = 20 }, var.host_instance_type, 10)
 }
