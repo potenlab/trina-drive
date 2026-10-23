@@ -10,6 +10,7 @@ import ClientMark from '../ClientMark.astro'
 import Compare from '../Compare.astro'
 import Icon from '../Icon.astro'
 import Logo from '../Logo.astro'
+import Marquee from '../Marquee.astro'
 import Nav from '../Nav.astro'
 import Pricing from '../Pricing.astro'
 import Terminal from '../Terminal.astro'
@@ -51,6 +52,13 @@ const d = t.devs
         <ul class="proof b-proof">
           {t.proof.map((p) => <li><Icon name={p.icon} />{p.text}</li>)}
         </ul>
+      </div>
+    </section>
+
+    <!-- any MCP client, as an endless logo marquee (same component and list as variant A) -->
+    <section class="cred mq-band" aria-label={t.clients.title}>
+      <div class="container">
+        <Marquee title={t.clients.title} items={t.clients.any} note={t.clients.rollout} trademarks={t.clients.trademarks} />
       </div>
     </section>
 

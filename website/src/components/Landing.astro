@@ -9,7 +9,7 @@ import Competitors from './Competitors.astro'
 import FilesMock from './FilesMock.astro'
 import Flow from './Flow.astro'
 import Footer from './Footer.astro'
-import ClientMark from './ClientMark.astro'
+import Marquee from './Marquee.astro'
 import Icon from './Icon.astro'
 import Logo from './Logo.astro'
 import Nav from './Nav.astro'
@@ -82,16 +82,10 @@ const jsonLd = {
       </div>
     </section>
 
-    <!-- credibility: supported clients (official logo where the brand allows it, name always as text) + three plain facts -->
+    <!-- credibility: any MCP client, as an endless logo marquee (official logo where the brand allows it, name always as text) + three plain facts -->
     <section class="cred" aria-label={t.clients.title}>
       <div class="container">
-        <p class="cred-title">{t.clients.title}</p>
-        <ul class="marks">
-          {t.clients.items.map((c) => (
-            <li class="mark" data-status={c.status}><ClientMark name={c.name} /><span class="mark-text">{c.name}<small>{c.status === 'today' ? t.clients.today : t.clients.soon}</small></span></li>
-          ))}
-        </ul>
-        <p class="marks-note">{t.clients.trademarks}</p>
+        <Marquee title={t.clients.title} items={t.clients.any} note={t.clients.rollout} trademarks={t.clients.trademarks} />
         <ul class="proof">
           {t.proof.map((p) => <li><Icon name={p.icon} />{p.text}</li>)}
         </ul>

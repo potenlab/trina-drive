@@ -524,16 +524,7 @@ html[lang="ko"] .hero-sub { font-size: 18px; max-width: 620px; }
   :root:not([data-theme="light"]) .cm-on-dark { display: block; }
 }
 
-.marks { margin-top: 18px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 28px; }
-.mark { display: inline-flex; align-items: center; gap: 2px; }
-.mark .cm { --cm-slot: 40px; }
-.mark-text {
-  display: inline-flex; align-items: baseline; gap: 7px; font-size: 22px; font-weight: 650; letter-spacing: -0.035em;
-  color: color-mix(in srgb, var(--fg) 78%, transparent);
-}
 .marks-note { margin-top: 10px; font-size: 12px; color: var(--fg-faint); }
-.mark small { font-size: 11.5px; font-weight: 500; letter-spacing: 0; color: var(--fg-faint); font-family: var(--font-mono); }
-.mark[data-status="today"] small { color: var(--accent); }
 .proof {
   margin: 36px auto 0; display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 10px;
 }
@@ -544,10 +535,6 @@ html[lang="ko"] .hero-sub { font-size: 18px; max-width: 620px; }
 .proof svg { width: 16px; height: 16px; color: var(--accent); }
 @media (max-width: 640px) {
   .cred { padding-top: 64px; }
-  .marks { gap: 4px 22px; }
-  .mark .cm { --cm-slot: 38px; }
-  .mark-text { font-size: 20px; }
-  .mark { font-size: 20px; }
 }
 
 /* ---------- sections ---------- */
@@ -1227,3 +1214,41 @@ html[lang="ko"] .secpage-hero h1 { line-height: 1.22; letter-spacing: -0.03em; f
 .thanks-steps { margin-top: 24px; display: grid; gap: 10px; color: var(--fg-muted); }
 .thanks-steps li { position: relative; padding-left: 24px; }
 .thanks-steps li svg { position: absolute; left: 0; top: 4px; width: 16px; height: 16px; color: var(--accent); }
+
+/* ---------- MCP client marquee (Marquee.astro) ----------
+   Two identical lists side by side; the track moves left by one list width (-50%) and loops without a seam. Each
+   list carries its own trailing gap so both halves are exactly equal. Slow (≈35-40 px/s), paused on hover, edges
+   faded with a mask. With prefers-reduced-motion: no animation, the copy is removed and the one list wraps, centred. */
+.mq-wrap { text-align: center; }
+.mq {
+  --mq-gap: 44px;
+  position: relative; margin: 18px auto 0; max-width: 1080px; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+}
+.mq-track { display: flex; width: max-content; animation: mq-scroll var(--mq-dur, 60s) linear infinite; will-change: transform; }
+.mq:hover .mq-track { animation-play-state: paused; }
+.mq-list { display: flex; flex: none; align-items: center; gap: var(--mq-gap); padding-inline-end: var(--mq-gap); }
+.mq-item {
+  display: inline-flex; align-items: center; gap: 2px; height: 48px; white-space: nowrap;
+  font-size: 21px; font-weight: 650; letter-spacing: -0.03em; color: color-mix(in srgb, var(--fg) 78%, transparent);
+}
+.mq-item .cm { --cm-slot: 40px; }
+.mq-item[data-mark="no"] { padding-inline: 4px; }
+.mq-note { margin-top: 12px; font-size: 13px; color: var(--fg-muted); }
+.mq-note + .marks-note { margin-top: 4px; }
+@keyframes mq-scroll { to { transform: translate3d(-50%, 0, 0); } }
+@media (max-width: 640px) {
+  .mq { --mq-gap: 30px; margin-inline: calc(var(--gutter) * -1); }
+  .mq-item { font-size: 18px; height: 44px; }
+  .mq-item .cm { --cm-slot: 36px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mq { -webkit-mask-image: none; mask-image: none; overflow: visible; margin-inline: auto; }
+  .mq-track { animation: none; width: auto; justify-content: center; }
+  .mq-list { flex: 1 1 auto; flex-wrap: wrap; justify-content: center; gap: 4px 28px; padding-inline-end: 0; }
+  .mq-list[aria-hidden="true"] { display: none; }
+}
+/* B: the marquee as its own band under the hero */
+.mq-band { padding: 72px 0 8px; }
+@media (max-width: 640px) { .mq-band { padding-top: 56px; } }

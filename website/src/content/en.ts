@@ -104,7 +104,8 @@ const en = {
     { icon: 'shield', text: 'Every security feature free' },
   ],
   clients: {
-    title: 'Works with the AI tools you already use',
+    // Heading of the MCP marquee (A credibility band, B band under the hero).
+    title: 'Works with any AI that speaks MCP',
     today: 'today',
     soon: 'v0.2 · rolling out',
     items: [
@@ -114,7 +115,14 @@ const en = {
       { name: 'claude.ai', status: 'soon' },
       { name: 'ChatGPT', status: 'soon' },
     ],
-    // Shown next to the logos (A band, B "works" section). Logo rules: public/logos/SOURCES.md.
+    // The marquee (components/Marquee.astro): MCP clients that can add a remote MCP server by URL (checked against
+    // each vendor's docs 2026-10-23; see LOGO-SOURCES.md). Which mark each one gets: content/brands.ts.
+    any: [
+      'Claude Code', 'Claude', 'Codex', 'ChatGPT', 'Cursor', 'Grok', 'Gemini CLI', 'Devin Desktop (Windsurf)',
+      'VS Code + Copilot', 'Zed', 'Cline', 'goose', 'LM Studio',
+    ],
+    rollout: 'Claude and ChatGPT web connectors: rolling out (v0.2).',
+    // Shown next to the logos (A band, B "works" section). Logo rules: LOGO-SOURCES.md.
     trademarks: 'Trademarks belong to their owners; Trina Drive is not affiliated with or endorsed by them.',
   },
   // One compact comparison: an ontology/RAG build vs. a cloud-drive connector vs. Trina Drive.
