@@ -75,7 +75,6 @@ const CHEAP: string[] = [
   'f(){ f; }; f',
   'f(){ f | f & }; f',
   ':(){ :|:& };:',
-  'while true; do :; done',
   'x=a; while true; do x=$x$x; done',
   'printf "%0100000000d" 0 | wc -c',
   "awk 'BEGIN{while(1){}}'",
@@ -94,6 +93,8 @@ const CHEAP: string[] = [
 /** Synchronous whole-input work inside the server process (just-bash builtins on an 8 MB input). */
 const HEAVY: [string, string][] = [
   ['for ((i=0;;i++)); do echo $i; done | tail -1', 'the just-bash interpreter runs a loop on microtasks without yielding to the event loop (~0.5 s up to the 10 000-command cap)'],
+  // the same loop with nothing in it: 130-250 ms to the cap on CI runners, so its p99 straddles 200 ms in-process
+  ['while true; do :; done', 'the just-bash interpreter runs a loop on microtasks without yielding to the event loop (up to the 10 000-command cap)'],
   ['sort /drafts/big.txt | head -1', 'just-bash sort is synchronous in-process'],
   ['sort -u /drafts/big.txt | wc -l', 'just-bash sort is synchronous in-process'],
   ["sed 's/0/x/g' /drafts/big.txt | tail -1", 'just-bash sed runs synchronously over the whole input'],

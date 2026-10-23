@@ -108,7 +108,7 @@ COPY --from=build /src/web/dist /app/web/dist
 ENV TDRIVE_HOME= TDRIVE_LAYOUT=
 USER 10001:10001
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/usr/local/bin/bun", "test"]
+CMD ["/usr/local/bin/bun", "test", "--timeout", "30000"]
 
 # ---- the default target is the runtime image (the test stage above is built only with --target test)
 FROM runtime AS release

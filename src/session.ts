@@ -162,7 +162,7 @@ export class Session {
       const now = this.ctx.now()
       const touched = new Map(this.srcTouches)
       for (const { node, strong } of this.folderTouches.values()) {
-        const id = ensureFolder(db, node.real, node.dev, node.ino)
+        const id = ensureFolder(db, node.real, node.dev, node.ino, node.birth)
         touched.set(id, strong || !!touched.get(id))
       }
       for (const [id, strong] of touched) {

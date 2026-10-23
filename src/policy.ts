@@ -10,13 +10,15 @@ import type { DB } from './db'
 import { loadClosures, type Closures } from './inplace/closures'
 import { appleDoubleSaysLink, sniffLink, SNIFF_BYTES } from './inplace/linkish'
 import { isSystemName, nfc, nfcCollisions } from './names'
-import { identityKey, type FolderRow, type RuleRow, type TokenRow } from './store'
+import { identityKey, isFolder, sameBirth, type FolderRow, type RuleRow, type TokenRow } from './store'
 
 export interface Node {
   real: string
   vpath: string
   dev: bigint
   ino: bigint
+  /** birth time (0n where the file system has none): with dev + ino, which folder this is (store.sameBirth) */
+  birth: bigint
   /** known folder rows from the mount down to this folder (inclusive when it has a row) */
   rows: FolderRow[]
   parent: Node | null
@@ -147,7 +149,7 @@ export class Access {
     if (!v) {
       for (const a of this.anchorsBelow(node)) {
         const below = this.descend(node, path.relative(node.real, a.path).split(path.sep))
-        if (below && identityKey(below.dev, below.ino) === identityKey(a.dev, a.ino) && this.canRead(below)) { v = true; break }
+        if (below && isFolder(a, below.dev, below.ino, below.birth) && this.canRead(below)) { v = true; break }
       }
     }
     this.visibleCache.set(node.real, v)
@@ -188,9 +190,9 @@ export class Access {
     if (onSystemPath(row.path)) return null
     let st: fs.BigIntStats
     try { st = fs.lstatSync(row.path, { bigint: true }) } catch { return null }
-    if (!st.isDirectory() || st.isSymbolicLink() || identityKey(st.dev, st.ino) !== identityKey(row.dev, row.ino)) return null
+    if (!st.isDirectory() || st.isSymbolicLink() || !isFolder(row, st.dev, st.ino, st.birthtimeNs)) return null
     if (this.closures.identities.has(identityKey(st.dev, st.ino))) return null
-    return { real: row.path, vpath: '/' + nfc(row.mount_name!), dev: st.dev, ino: st.ino, rows: [row], parent: null }
+    return { real: row.path, vpath: '/' + nfc(row.mount_name!), dev: st.dev, ino: st.ino, birth: st.birthtimeNs, rows: [row], parent: null }
   }
 
   private listing(real: string) {
@@ -229,10 +231,11 @@ export class Access {
     const known = this.indexedAt(st.dev, st.ino)
     if (known.length && !known.some((k) => k.path === real)) { recheckFailed?.(parent.real); return null }
     if (st.isDirectory()) {
+      // a lost rule-bearing folder's path: only that folder itself (same identity and birth time) opens it again
       const lost = this.closures.lostPaths.get(real)
-      if (lost !== undefined && lost !== key) return null
-      const row = this.byIdentity.get(identityKey(st.dev, st.ino))
-      return { kind: 'dir', node: { real, vpath, dev: st.dev, ino: st.ino, rows: row ? [...parent.rows, row] : parent.rows, parent } }
+      if (lost !== undefined && (lost.key !== key || !sameBirth(lost.birth, st.birthtimeNs))) return null
+      const row = this.rowFor(st.dev, st.ino, st.birthtimeNs)
+      return { kind: 'dir', node: { real, vpath, dev: st.dev, ino: st.ino, birth: st.birthtimeNs, rows: row ? [...parent.rows, row] : parent.rows, parent } }
     }
     if (!st.isFile() || st.nlink !== 1n || isXSymFile(real, st.size)) return null
     if (l.sidecars.has(name) && sidecarSaysLink(parent.real, name)) return null // a Mac alias by its Finder info
@@ -303,13 +306,13 @@ export class Access {
 
   /** ⑦: every step from the mount down is still the same folder (and not a link), and the file is still there. */
   recheck(f: FileEntry) {
-    const same = (p: string, dev: bigint, ino: bigint, dir: boolean) => {
+    const same = (p: string, dev: bigint, ino: bigint, birth: bigint | null) => {
       const st = fs.lstatSync(p, { bigint: true })
-      if (st.isSymbolicLink() || (dir ? !st.isDirectory() : !st.isFile() || st.nlink !== 1n) || st.dev !== dev || st.ino !== ino) throw new Closed()
+      if (st.isSymbolicLink() || (birth !== null ? !st.isDirectory() || st.birthtimeNs !== birth : !st.isFile() || st.nlink !== 1n) || st.dev !== dev || st.ino !== ino) throw new Closed()
     }
     try {
-      same(f.real, f.dev, f.ino, false)
-      for (let n: Node | null = f.parent; n; n = n.parent) same(n.real, n.dev, n.ino, true)
+      same(f.real, f.dev, f.ino, null)
+      for (let n: Node | null = f.parent; n; n = n.parent) same(n.real, n.dev, n.ino, n.birth)
     } catch (e) {
       recheckFailed?.(f.parent.real)
       throw e instanceof Closed ? e : new Closed()
@@ -325,7 +328,7 @@ export class Access {
     const start = mount && this.mountNode(mount)
     if (!start) return null
     const n = f.path === mount.path ? start : this.descend(start, path.relative(mount.path, f.path).split(path.sep))
-    return n && identityKey(n.dev, n.ino) === identityKey(f.dev, f.ino) ? n : null
+    return n && isFolder(f, n.dev, n.ino, n.birth) ? n : null
   }
 
   /** R4: can this token read files in folder `id` right now (R1 ①–④)? */
@@ -335,7 +338,12 @@ export class Access {
   }
 
   folderRow(id: number) { return this.byId.get(id) }
-  rowForNode(n: Node) { return this.byIdentity.get(identityKey(n.dev, n.ino)) }
+  rowForNode(n: Node) { return this.rowFor(n.dev, n.ino, n.birth) }
+  /** The folder row of a folder on disk: same identity and birth time (a reused inode number is another folder). */
+  private rowFor(dev: bigint, ino: bigint, birth: bigint) {
+    const row = this.byIdentity.get(identityKey(dev, ino))
+    return row && sameBirth(row.birth_ns, birth) ? row : undefined
+  }
   rulesMap() { return this.rules }
 }
 

@@ -15,7 +15,7 @@ import type { DB } from '../db'
 import { Mirror } from '../mirror'
 import { isOffice } from '../names'
 import { onRecheckFailure, readersOfChain } from '../policy'
-import { ensureFolder, identityKey, StoreError, type FolderRow } from '../store'
+import { ensureFolder, identityKey, isFolder, sameBirth, StoreError, type FolderRow } from '../store'
 import { addEvent, addQuarantine, adminIds, manageHolders } from './events'
 import { ExtractQueue, extractForIndex, IdentityChanged, openOriginal, readAll } from './extractq'
 import { appleDoubleSaysLink, isNoiseName, sniffLink, SNIFF_BYTES } from './linkish'
@@ -52,6 +52,11 @@ interface PrevRow {
 interface Cur extends Seen { sha256: string | null; hashedKey: string | null; sniff: string | null; closed: string | null }
 
 const idOf = (e: { dev: string; ino: string }) => identityKey(e.dev, e.ino)
+/** An index entry as seen now (Cur) or by the last pass (PrevRow). */
+type Ident = { dev: string; ino: string; birthNs?: string; birth_ns?: string }
+const birthOf = (e: Ident) => e.birthNs ?? e.birth_ns ?? ''
+/** The folder row of an index entry, if any: same identity and birth time (a reused inode number is another folder). */
+type RowOf = (e: Ident) => FolderRow | undefined
 /** What a stored hash belongs to. ctime too: mtime can be put back after a same-size rewrite in place (or a reused inode). */
 const hashKey = (e: Seen) => `${e.dev}:${e.ino}:${e.size}:${e.mtimeNs}:${e.ctimeNs}`
 const under = (p: string, dir: string) => p === dir || p.startsWith(dir + '/')
@@ -117,8 +122,7 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
   for (const r of roots) {
     let st: fs.BigIntStats | null = null
     try { st = await ops.lstat(r.path) } catch {}
-    const want = r.folder ? identityKey(r.folder.dev, r.folder.ino) : null
-    const okHere = !!st && st.isDirectory() && !st.isSymbolicLink() && (!want || identityKey(st.dev, st.ino) === want)
+    const okHere = !!st && st.isDirectory() && !st.isSymbolicLink() && (!r.folder || isFolder(r.folder, st.dev, st.ino, st.birthtimeNs))
     if (okHere) {
       if (lastAvailability(db, r.path) === 'unavailable') addEvent(db, { kind: 'available', path: r.path, at: now() })
       walked.push({ path: r.path, oldPath: r.path })
@@ -135,7 +139,7 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
     let moved: string | null = null
     for (const n of names ?? []) {
       const p = path.join(parent, n)
-      try { const s = await ops.lstat(p); if (s.isDirectory() && !s.isSymbolicLink() && identityKey(s.dev, s.ino) === want) { moved = p; break } } catch {}
+      try { const s = await ops.lstat(p); if (s.isDirectory() && !s.isSymbolicLink() && isFolder(r.folder, s.dev, s.ino, s.birthtimeNs)) { moved = p; break } } catch {}
     }
     if (moved) {
       const old = r.folder.path
@@ -146,7 +150,7 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
     skipped.add(r.path)
     const seenBefore = prevByPath.get(r.path)
     const hasLive = db.query("SELECT 1 FROM quarantine WHERE kind = 'lost' AND folder_id = ? AND released_at IS NULL").get(r.folder.id)
-    if (names !== null && seenBefore && seenBefore.dev === r.folder.dev && seenBefore.ino === r.folder.ino && !hasLive) {
+    if (names !== null && seenBefore && isFolder(r.folder, seenBefore.dev, seenBefore.ino, seenBefore.birth_ns) && !hasLive) {
       db.transaction(() => {
         const ev = addEvent(db, { kind: 'lost', path: r.path, dev: r.folder!.dev, ino: r.folder!.ino, folderId: r.folder!.id, at: now(),
           detail: { registered: true, replaced: !!st }, notify: { admins, manage: manageHolders(db, [r.folder!.id]) } })
@@ -234,34 +238,39 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
   // ---- 4. apply (one transaction): folder paths, lost/found, R10, closures, index, audit
   const folderRows = db.query<FolderRow, []>('SELECT * FROM folders').all()
   const rowById = new Map(folderRows.map((r) => [identityKey(r.dev, r.ino), r]))
+  const rowOf: RowOf = (e) => { const r = rowById.get(idOf(e)); return r && sameBirth(r.birth_ns, birthOf(e)) ? r : undefined }
+  /** where a folder row's folder is now: same identity and birth time */
+  const curOf = (r: FolderRow) => (curById.get(identityKey(r.dev, r.ino)) ?? []).filter((c) => sameBirth(r.birth_ns, c.birthNs))
   const ruleBearing = ruleBearingIds(db)
   const closedEvents = new Map<string, string[]>()
   db.transaction(() => {
     // folder rows follow their identity
     for (const r of folderRows) {
-      const at = (curById.get(identityKey(r.dev, r.ino)) ?? []).filter((c) => c.kind === 'dir')
+      const at = curOf(r).filter((c) => c.kind === 'dir')
       if (at.length === 1 && at[0]!.path !== r.path) db.query('UPDATE folders SET path = ? WHERE id = ?').run(at[0]!.path, r.id)
+      // rows from before birth times were kept: record it while the folder is where the row says
+      if (at.length === 1 && r.birth_ns === '') db.query('UPDATE folders SET birth_ns = ? WHERE id = ?').run(at[0]!.birthNs, r.id)
     }
 
     // lost: a rule-bearing folder seen last time whose identity is nowhere now
     const prevById = groupBy(considered, idOf)
     for (const r of folderRows) {
-      const k = identityKey(r.dev, r.ino)
-      if (!ruleBearing.has(r.id) || curById.has(k)) continue
-      const before = (prevById.get(k) ?? []).find((p) => p.kind === 'dir')
+      if (!ruleBearing.has(r.id) || curOf(r).length) continue
+      const before = (prevById.get(identityKey(r.dev, r.ino)) ?? []).find((p) => p.kind === 'dir' && sameBirth(r.birth_ns, p.birth_ns))
       if (!before || unreadable.some((u) => under(before.path, u))) continue
       if (roots.some((x) => x.folder?.id === r.id)) continue // registered roots were judged in step 1
       const ev = addEvent(db, { kind: 'lost', path: before.path, dev: r.dev, ino: r.ino, folderId: r.id, at: now(),
-        notify: { admins, manage: manageHolders(db, chain(before.path, prevIdx, rowById).map((x) => x.id)) } })
+        notify: { admins, manage: manageHolders(db, chain(before.path, prevIdx, rowOf).map((x) => x.id)) } })
       addQuarantine(db, { kind: 'lost', item: 'dir', dev: r.dev, ino: r.ino, path: before.path, folder_id: r.id, widened_id: null, event_id: ev,
         reason: 'a folder with rules vanished; its path stays closed to agents until the admin releases it' }, now())
       audit.push({ command: `lost: ${before.path}`, files: [before.path], outcome: 'closed' })
       rep.lost++
     }
     // found: a lost identity is back (same or another path)
-    for (const q of db.query<{ id: number; dev: string; ino: string; path: string; folder_id: number | null }, []>(
-      "SELECT id, dev, ino, path, folder_id FROM quarantine WHERE kind = 'lost' AND released_at IS NULL").all()) {
-      const at = (curById.get(identityKey(q.dev, q.ino)) ?? []).filter((c) => c.kind === 'dir')
+    for (const q of db.query<{ id: number; dev: string; ino: string; path: string; folder_id: number | null; birth: string | null }, []>(
+      `SELECT q.id, q.dev, q.ino, q.path, q.folder_id, f.birth_ns AS birth FROM quarantine q LEFT JOIN folders f ON f.id = q.folder_id
+       WHERE q.kind = 'lost' AND q.released_at IS NULL`).all()) {
+      const at = (curById.get(identityKey(q.dev, q.ino)) ?? []).filter((c) => c.kind === 'dir' && sameBirth(q.birth ?? '', c.birthNs))
       if (at.length !== 1) continue
       const c = at[0]!
       db.query('UPDATE quarantine SET released_at = ?, reason = reason || ? WHERE id = ?').run(now(), ` (found again at ${c.path})`, q.id)
@@ -274,14 +283,14 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
     for (const m of topMoves) {
       const sameParent = path.dirname(m.from) === path.dirname(m.to) ||
         idOfPath(prevIdx, path.dirname(m.from)) === idOfPath(cur, path.dirname(m.to))
-      const row = rowById.get(idOf(m.c))
+      const row = rowOf(m.c)
       const bearing = !!row && ruleBearing.has(row.id)
       // path + identity installs (unstable SMB identities) quarantine every rename too (R10, last sentence)
-      const widen = sameParent ? !!opts.quarantineRenames : movesWiden(db, m, prevIdx, cur, rowById, ruleBearing)
+      const widen = sameParent ? !!opts.quarantineRenames : movesWiden(db, m, prevIdx, cur, folderRows, rowOf, ruleBearing)
       if (sameParent) rep.renamed++; else rep.moved++
-      const oldChain = chain(m.c.kind === 'dir' ? m.from : path.dirname(m.from), prevIdx, rowById)
+      const oldChain = chain(m.c.kind === 'dir' ? m.from : path.dirname(m.from), prevIdx, rowOf)
       if (widen) {
-        const folderId = m.c.kind === 'dir' ? ensureFolder(db, m.to, BigInt(m.c.dev), BigInt(m.c.ino)) : null
+        const folderId = m.c.kind === 'dir' ? ensureFolder(db, m.to, m.c.dev, m.c.ino, m.c.birthNs) : null
         const ev = addEvent(db, { kind: 'quarantined', path: m.to, oldPath: m.from, dev: m.c.dev, ino: m.c.ino, folderId, at: now(),
           detail: { item: m.c.kind === 'dir' ? 'dir' : 'file', why: sameParent ? 'rename (path + identity install)' : 'move widens readers' },
           notify: { admins, manage: manageHolders(db, oldChain.map((x) => x.id)) } })
@@ -365,7 +374,7 @@ async function runPass(db: DB, opts: ReconcileOptions): Promise<ReconcileReport>
   const t3 = performance.now()
   rep.ms.hash = t3 - t2
 
-  const parentOf = (c: Cur) => { const p = cur.get(path.dirname(c.path)); return p ? { path: p.path, dev: p.dev, ino: p.ino } : null }
+  const parentOf = (c: Cur) => { const p = cur.get(path.dirname(c.path)); return p ? { path: p.path, dev: p.dev, ino: p.ino, birthNs: p.birthNs } : null }
   const mirror = opts.dataDir ? new Mirror(db, path.join(opts.dataDir, 'mirror')) : null
   let corpus: DraftCorpus | null = null
   const corpusFor = () => (corpus ??= opts.dataDir ? DraftCorpus.load(db, blobsFor(opts.dataDir)) : null)
@@ -416,7 +425,7 @@ function countTops(paths: string[], set: Set<string>, topOf: (p: string, s: Set<
   return m
 }
 
-const idOfPath = (m: Map<string, { dev: string; ino: string }>, p: string) => { const e = m.get(p); return e ? idOf(e) : `missing:${p}` }
+const idOfPath = (m: Map<string, Ident>, p: string) => { const e = m.get(p); return e ? `${idOf(e)}:${birthOf(e)}` : `missing:${p}` }
 
 /** Update a folder row and every row below it after the folder was found under a new path. */
 function renameFolderRows(db: DB, from: string, to: string) {
@@ -426,13 +435,13 @@ function renameFolderRows(db: DB, from: string, to: string) {
 }
 
 /** Folder rows (by identity) of `p` and its ancestors as an index saw them, from the top registered folder down. */
-function chain(p: string, idx: Map<string, { dev: string; ino: string }>, rowById: Map<string, FolderRow>): FolderRow[] {
+function chain(p: string, idx: Map<string, Ident>, rowOf: RowOf): FolderRow[] {
   const parts: string[] = []
   for (let c = p; ; c = path.dirname(c)) { parts.unshift(c); if (path.dirname(c) === c) break }
   const out: FolderRow[] = []
   for (const a of parts) {
     const e = idx.get(a)
-    const r = e && rowById.get(idOf(e))
+    const r = e && rowOf(e)
     if (r) out.push(r)
   }
   const top = out.findIndex((r) => r.registered)
@@ -447,16 +456,16 @@ function widens(db: DB, oldChain: FolderRow[], newChain: FolderRow[]): boolean {
 }
 
 function movesWiden(db: DB, m: { from: string; to: string; c: Cur }, prevIdx: Map<string, PrevRow>, cur: Map<string, Cur>,
-  rowById: Map<string, FolderRow>, ruleBearing: Set<number>): boolean {
-  if (m.c.kind !== 'dir') return widens(db, chain(path.dirname(m.from), prevIdx, rowById), chain(path.dirname(m.to), cur, rowById))
-  if (widens(db, chain(m.from, prevIdx, rowById), chain(m.to, cur, rowById))) return true
+  rows: FolderRow[], rowOf: RowOf, ruleBearing: Set<number>): boolean {
+  if (m.c.kind !== 'dir') return widens(db, chain(path.dirname(m.from), prevIdx, rowOf), chain(path.dirname(m.to), cur, rowOf))
+  if (widens(db, chain(m.from, prevIdx, rowOf), chain(m.to, cur, rowOf))) return true
   // folders with their own rules inside the moved folder are judged too (their readers can change differently)
-  for (const r of rowById.values()) {
+  for (const r of rows) {
     if (!ruleBearing.has(r.id)) continue
     const at = findByIdentity(cur, r)
     if (!at || !at.path.startsWith(m.to + '/')) continue
     const oldP = m.from + at.path.slice(m.to.length)
-    if (widens(db, chain(oldP, prevIdx, rowById), chain(at.path, cur, rowById))) return true
+    if (widens(db, chain(oldP, prevIdx, rowOf), chain(at.path, cur, rowOf))) return true
   }
   return false
 }
@@ -465,7 +474,8 @@ const identityCache = new WeakMap<Map<string, Cur>, Map<string, Cur>>()
 function findByIdentity(cur: Map<string, Cur>, r: FolderRow): Cur | null {
   let m = identityCache.get(cur)
   if (!m) { m = new Map([...cur.values()].filter((c) => c.kind === 'dir').map((c) => [idOf(c), c])); identityCache.set(cur, m) }
-  return m.get(identityKey(r.dev, r.ino)) ?? null
+  const c = m.get(identityKey(r.dev, r.ino))
+  return c && sameBirth(r.birth_ns, c.birthNs) ? c : null
 }
 
 /** Folder ids that carry something an identity loss would orphan: rules, flags, breaks, manage, scopes, registration. */

@@ -109,7 +109,7 @@ export class DraftCorpus {
   }
 }
 
-export interface IndexedFile { path: string; dev: string; ino: string; sha256: string; parent: { path: string; dev: string; ino: string } }
+export interface IndexedFile { path: string; dev: string; ino: string; sha256: string; parent: { path: string; dev: string; ino: string; birthNs: string } }
 
 interface WidenedRow {
   id: number; dev: string; ino: string; path: string; sha256: string; draft_id: number; draft_version: number
@@ -141,7 +141,7 @@ function markPending(db: DB, w: WidenedRow, src: number[], now: number, rejudged
   }
 }
 
-const targetFolder = (db: DB, f: IndexedFile) => ensureFolder(db, f.parent.path, BigInt(f.parent.dev), BigInt(f.parent.ino))
+const targetFolder = (db: DB, f: IndexedFile) => ensureFolder(db, f.parent.path, f.parent.dev, f.parent.ino, f.parent.birthNs)
 
 /**
  * Judge one new or changed NAS file against every draft: exact sha256 first, then paragraph overlap of `text`
@@ -191,9 +191,9 @@ export function rejudgeWidened(db: DB, now = Date.now()): { judged: number; flip
       const at = db.query<{ path: string }, [string, string]>("SELECT path FROM fs_index WHERE dev = ? AND ino = ? AND kind = 'file'").all(w.dev, w.ino)
       if (at.length !== 1) continue // gone, or at several paths (closed anyway)
       const p = at[0]!.path
-      const parent = db.query<{ dev: string; ino: string }, [string]>('SELECT dev, ino FROM fs_index WHERE path = ?').get(path.dirname(p))
+      const parent = db.query<{ dev: string; ino: string; birth_ns: string }, [string]>('SELECT dev, ino, birth_ns FROM fs_index WHERE path = ?').get(path.dirname(p))
       if (!parent) continue
-      const target = ensureFolder(db, path.dirname(p), BigInt(parent.dev), BigInt(parent.ino))
+      const target = ensureFolder(db, path.dirname(p), parent.dev, parent.ino, parent.birth_ns)
       const src = sourcesOf(db, w.draft_id)
       const widening = src.length > 0 && isWidening(db, src, target)
       judged++

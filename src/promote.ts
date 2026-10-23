@@ -121,7 +121,7 @@ export function resolveTarget(db: DB, p: Promoter, folder: unknown): Target {
   const node = e.node
   if (!promoteOn(promoteFolderIds(db), node.rows)) throw new PromoteError('promote_off', `Promote is not turned on for ${node.vpath}; an admin turns it on for the folder (Folders → Promote).`, 403)
   if (p.access.level(node) < 2) throw new PromoteError('no_write', `Your rule on ${node.vpath} is not "write": drafts can be promoted only where you have write.`, 403)
-  return { node, folderId: ensureFolder(db, node.real, node.dev, node.ino), vpath: node.vpath }
+  return { node, folderId: ensureFolder(db, node.real, node.dev, node.ino, node.birth), vpath: node.vpath }
 }
 
 /** Folders (by id and the path this person sees) where this person may promote. */
@@ -165,7 +165,7 @@ function recheckDir(node: Node) {
   for (let n: Node | null = node; n; n = n.parent) {
     let st: fs.BigIntStats
     try { st = fs.lstatSync(n.real, { bigint: true }) } catch { throw new PromoteError('target_changed', 'the target folder changed; nothing was written', 409) }
-    if (st.isSymbolicLink() || !st.isDirectory() || st.dev !== n.dev || st.ino !== n.ino) throw new PromoteError('target_changed', 'the target folder changed; nothing was written', 409)
+    if (st.isSymbolicLink() || !st.isDirectory() || st.dev !== n.dev || st.ino !== n.ino || st.birthtimeNs !== n.birth) throw new PromoteError('target_changed', 'the target folder changed; nothing was written', 409)
   }
 }
 
