@@ -1,11 +1,12 @@
 ---
-// Variant B of the home page (/b): the same structure as variant A (supabase.com-style), told for non-developer teams.
+// Home page, variant B (/ and /b): the same structure as variant A (supabase.com-style), told for non-developer teams.
 // B differs in the hero visual (an animated AI chat beside the company folders), the proof chips under it and the
 // use-case gallery. Shared sections come from components/; B-only parts live in components/b/ and are styled by
 // styles/b.css, which only this page loads.
 import type { CopyB } from '../../content/en-b'
 import Base from '../../layouts/Base.astro'
 import { CLOUD_LIVE, LINKS, SITE_URL } from '../../site'
+import { homeJsonLd } from '../../seo'
 import CloudTrust from '../CloudTrust.astro'
 import Faq from '../Faq.astro'
 import FinalCta from '../FinalCta.astro'
@@ -22,12 +23,13 @@ import ChatDemo from './ChatDemo.astro'
 import UseCases from './UseCases.astro'
 import '../../styles/b.css'
 
-interface Props { t: CopyB }
-const { t } = Astro.props
-const home = '/b'
+interface Props { t: CopyB; /** Served at /b: same page, noindex with canonical → / (A/B link). */ abLink?: boolean }
+const { t, abLink = false } = Astro.props
+const home = '/'
+const jsonLd = homeJsonLd(t)
 const h = t.hero
 ---
-<Base t={t} noindex canonicalHref={`${SITE_URL}/`} preloadHero variant="b">
+<Base t={t} jsonLd={abLink ? undefined : jsonLd} preloadHero variant="b" noindex={abLink} canonicalHref={abLink ? `${SITE_URL}/` : undefined}>
   <Nav t={t} home={home} />
   <main id="main" class="vb">
     <!-- hero: Trina Cloud first, self-host second; then an AI chat window answering from the company folders -->

@@ -9,8 +9,8 @@ const root = join(import.meta.dir, '..')
 
 describe('titles and descriptions', () => {
   const pages: [string, string, string][] = [
-    ['home', en.meta.title, en.meta.description],
-    ['/b', enB.meta.title, enB.meta.description],
+    ['home', enB.meta.title, enB.meta.description],
+    ['/a', en.meta.title, en.meta.description],
     ['security', en.securityPage.title, en.securityPage.description],
     ['compare', en.compareGd.title, en.compareGd.description],
     ...(['terms', 'privacy', 'refund'] as const).map((p): [string, string, string] => [p, `${en.legal[p].title} — Trina Drive`, en.legal[p].description]),
@@ -21,7 +21,7 @@ describe('titles and descriptions', () => {
     expect(description.length).toBeLessThanOrEqual(155)
   })
   test('indexable titles are unique', () => {
-    const titles = pages.filter(([p]) => p !== '/b').map(([, t]) => t)
+    const titles = pages.filter(([p]) => p !== '/a').map(([, t]) => t)
     expect(new Set(titles).size).toBe(titles.length)
   })
 })
