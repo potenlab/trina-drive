@@ -224,13 +224,14 @@ describe('hosts check', () => {
   })
 })
 
-// ---------------------------------------------------------------- the before-serve hook
+// ---------------------------------------------------------------- the traffic hold around the member sync's gate
 class Recorder implements Runner {
   readonly argv: string[] = []
   async run(_host: string, argv: string[]): Promise<ExecResult> {
     const line = argv.slice(1).join(' ')
     this.argv.push(line)
     if (line.startsWith('inspect -f {{.State.Status}}')) return { code: 0, stdout: 'running healthy\n', stderr: '' }
+    if (line.startsWith('network disconnect') && line.includes('tdc-net-gone')) return { code: 1, stdout: '', stderr: 'container tdc-caddy is not connected to network tdc-net-gone' }
     return { code: 0, stdout: '', stderr: '' }
   }
 }
@@ -238,51 +239,54 @@ const layout: HostLayout = {
   seccomp: '/s.json', apparmor: '', dataMount: () => 'type=volume,src=v,dst=/data', stagingMount: () => 'type=bind,src=/s,dst=/backup', envFile: () => '/env',
   prepare: async () => {}, cleanup: async () => {}, ship: async () => [], publicIp: async () => null,
 }
-const spec = (): TeamSpec => ({ slug: 'acme', number: 1, uid: 20001, url: 'https://acme.example.com', plan: planOf('team'), net: teamNet('10.128.0.0/11', 1), image: 'trina-drive:x', env: {} })
+const spec = (slug = 'acme'): TeamSpec => ({ slug, number: 1, uid: 20001, url: `https://${slug}.example.com`, plan: planOf('team'), net: teamNet('10.128.0.0/11', 1), image: 'trina-drive:x', env: {} })
 
-describe('driver: before serving', () => {
-  test('without a hook: start, Caddy joins, health (as before)', async () => {
+describe('traffic hold (sync.ts serveHooks)', () => {
+  test('the docker driver: hold = Caddy leaves the team network (already gone is fine), serve = Caddy joins at its fixed address', async () => {
     const r = new Recorder()
     const d = new DockerDriver({ name: 't', runner: r, layout, caddyContainer: 'tdc-caddy', helperImage: 'h', pickHost: async () => 'h1' })
-    await d.start('h1', spec())
-    expect(r.argv.map((l) => l.split(' ').slice(0, 2).join(' '))).toEqual(['start tdc-acme', 'network connect', 'inspect -f'])
+    await d.holdTraffic('h1', spec())
+    await d.holdTraffic('h1', spec('gone'))
+    await d.serveTraffic('h1', spec())
+    expect(r.argv).toEqual(['network disconnect -f tdc-net-acme tdc-caddy', 'network disconnect -f tdc-net-gone tdc-caddy', `network connect --ip ${teamNet('10.128.0.0/11', 1).caddyIp} tdc-net-acme tdc-caddy`])
   })
 
-  test('with a hook: Caddy leaves the network, the container starts and is healthy, the hook runs, then Caddy joins', async () => {
-    const r = new Recorder()
-    const d = new DockerDriver({ name: 't', runner: r, layout, caddyContainer: 'tdc-caddy', helperImage: 'h', pickHost: async () => 'h1' })
-    const seen: string[] = []
-    d.beforeServe = async (host, s) => { seen.push(`${host} ${s.slug}`); r.argv.push('HOOK') }
-    await d.start('h1', spec())
-    expect(seen).toEqual(['h1 acme'])
-    const steps = r.argv.map((l) => l.split(' ').slice(0, 2).join(' '))
-    expect(steps).toEqual(['network disconnect', 'start tdc-acme', 'inspect -f', 'HOOK', 'network connect'])
-    expect(r.argv[0]).toBe('network disconnect -f tdc-net-acme tdc-caddy')
-  })
-
-  test('a failing hook fails the start and Caddy stays off the team network (paused page)', async () => {
-    const r = new Recorder()
-    const d = new DockerDriver({ name: 't', runner: r, layout, caddyContainer: 'tdc-caddy', helperImage: 'h', pickHost: async () => 'h1' })
-    d.beforeServe = async () => { throw new Error('sync refused') }
-    await expect(d.start('h1', spec())).rejects.toThrow(/not served: the step before serving failed \(sync refused\)/)
-    await Bun.sleep(10)
-    expect(r.argv.some((l) => l.startsWith('network connect'))).toBe(false)
-  })
-
-  test('the fake driver calls it on create, start and recreate; a throw fails the resume job', async () => {
+  test('registered once in serveHooks; the gate holds the team while it syncs and releases it after', async () => {
+    const { serveHooks } = await import('../src/sync')
+    const { caddyHold, registerCaddyHold } = await import('../src/cli/ops-serve')
+    expect(serveHooks.filter((h) => h === caddyHold)).toHaveLength(1)
+    registerCaddyHold()
+    expect(serveHooks.filter((h) => h === caddyHold)).toHaveLength(1)
     env = setup()
-    const order: string[] = []
-    env.driver.beforeServe = async (_h, s) => { order.push(s.slug) }
     await env.cloud.adminCreateTeam({ email: 'o@acme.test', slug: 'acme', actor: 'admin:test' })
     await jobs()
-    await env.cloud.suspend(team('acme'), 'admin', 'admin:test')
-    await env.cloud.resume(team('acme'), 'admin:test')
-    await env.cloud.upgrade(team('acme'), 'admin:test')
-    expect(order).toEqual(['acme', 'acme', 'acme'])
-    await env.cloud.suspend(team('acme'), 'admin', 'admin:test')
-    env.driver.beforeServe = async () => { throw new Error('no sync') }
-    await expect(env.cloud.resume(team('acme'), 'admin:test')).rejects.toThrow('no sync')
-    await Bun.sleep(10)
-    expect(team('acme').status).toBe('suspended')
+    const t = team('acme')
+    await caddyHold.hold!(env.cloud, t)
+    expect(env.driver.held.has('acme')).toBe(true)
+    await caddyHold.release!(env.cloud, t)
+    expect(env.driver.held.has('acme')).toBe(false)
+    expect(env.driver.calls.filter((c) => /^(hold|serve) /.test(c))).toEqual(['hold acme', 'serve acme'])
+  })
+
+  test('with SSO on: a resume runs start → hold → member sync → serve; a failed sync leaves the team held and stopped', async () => {
+    await import('../src/cli/ops-serve')
+    const { setupConsole, opsTeam, runJobs } = await import('./console-helpers')
+    const cenv = setupConsole()
+    try {
+      await opsTeam(cenv, 'owner@acme.test', 'acme')
+      await runJobs(cenv)
+      await cenv.cloud.suspend(teamBySlug(cenv.cloud.db, 'acme')!, 'admin', 'admin:test')
+      cenv.cloud.sync.changed(teamBySlug(cenv.cloud.db, 'acme')!.id)
+      await cenv.cloud.resume(teamBySlug(cenv.cloud.db, 'acme')!, 'admin:test')
+      const calls = cenv.driver.calls.slice(cenv.driver.calls.lastIndexOf('start acme'))
+      expect(calls.slice(0, 4)).toEqual(['start acme', 'hold acme', 'exec acme cloud sync-members', 'serve acme'])
+      expect(cenv.driver.held.has('acme')).toBe(false)
+      await cenv.cloud.suspend(teamBySlug(cenv.cloud.db, 'acme')!, 'admin', 'admin:test')
+      cenv.cloud.sync.changed(teamBySlug(cenv.cloud.db, 'acme')!.id)
+      cenv.drive('acme').fail = 'bad_json'
+      await expect(cenv.cloud.resume(teamBySlug(cenv.cloud.db, 'acme')!, 'admin:test')).rejects.toThrow()
+      expect(cenv.driver.held.has('acme')).toBe(true)
+      expect(cenv.driver.instances.get('acme')!.state).toBe('stopped')
+    } finally { cenv.cleanup() }
   })
 })

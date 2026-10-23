@@ -2,7 +2,9 @@
 // may replace a built-in: `replaces: true`). Larger commands live in their own cli/ops-*.ts files and are listed here.
 //   ops-teams.ts  teams retry (+ --reset-host, review finding 24), teams set-plan (+ --complimentary), teams exec
 //   ops-hosts.ts  hosts check (data volume use, isolation probes; hourly --alert from the control host's cron)
+//   ops-serve.ts  (no command) the Caddy hold around the member sync's gate, registered in sync.ts serveHooks
 import { hostsCheck } from './ops-hosts'
+import './ops-serve'
 import { teamsExec, teamsRetry, teamsSetPlan } from './ops-teams'
 import type { ControlCommand } from './types'
 

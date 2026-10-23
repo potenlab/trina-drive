@@ -2,7 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import type { BackupArtifact, BeforeServe, CreateResult, Driver, ExecResult, HostPool, HostProbe, InstanceState, PoolStatus, TeamSpec } from './types'
+import type { BackupArtifact, CreateResult, Driver, ExecResult, HostPool, HostProbe, InstanceState, PoolStatus, TeamSpec } from './types'
 import { DriverError } from './types'
 
 export class FakeDriver implements Driver {
@@ -10,15 +10,13 @@ export class FakeDriver implements Driver {
   readonly calls: string[] = []
   readonly instances = new Map<string, { state: InstanceState; spec: TeamSpec; setupDone: boolean; disk: number }>()
   failCreate = false
-  beforeServe: BeforeServe | null = null
+  /** teams whose traffic is held (holdTraffic) */
+  readonly held = new Set<string>()
+  async holdTraffic(_h: string, spec: TeamSpec) { this.calls.push(`hold ${spec.slug}`); this.held.add(spec.slug) }
+  async serveTraffic(_h: string, spec: TeamSpec) { this.calls.push(`serve ${spec.slug}`); this.held.delete(spec.slug) }
   /** what `runOnHost` answers per host and argv[1] (e.g. 'info', 'check'); unset = exit 1 */
   readonly hostAnswers = new Map<string, ExecResult>()
   constructor(private readonly dir?: string) {}
-  private async serve(host: string, spec: TeamSpec) {
-    if (!this.beforeServe) return
-    this.calls.push(`before-serve ${spec.slug}`)
-    await this.beforeServe(host, spec)
-  }
   async runOnHost(host: string, argv: string[]): Promise<ExecResult> {
     this.calls.push(`host ${host} ${argv.slice(1).join(' ')}`)
     return this.hostAnswers.get(`${host} ${argv[1] ?? ''}`) ?? this.hostAnswers.get(host) ?? { code: 1, stdout: '', stderr: 'unreachable' }
@@ -29,14 +27,13 @@ export class FakeDriver implements Driver {
     if (this.failCreate) throw new DriverError('boom')
     if (this.instances.has(spec.slug)) throw new DriverError('exists')
     this.instances.set(spec.slug, { state: 'running', spec, setupDone: false, disk: 1000 })
-    await this.serve(_host, spec)
     return { setupToken: `tdrive_setup_${crypto.randomBytes(18).toString('base64url')}`, productBackupSecret: `tdrive_bksec1_${spec.slug}`, publicIp: null }
   }
   private get(slug: string) { const i = this.instances.get(slug); if (!i) throw new DriverError(`no ${slug}`); return i }
-  async start(h: string, spec: TeamSpec) { this.calls.push(`start ${spec.slug}`); this.get(spec.slug).state = 'running'; await this.serve(h, spec) }
+  async start(_h: string, spec: TeamSpec) { this.calls.push(`start ${spec.slug}`); this.get(spec.slug).state = 'running' }
   async stop(_h: string, slug: string) { this.calls.push(`stop ${slug}`); this.get(slug).state = 'stopped' }
   async destroy(_h: string, slug: string) { this.calls.push(`destroy ${slug}`); this.instances.delete(slug) }
-  async recreate(h: string, spec: TeamSpec) { this.calls.push(`recreate ${spec.slug} ${spec.image}`); this.get(spec.slug).spec = spec; this.get(spec.slug).state = 'running'; await this.serve(h, spec) }
+  async recreate(_h: string, spec: TeamSpec) { this.calls.push(`recreate ${spec.slug} ${spec.image}`); this.get(spec.slug).spec = spec; this.get(spec.slug).state = 'running' }
   async setLimits(_h: string, spec: TeamSpec) { this.calls.push(`limits ${spec.slug} ${spec.plan.id}`); this.get(spec.slug).spec = spec }
   async reissueSetupToken(_h: string, spec: TeamSpec) { return this.get(spec.slug).setupDone ? null : `tdrive_setup_${crypto.randomBytes(18).toString('base64url')}` }
   async state(_h: string, slug: string) { return this.instances.get(slug)?.state ?? 'missing' }

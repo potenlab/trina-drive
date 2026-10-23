@@ -3,7 +3,7 @@
 // Caddy, joined to the team's network, reaches it). The same docker commands run on this machine (LocalRunner) or on
 // an EC2 host through SSM (SsmRunner); HostLayout is what differs (named volume vs. XFS-quota directory, env file).
 import type { PlanLimits } from '../plans'
-import { DriverError, type BackupArtifact, type BeforeServe, type CreateResult, type Driver, type ExecResult, type InstanceState, type TeamSpec } from './types'
+import { DriverError, type BackupArtifact, type CreateResult, type Driver, type ExecResult, type InstanceState, type TeamSpec } from './types'
 
 export interface RunOpts {
   stdin?: string
@@ -76,7 +76,6 @@ export interface DockerDriverOptions {
 
 export class DockerDriver implements Driver {
   readonly name: string
-  beforeServe: BeforeServe | null = null
   constructor(private readonly o: DockerDriverOptions) { this.name = o.name }
 
   runOnHost(host: string, argv: string[], o: { timeoutS?: number } = {}) { return this.o.runner.run(host, argv, o) }
@@ -166,23 +165,21 @@ export class DockerDriver implements Driver {
 
   async start(host: string, spec: TeamSpec) {
     const n = names(spec.slug, spec.number)
-    const hook = this.beforeServe
-    if (!hook) {
-      await this.docker(host, ['start', n.container], { what: 'start' })
-      await this.connectCaddy(host, n.network, spec.net.caddyIp)
-      await this.waitHealthy(host, n.container)
-      return
-    }
-    // Caddy stays joined to a team network while the container is stopped or made again: take it off first, so the
-    // team is unreachable (the paused page) until the hook has run
-    await this.docker(host, ['network', 'disconnect', '-f', n.network, this.o.caddyContainer], { ok: false })
     await this.docker(host, ['start', n.container], { what: 'start' })
+    await this.connectCaddy(host, n.network, spec.net.caddyIp)
     await this.waitHealthy(host, n.container)
-    try {
-      await hook(host, spec)
-    } catch (e) {
-      throw new DriverError(`${n.container} is running but not served: the step before serving failed (${(e as Error).message})`, (e as { detail?: string }).detail)
-    }
+  }
+
+  /** Caddy leaves the team's network: its requests fail over to the paused page (503) while the container runs. The
+   * next start / serveTraffic joins it again. */
+  async holdTraffic(host: string, spec: TeamSpec) {
+    const n = names(spec.slug, spec.number)
+    const r = await this.docker(host, ['network', 'disconnect', '-f', n.network, this.o.caddyContainer], { ok: false })
+    if (r.code !== 0 && !/is not connected|not found|No such/i.test(r.stderr)) throw new DriverError('taking Caddy off the team network failed', r.stderr)
+  }
+
+  async serveTraffic(host: string, spec: TeamSpec) {
+    const n = names(spec.slug, spec.number)
     await this.connectCaddy(host, n.network, spec.net.caddyIp)
   }
 

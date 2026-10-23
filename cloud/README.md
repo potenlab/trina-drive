@@ -883,10 +883,15 @@ $C hosts check --isolation                          # disk %, and the isolation 
 dig +short trina.cloud.trina.app @ns-405.awsdns-50.com   # the host's Elastic IP
 ```
 
-The old data stays in the backup bucket (`teams/trina/…`, `trina/…`), readable with the retired keys.
+The old data stays in the backup bucket (`teams/trina/…`, `trina/…`), readable with the retired keys. Neither command
+writes the team's env itself: `set-plan` queues the `limits` job and `retry` the `provision` job, which the control
+plane runs through `Cloud.writeSpec` (a new drive callback token with every env write).
 
-**A6 — owner, by hand** (~10 min): console sign-in as the owner (contact@trina.app or the CEO's account), TOTP
-enrolment, Open drive → SSO → the drive's second factor; folders 공용, 경영 (No AI), 프로젝트, 인사. The smoke account:
+**A6 — owner, by hand** (~10 min): the owner `contact@trina.app` has no console password (the account was made by
+`teams create`): at `https://cloud.trina.app/login` → "No password?" → **email sign-in link** (one Resend mail), then
+**enrol TOTP** (Account → two-step verification; Open drive refuses an owner/admin without it and sends them there
+first), save the recovery codes, then Open drive → SSO → the drive's own second factor; folders 공용, 경영 (No AI),
+프로젝트, 인사. The CEO's personal account: invite it from Members as admin (it enrols TOTP the same way). The smoke account:
 invite a member (a mailbox `gws` reads), accept, set its password; put its address and password in
 `~/.config/trina-drive/smoke/{email,password}` (0600) or `/tdcloud/smoke/{email,password}` (SecureString, file://);
 give it Editor on one folder; `$C teams exec trina -- folder create smoke-canary`.
@@ -1100,9 +1105,11 @@ Before a real AWS launch:
     accepts only a team container's address and the team From.
 14. No `teams restore`: bringing a team back after hold mode or a lost host is `teams retry --reset-host` (empty) plus
     the manual procedure above. Free teams' final backups are restored the same way within their 30 days.
-18. A host reboot restarts team containers by themselves and Caddy keeps its team networks: they serve again without
-    the before-serve step (the console's member sync, `Driver.beforeServe`); the console's sync retries are what
-    catch up. A host-side gate (Caddy joining a team only after the control plane says so) is a follow-up.
+18. Wake / resume / upgrade hold the team's traffic around the member sync (`sync.ts` gate; `serveHooks` →
+    `cli/ops-serve.ts`: Caddy leaves the team network, the sync runs, Caddy joins again) — but only after `docker
+    start` has joined Caddy, so a woken team can answer for the second between becoming healthy and the hold. A host
+    reboot restarts team containers by themselves with Caddy still on their networks: they serve without the gate;
+    the console's daily and retried syncs are what catch up. A host-side gate is a follow-up.
 15. Hosts are packed (the fullest host that fits) but teams are never moved: a host with one team left stays until
     that team goes. A `teams move` (backup → restore on another host → DNS) would let the scaler consolidate.
 16. The scaler's first AWS run is still ahead: it is tested locally (simulated hosts) and against fake Auto Scaling /
