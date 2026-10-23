@@ -49,6 +49,8 @@ export interface Driver {
   stop(host: string, slug: string): Promise<void>
   /** container, network and data are removed (call only after the final export) */
   destroy(host: string, slug: string): Promise<void>
+  /** a new container from spec.image on the same data (product upgrade); pulls the image first */
+  recreate(host: string, spec: TeamSpec): Promise<void>
   /** apply the plan's limits to the running container */
   setLimits(host: string, spec: TeamSpec): Promise<void>
   /** a new setup token while no admin has finished setup (the mail was lost); null when setup is done */

@@ -110,13 +110,30 @@ export class DockerDriver implements Driver {
     const key = await this.once(host, spec, ['backup', 'keygen', '--set'], { secret: true })
     const productBackupSecret = key.stdout.trim().split(/\s+/)[0] ?? ''
     if (!productBackupSecret) throw new DriverError('backup keygen printed no key')
+    await this.createContainer(host, spec)
+    await this.start(host, spec)
+    return { setupToken, productBackupSecret, publicIp: await l.publicIp(host) }
+  }
+
+  private async createContainer(host: string, spec: TeamSpec) {
+    const n = names(spec.slug, spec.number), l = this.o.layout
     await this.docker(host, ['create', '--name', n.container, '--hostname', spec.slug, '--network', n.network, '--restart', 'unless-stopped',
       '--user', `${spec.uid}:${spec.uid}`, '--mount', l.dataMount(spec.slug), '--mount', l.stagingMount(spec.slug), '--env-file', l.envFile(spec.slug),
       ...securityArgs(l, spec.plan), ...limitArgs(spec.plan), ...labels(spec),
       '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3', '--stop-timeout', '30',
       spec.image, 'serve', '--host', '0.0.0.0', '--port', '8787', '--allow-origin', spec.url, '--public-url', spec.url], { what: 'create container' })
+  }
+
+  /** A new container from spec.image on the same data (upgrade, or after a change of settings). The image is pulled
+   * first, so a missing image leaves the running container alone. */
+  async recreate(host: string, spec: TeamSpec) {
+    const n = names(spec.slug, spec.number)
+    const has = await this.docker(host, ['image', 'inspect', spec.image], { ok: false })
+    if (has.code !== 0) await this.docker(host, ['pull', spec.image], { what: `pull ${spec.image}`, timeoutS: 900 })
+    await this.docker(host, ['stop', '-t', '30', n.container], { ok: false })
+    await this.docker(host, ['rm', '-f', n.container], { ok: false })
+    await this.createContainer(host, spec)
     await this.start(host, spec)
-    return { setupToken, productBackupSecret, publicIp: await l.publicIp(host) }
   }
 
   async start(host: string, spec: TeamSpec) {

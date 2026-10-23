@@ -29,6 +29,7 @@ const HELP = `Trina Cloud control plane
   teams export <slug> --out DIR           backup, then download and decrypt it into DIR for the customer
   teams delete <slug> --yes               final backup, then remove the instance and its data (slug stays taken)
   teams resend-setup <slug>               a new one-time setup link to the owner (only before setup is done)
+  teams upgrade <slug> | --all            backup, then a new container from TDCLOUD_IMAGE on the same data
   teams retry <slug>                      provision again after a failure
   teams link <slug> <subscription_id>     attach a Paddle subscription that arrived without custom_data
   teams set-plan <slug> team|business
@@ -170,6 +171,14 @@ export async function main(argv: string[]): Promise<number> {
     case 'teams resume': await cloud.resume(team(), actor); console.log('resumed'); return 0
     case 'teams backup': for (const p of await cloud.backup(team(), 'manual', actor)) console.log(`${p.part}\t${p.bytes}\t${p.key}`); return 0
     case 'teams resend-setup': await cloud.resendSetup(team(), actor); console.log('setup link sent'); return 0
+    case 'teams upgrade': {
+      const all = rest[0] === '--all'
+      const list = all ? cloud.db.query<TeamRow, []>("SELECT * FROM teams WHERE status IN ('active', 'past_due', 'suspended') ORDER BY id").all() : [team()]
+      for (const t of list) {
+        try { await cloud.upgrade(t, actor); console.log(`${t.slug}: now on ${cfg.image}`) } catch (e) { console.error(`${t.slug}: upgrade failed: ${(e as Error).message}`); if (!all) throw e }
+      }
+      return 0
+    }
     case 'teams retry': { const t = team(); updateTeam(cloud.db, t.id, { status: 'provisioning', error: null }); cloud.enqueue('provision', t.id); await cloud.runDueJobs(); console.log(teamLine(cloud, team())); return 0 }
     case 'teams link': { const t = team(); updateTeam(cloud.db, t.id, { subscription_id: rest[1] ?? null }); console.log(`linked ${t.slug} to ${rest[1]}; the next event for it applies`); return 0 }
     case 'teams set-plan': {

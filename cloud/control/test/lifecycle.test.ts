@@ -193,6 +193,20 @@ describe('grace, suspend, resume, delete', () => {
   }, 20_000)
 })
 
+describe('upgrade', () => {
+  test('backs up first, then recreates on the configured image; a suspended team stays stopped', async () => {
+    env = setup({ TDCLOUD_IMAGE: 'trina-drive:2' })
+    await provisioned()
+    await env.cloud.upgrade(teamBySlug(env.cloud.db, 'acme')!, 'test')
+    const i = env.driver.calls.indexOf('backup acme'), j = env.driver.calls.indexOf('recreate acme trina-drive:2')
+    expect(i).toBeGreaterThanOrEqual(0)
+    expect(j).toBeGreaterThan(i)
+    await env.cloud.suspend(teamBySlug(env.cloud.db, 'acme')!, 'admin', 'test')
+    await env.cloud.upgrade(teamBySlug(env.cloud.db, 'acme')!, 'test')
+    expect(env.driver.instances.get('acme')!.state).toBe('stopped')
+  })
+})
+
 describe('internal endpoints', () => {
   test('Caddy ask: only live team names under the domain, and only with the key when one is set', async () => {
     env = setup({ TDCLOUD_CADDY_ASK_KEY: 'k3y' })

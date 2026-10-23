@@ -23,6 +23,7 @@ export class FakeDriver implements Driver {
   async start(_h: string, spec: TeamSpec) { this.calls.push(`start ${spec.slug}`); this.get(spec.slug).state = 'running' }
   async stop(_h: string, slug: string) { this.calls.push(`stop ${slug}`); this.get(slug).state = 'stopped' }
   async destroy(_h: string, slug: string) { this.calls.push(`destroy ${slug}`); this.instances.delete(slug) }
+  async recreate(_h: string, spec: TeamSpec) { this.calls.push(`recreate ${spec.slug} ${spec.image}`); this.get(spec.slug).spec = spec; this.get(spec.slug).state = 'running' }
   async setLimits(_h: string, spec: TeamSpec) { this.calls.push(`limits ${spec.slug} ${spec.plan.id}`); this.get(spec.slug).spec = spec }
   async reissueSetupToken(_h: string, spec: TeamSpec) { return this.get(spec.slug).setupDone ? null : `tdrive_setup_${crypto.randomBytes(18).toString('base64url')}` }
   async state(_h: string, slug: string) { return this.instances.get(slug)?.state ?? 'missing' }

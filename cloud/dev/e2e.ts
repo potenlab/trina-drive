@@ -210,10 +210,13 @@ async function main() {
   check('export acme', ex.code === 0, ex.err)
   const tar = sh(['tar', '-tf', path.join(exportDir, 'files.tar')])
   check('export decrypts: files.tar has the team\'s files', tar.out.includes('shares/acme/경영/board.md'), tar.out.slice(0, 300))
+  const up = admin('teams', 'upgrade', 'acme')
+  check('upgrade acme (backup, new container on the same data)', up.code === 0, up.out + up.err)
+  check('after the upgrade: the same data, the same tokens', (await bash('acme', a.boss, 'cat /경영/board.md')).stdout.includes('acme 매출'))
   const audit = admin('audit', 'verify')
   check('control-plane audit chain verifies', audit.code === 0 && audit.out.includes('audit chain ok'), audit.out)
   const log = admin('audit', 'list', '--limit', '200').out
-  for (const action of ['user.signup', 'team.create', 'billing.subscription.created', 'team.provisioned', 'team.setup_link_sent', 'team.suspend', 'team.resume', 'team.backup.manual', 'team.exported']) check(`audit has ${action}`, log.includes(action))
+  for (const action of ['user.signup', 'team.create', 'billing.subscription.created', 'team.provisioned', 'team.setup_link_sent', 'team.suspend', 'team.resume', 'team.backup.manual', 'team.exported', 'team.upgrade']) check(`audit has ${action}`, log.includes(action))
 
   console.log(`\n${failed ? 'FAILED' : 'PASSED'}: ${passed} checks passed, ${failed} failed (${Math.round((Date.now() - t0) / 1000)}s)`)
   console.log(`\n  acme    ${teamUrl('acme')}    admin alex / admin-acme-password`)

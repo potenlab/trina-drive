@@ -357,6 +357,18 @@ export class Cloud {
     audit(this.db, { actor, action: 'team.deleted', teamId: t.id })
   }
 
+  /** Moves a running team to the configured image (cfg.image): a backup first, then a new container on the same data.
+   * The product migrates its database on start; there are no down-migrations, so a failed upgrade is rolled back by
+   * restoring that backup (README, "Upgrades"). */
+  async upgrade(t: TeamRow, actor: string) {
+    if (!t.host || !['active', 'past_due', 'suspended'].includes(t.status)) throw new CloudError('not_running', `${t.slug} has no instance`)
+    const running = (await this.driver.state(t.host, t.slug)) === 'running'
+    if (running) await this.backup(t, 'manual', actor)
+    await this.driver.recreate(t.host, this.spec(t))
+    if (!running || t.status === 'suspended') await this.driver.stop(t.host, t.slug)
+    audit(this.db, { actor, action: 'team.upgrade', teamId: t.id, detail: { image: this.cfg.image } })
+  }
+
   // ---------------------------------------------------------------- backups
   async backup(t: TeamRow, kind: 'scheduled' | 'export' | 'final' | 'manual', actor: string) {
     if (!t.host || !t.backup_pub) throw new CloudError('no_instance', `${t.slug} has no instance`)
