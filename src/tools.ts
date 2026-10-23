@@ -8,6 +8,7 @@ import { runShell } from './shell'
 import { sha256, type TokenRow } from './store'
 import { asFsError, MSG, VirtualFs, type Hit } from './vfs'
 import { discardKept } from './worker'
+import { skillsTool } from './skills/mcp'
 
 export interface ToolResult { content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean }
 export class AuditFailure extends Error {}
@@ -165,6 +166,14 @@ export async function callTool(ctx: Ctx, token: TokenRow, name: string, args: Re
           const res = result
           finish = () => { r.finish!(); res.content = [{ type: 'text', text: r.text }]; res.structuredContent = r.structured; if (r.isError) res.isError = true; else delete res.isError }
         }
+        break
+      }
+      case 'skills': {
+        // team skills (src/skills): approved snapshots this token may read; touches the skill folder like a read
+        const r = skillsTool(ctx, s, args)
+        audit = r.audit
+        outcome = r.outcome
+        result = text(r.text, { structuredContent: r.structured, isError: r.isError || undefined })
         break
       }
       default:

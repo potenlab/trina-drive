@@ -12,6 +12,7 @@ import { McpLimiter, type Refusal } from './ratelimit'
 import type { Ctx } from './session'
 import { verifyToken, type TokenRow } from './store'
 import { AuditFailure, callTool, TOOL_DEFS } from './tools'
+import { capabilitiesWith, clientWantsSkills, instructionsWith, NotFound as SkillNotFound, sepResourcesList, sepResourcesRead, sepSkillsGet, sepSkillsList, skillsOf, skillsToolDef } from './skills/mcp'
 
 export interface ServerOptions {
   allowedOrigins?: string[]
@@ -194,21 +195,40 @@ async function dispatch(ctx: Ctx, token: TokenRow, msg: RpcMessage, req: Request
     : { resultType: 'complete', ...result, ...(cacheable ? CACHE_HINTS : {}), _meta: { ...(isObject(result._meta) ? result._meta : {}), [META_SERVER]: SERVER_INFO } } })
   // a method this era does not have (initialize and ping are gone in 2026-07-28; Streamable HTTP wants a 404 for those)
   const notFound = () => rpcError(id, -32601, `method not found: ${method}`, modern ? 404 : 200)
+  // team skills (src/skills): the catalog this token may read, from approved snapshots only
+  const skills = () => skillsOf(ctx, token)
+  const tools = () => [...TOOL_DEFS, ...skillsToolDef(skills())]
+  // SEP-2640 is offered to a client that declares it (initialize capabilities, or a modern request's _meta)
+  const wantsSkills = clientWantsSkills(modern ? metaOf(msg)?.[META_CAPABILITIES] : isObject(params.capabilities) ? params.capabilities : undefined)
+  // a modern request says on every call what the client speaks; a legacy one only said it in initialize (not kept)
+  const sep = (f: () => Record<string, unknown>, cacheable = false) => {
+    if (modern && !wantsSkills) return notFound()
+    try { return ok(f(), cacheable) } catch (e) {
+      if (e instanceof SkillNotFound) return rpcError(id, -32602, e.message)
+      throw e
+    }
+  }
   switch (method) {
     case 'server/discover':
-      return ok({ supportedVersions: [...SUPPORTED_PROTOCOL_VERSIONS], capabilities: CAPABILITIES, instructions: INSTRUCTIONS }, true)
+      return ok({ supportedVersions: [...SUPPORTED_PROTOCOL_VERSIONS], capabilities: capabilitiesWith(CAPABILITIES, wantsSkills), instructions: instructionsWith(INSTRUCTIONS, skills()) }, true)
     case 'initialize': {
       if (modern) return notFound()
       // the handshake only exists up to 2025-11-25: never answer it with a modern version
       const asked = params.protocolVersion
       const protocolVersion = isIn(LEGACY_PROTOCOL_VERSIONS, asked) ? asked : LEGACY_PROTOCOL_VERSIONS[0]
-      return ok({ protocolVersion, capabilities: CAPABILITIES, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS })
+      return ok({ protocolVersion, capabilities: capabilitiesWith(CAPABILITIES, wantsSkills), serverInfo: SERVER_INFO, instructions: instructionsWith(INSTRUCTIONS, skills()) })
     }
     case 'ping': return modern ? notFound() : ok({})
-    case 'tools/list': return ok({ tools: TOOL_DEFS }, true)
+    case 'tools/list': return ok({ tools: tools() }, true)
+    // SEP-2640 Skills Extension (minimal): listing, one entry, and the approved files as skill:// resources
+    case 'skills/list': return sep(() => sepSkillsList(ctx, token), true)
+    case 'skills/get': return sep(() => sepSkillsGet(ctx, token, params))
+    case 'resources/list': return sep(() => sepResourcesList(ctx, token), true)
+    case 'resources/templates/list': return sep(() => ({ resourceTemplates: [] }), true)
+    case 'resources/read': return sep(() => sepResourcesRead(ctx, token, params))
     case 'tools/call': {
       const name = typeof params.name === 'string' ? params.name : ''
-      if (!TOOL_DEFS.some((t) => t.name === name)) return rpcError(id, -32602, `unknown tool: ${name}`)
+      if (!tools().some((t) => t.name === name)) return rpcError(id, -32602, `unknown tool: ${name}`)
       const args = (params.arguments ?? {}) as Record<string, unknown>
       try {
         return ok({ ...await callTool(ctx, token, name, args) })

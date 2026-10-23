@@ -6,6 +6,7 @@
 // share a method and path pattern.
 import { shareRoutes } from '../share/http'
 import { cloudRoutes } from '../tdcloud/http'
+import { skillsRoutes } from '../skills/http'
 import type { Route } from './route'
 
-export const MODULE_ROUTES: Route[] = [...shareRoutes, ...cloudRoutes]
+export const MODULE_ROUTES: Route[] = [...shareRoutes, ...cloudRoutes, ...skillsRoutes]

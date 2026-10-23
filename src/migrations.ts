@@ -9,6 +9,7 @@
 import type { Database } from 'bun:sqlite'
 import { shareMigrations } from './share/schema'
 import { cloudMigrations } from './tdcloud/schema'
+import { skillMigrations } from './skills/schema'
 
 export interface Migration {
   /** unique, e.g. 'share.editors_can_share' */
@@ -17,7 +18,7 @@ export interface Migration {
   up: (db: Database) => void
 }
 
-export const MIGRATIONS: Migration[] = [...shareMigrations, ...cloudMigrations]
+export const MIGRATIONS: Migration[] = [...shareMigrations, ...cloudMigrations, ...skillMigrations]
 
 /** Columns added to an existing table when missing ([name, declaration], e.g. ['cloud_user', 'TEXT']). */
 export function addColumns(db: Database, table: string, columns: [name: string, decl: string][]) {

@@ -32,6 +32,7 @@ import { createManagedFolder } from './managed/folders'
 import { purgeExpired, rescan, usage } from './managed/ops'
 import { ensureRoot, metaSet, parseBytes, storageSettings } from './managed/settings'
 import { findCommand, registeredHelp } from './cli-registry'
+import { skillsLibrary } from './skills/cli'
 
 const HELP = `${PRODUCT} ${VERSION} — your team's files for AI agents, permission-aware (${CLI})
 
@@ -44,7 +45,7 @@ usage: ${CLI} [--data DIR] <command>
   group member <group> <person>
   folder register <path> [--name N] [--personal-owner P] [--nas-readers all|unknown|p1,p2]
   folder create <name> [--personal-owner P]   a team folder in managed storage (the server makes and owns it)
-  folder flag <path> no-ai|quarantine|widened-pending|inherit-break [--off]
+  folder flag <path> no-ai|quarantine|widened-pending|inherit-break|skills [--off]
   rule set <path> <person|@group> none|read|write [--break]
   manage grant <path> <person>
   token create <person> [--name N] [--scope path1,path2] [--read-only] [--ttl 8h]
@@ -159,6 +160,7 @@ async function main(argv: string[]) {
     }
     case 'storage rescan': { const r = rescan({ db, dataDir }); return console.log(`file rows: ${r.added} added, ${r.dropped} dropped`) }
     case 'folder flag': {
+      if (rest[1] === 'skills') { process.exitCode = skillsLibrary({ db, dataDir, args: rest, out: (s) => console.log(s), err: (s) => console.error(s) }) || 0; return } // team skills (src/skills)
       const off = takeBool(rest, '--off')
       const flag = need(rest[1], 'flag').replace(/-/g, '_') as 'no_ai' | 'quarantine' | 'widened_pending' | 'inherit_break'
       if (!['no_ai', 'quarantine', 'widened_pending', 'inherit_break'].includes(flag)) throw new StoreError(`unknown flag ${rest[1]}`)
