@@ -97,7 +97,7 @@ export class DockerDriver implements Driver {
     const n = names(spec.slug, spec.number), l = this.o.layout
     if ((await this.state(host, spec.slug)) !== 'missing') throw new DriverError(`${n.container} already exists on ${host}`)
     await l.prepare(host, spec)
-    await this.docker(host, ['network', 'create', '--driver', 'bridge', '--opt', `com.docker.network.bridge.name=${n.bridge}`, ...labels(spec), n.network], { what: 'network create' })
+    await this.createNetwork(host, spec)
     // the team's uid owns its data and staging; only this one-shot runs as root, with just the capabilities chown needs
     await this.docker(host, ['run', '--rm', '--network', 'none', '--user', '0:0', '--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--cap-add', 'FOWNER', '--cap-add', 'DAC_OVERRIDE',
       '--security-opt', 'no-new-privileges:true', '--read-only', '--mount', l.dataMount(spec.slug), '--mount', l.stagingMount(spec.slug),
@@ -115,23 +115,48 @@ export class DockerDriver implements Driver {
     return { setupToken, productBackupSecret, publicIp: await l.publicIp(host) }
   }
 
+  /** The team's bridge with its fixed /28 (teamnet.ts). The label carries Caddy's address for the host's boot script,
+   * which joins Caddy to every team network again after a reboot (cloud/host/bootstrap.sh). */
+  private async createNetwork(host: string, spec: TeamSpec) {
+    const n = names(spec.slug, spec.number)
+    await this.docker(host, ['network', 'create', '--driver', 'bridge', '--opt', `com.docker.network.bridge.name=${n.bridge}`,
+      '--subnet', spec.net.subnet, '--gateway', spec.net.gateway, '--ip-range', spec.net.ipRange,
+      ...labels(spec), '--label', `tdcloud.caddy-ip=${spec.net.caddyIp}`, n.network], { what: 'network create' })
+  }
+
+  /** A network made before fixed subnets (or with other addresses) is made again; the container must be gone. */
+  private async ensureNetwork(host: string, spec: TeamSpec) {
+    const n = names(spec.slug, spec.number)
+    const r = await this.docker(host, ['network', 'inspect', '-f', '{{range .IPAM.Config}}{{.Subnet}} {{end}}', n.network], { ok: false })
+    if (r.code === 0 && r.stdout.trim() === spec.net.subnet) return
+    if (r.code === 0) {
+      await this.docker(host, ['network', 'disconnect', '-f', n.network, this.o.caddyContainer], { ok: false })
+      await this.docker(host, ['network', 'rm', n.network], { what: 'network rm' })
+    }
+    await this.createNetwork(host, spec)
+  }
+
   private async createContainer(host: string, spec: TeamSpec) {
     const n = names(spec.slug, spec.number), l = this.o.layout
-    await this.docker(host, ['create', '--name', n.container, '--hostname', spec.slug, '--network', n.network, '--restart', 'unless-stopped',
+    await this.docker(host, ['create', '--name', n.container, '--hostname', spec.slug, '--network', n.network, '--ip', spec.net.teamIp, '--restart', 'unless-stopped',
       '--user', `${spec.uid}:${spec.uid}`, '--mount', l.dataMount(spec.slug), '--mount', l.stagingMount(spec.slug), '--env-file', l.envFile(spec.slug),
       ...securityArgs(l, spec.plan), ...limitArgs(spec.plan), ...labels(spec),
       '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3', '--stop-timeout', '30',
       spec.image, 'serve', '--host', '0.0.0.0', '--port', '8787', '--allow-origin', spec.url, '--public-url', spec.url], { what: 'create container' })
   }
 
-  /** A new container from spec.image on the same data (upgrade, or after a change of settings). The image is pulled
-   * first, so a missing image leaves the running container alone. */
+  /** A new container from spec.image on the same data (upgrade, plan change, new settings). The image is pulled
+   * first, so a missing image leaves the running container alone. The env file and the disk quota are written again
+   * (the plan's quota, settings added since the team was made), and the network is given its fixed subnet if it
+   * predates them. */
   async recreate(host: string, spec: TeamSpec) {
     const n = names(spec.slug, spec.number)
     const has = await this.docker(host, ['image', 'inspect', spec.image], { ok: false })
     if (has.code !== 0) await this.docker(host, ['pull', spec.image], { what: `pull ${spec.image}`, timeoutS: 900 })
+    await this.o.layout.prepare(host, spec)
     await this.docker(host, ['stop', '-t', '30', n.container], { ok: false })
     await this.docker(host, ['rm', '-f', n.container], { ok: false })
+    await this.ensureNetwork(host, spec)
     await this.createContainer(host, spec)
     await this.start(host, spec)
   }
@@ -139,13 +164,21 @@ export class DockerDriver implements Driver {
   async start(host: string, spec: TeamSpec) {
     const n = names(spec.slug, spec.number)
     await this.docker(host, ['start', n.container], { what: 'start' })
-    await this.connectCaddy(host, n.network)
+    await this.connectCaddy(host, n.network, spec.net.caddyIp)
     await this.waitHealthy(host, n.container)
   }
 
-  private async connectCaddy(host: string, network: string) {
-    const r = await this.docker(host, ['network', 'connect', network, this.o.caddyContainer], { ok: false })
-    if (r.code !== 0 && !/already exists|already attached|endpoint with name .* already/i.test(r.stderr)) throw new DriverError('connecting Caddy to the team network failed', r.stderr)
+  /** Caddy on the team network at its fixed address (the team trusts X-Forwarded-For from that address only). */
+  private async connectCaddy(host: string, network: string, ip: string) {
+    const c = this.o.caddyContainer
+    const r = await this.docker(host, ['network', 'connect', '--ip', ip, network, c], { ok: false })
+    if (r.code === 0) return
+    if (!/already exists|already attached|endpoint with name .* already/i.test(r.stderr)) throw new DriverError('connecting Caddy to the team network failed', r.stderr)
+    const cur = await this.docker(host, ['inspect', '-f', `{{with index .NetworkSettings.Networks ${JSON.stringify(network)}}}{{.IPAddress}}{{end}}`, c], { ok: false })
+    if (cur.stdout.trim() === ip) return
+    // attached with another address (joined by hand, or before fixed addresses): the team would not trust it
+    await this.docker(host, ['network', 'disconnect', '-f', network, c], { ok: false })
+    await this.docker(host, ['network', 'connect', '--ip', ip, network, c], { what: 'connect Caddy' })
   }
 
   private async waitHealthy(host: string, container: string) {
@@ -181,8 +214,10 @@ export class DockerDriver implements Driver {
     await this.o.layout.cleanup(host, slug)
   }
 
+  /** A plan change: cpu/memory/pids, the disk quota and the product's storage quota (an env value: the container is
+   * made again on the same data, a few seconds of downtime). */
   async setLimits(host: string, spec: TeamSpec) {
-    await this.docker(host, ['update', ...limitArgs(spec.plan), `tdc-${spec.slug}`], { what: 'update limits' })
+    await this.recreate(host, spec)
   }
 
   async reissueSetupToken(host: string, spec: TeamSpec) {

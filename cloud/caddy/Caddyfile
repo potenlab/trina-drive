@@ -17,6 +17,12 @@
 		ask {$TDCLOUD_ASK_URL}
 	}
 	servers {
+		# the client's address ({client_ip}: rate-limit keys, X-Forwarded-For to the team). Nothing sits in front of
+		# Caddy today (DNS points at the host's Elastic IP), so TDCLOUD_FRONT_PROXIES is empty and {client_ip} is the TCP
+		# peer. With a load balancer or CDN in front, list its ranges there (README, "Client addresses").
+		trusted_proxies static {$TDCLOUD_FRONT_PROXIES}
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
 		# the Host header must name the certificate the client asked for (no SNI/Host mismatch tricks)
 		strict_sni_host on
 		protocols h1 h2

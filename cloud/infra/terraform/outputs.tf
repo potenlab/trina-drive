@@ -47,7 +47,10 @@ output "control_env_template" {
     TDCLOUD_HELPER_IMAGE=${local.images.control}
     TDCLOUD_CADDY_CONTAINER=tdc-caddy
     TDCLOUD_MAILER=ses
-    TDCLOUD_MAIL_FROM=Trina Cloud <cloud@${var.mail_domain}>
+    TDCLOUD_MAIL_FROM=Trina Cloud <${local.control_mail_address}>
+    TDCLOUD_TEAM_MAILER=relay
+    TDCLOUD_TEAM_MAIL_FROM=${local.team_mail_from}
+    TDCLOUD_TEAM_SUBNETS=${var.team_subnets}
     TDCLOUD_OPS_EMAIL=${var.acme_email}
     TDCLOUD_KMS_KEY_ID=${aws_kms_alias.main.name}
     TDCLOUD_BACKUP_TARGET=s3://${aws_s3_bucket.backups.id}

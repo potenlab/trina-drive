@@ -36,6 +36,9 @@ resource "aws_instance" "control" {
     control_private_ip = ""
     control_env_param  = local.ssm_control_env
     ask_key_param      = local.ssm_ask_key
+    team_mail_from     = local.team_mail_from
+    team_subnets       = var.team_subnets
+    front_proxies      = join(" ", var.front_proxies)
   })
   user_data_replace_on_change = false
 

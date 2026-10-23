@@ -15,9 +15,10 @@ import type { Driver, TeamSpec } from './drivers/types'
 import { hashPassword, verifyPassword, type KeyWrapper } from './keys'
 import type { Mailer } from './mailer'
 import type { EventSummary } from './paddle'
-import { planOf } from './plans'
+import { DATA_HEADROOM_GB, planOf, type PlanLimits } from './plans'
 import { generateTeamKey } from './seal'
 import { slugProblem } from './slug'
+import { teamNet, type TeamNet } from './teamnet'
 import { DAY, EMAIL_RE, HOUR, iso, now, publicId, random, sha256 } from './util'
 import fs from 'node:fs'
 
@@ -128,9 +129,10 @@ export class Cloud {
   url(t: Pick<TeamRow, 'slug'>) { return teamUrl(this.cfg, t.slug) }
 
   spec(t: TeamRow): TeamSpec {
+    const plan = planOf(t.plan), net = teamNet(this.cfg.teamSubnets, t.number)
     return {
-      slug: t.slug, number: t.number, uid: this.cfg.uidBase + t.number, url: this.url(t), plan: planOf(t.plan), image: this.cfg.image,
-      env: { TZ: 'UTC', TDRIVE_CLOUD_TEAM: t.public_id },
+      slug: t.slug, number: t.number, uid: this.cfg.uidBase + t.number, url: this.url(t), plan, net, image: this.cfg.image,
+      env: teamEnv(this.cfg, t.public_id, plan, net),
     }
   }
 
@@ -413,12 +415,15 @@ export class Cloud {
     const out: { slug: string; bytes: number | null; quota: number; over: boolean }[] = []
     for (const t of this.db.query<TeamRow, []>("SELECT * FROM teams WHERE status IN ('active', 'past_due') AND host IS NOT NULL").all()) {
       const bytes = await this.driver.diskUsage(t.host!, t.slug).catch(() => null)
-      const quota = planOf(t.plan).diskGb * 1024 ** 3
+      // the product enforces the plan's storage itself (TDRIVE_STORAGE_QUOTA); /data beyond it plus the database's
+      // headroom means something the quota does not count is growing (or the quota is off): tell the owner and ops
+      const plan = planOf(t.plan)
+      const quota = (plan.storageGb + DATA_HEADROOM_GB) * 1024 ** 3
       const over = bytes != null && bytes > quota
       updateTeam(this.db, t.id, { disk_bytes: bytes ?? t.disk_bytes, disk_checked_at: now(), over_quota_since: over ? (t.over_quota_since ?? now()) : null })
       if (over && !t.over_quota_since) {
         audit(this.db, { actor: 'system', action: 'team.over_quota', teamId: t.id, detail: { bytes, quota } })
-        void this.mailOwner(t, 'Your Trina Drive is over its storage', `${this.url(t)} uses ${(bytes! / 1024 ** 3).toFixed(1)} GB of ${planOf(t.plan).diskGb} GB. Remove files or move to the Business plan.`)
+        void this.mailOwner(t, 'Your Trina Drive is over its storage', `${this.url(t)} uses ${(bytes! / 1024 ** 3).toFixed(1)} GB; the plan includes ${plan.storageGb} GB of files. Remove files (and empty the trash) or move to the Business plan.`)
         void this.alertOps(`team ${t.slug} over quota`, `${bytes} bytes of ${quota}`)
       }
       out.push({ slug: t.slug, bytes, quota, over })
@@ -442,6 +447,38 @@ export class Cloud {
     this.log(`ALERT ${subject}`)
     try { await this.mailer.send({ to: this.cfg.opsEmail, subject: `[Trina Cloud] ${subject}`, text }) } catch (e) { this.log(`ops mail failed: ${(e as Error).message}`) }
   }
+}
+
+/** The team container's environment (its 0600 env file / SSM SecureString). Rewritten before every (re)start of the
+ * container, so a plan change or a new setting reaches existing teams on their next recreate (upgrade, plan change). */
+export function teamEnv(cfg: Config, publicId: string, plan: PlanLimits, net: TeamNet): Record<string, string> {
+  const env: Record<string, string> = {
+    TZ: 'UTC',
+    TDRIVE_CLOUD_TEAM: publicId,
+    // on the internet: every admin enrols a passkey or an authenticator app before anything else (src/web/hosted.ts)
+    TDRIVE_HOSTED: '1',
+    // Caddy's fixed address on this team's network is the only peer whose X-Forwarded-For is believed; Caddy sets that
+    // header to the client's address itself (caddy/team_routes.caddy), so per-address limits and audit addresses are
+    // the client's, not Caddy's
+    TDRIVE_TRUSTED_PROXY: `${net.caddyIp}/32`,
+    // managed storage with the plan's quota (files, trash, earlier versions, unfinished uploads)
+    TDRIVE_STORAGE: 'managed',
+    TDRIVE_STORAGE_QUOTA: `${plan.storageGb}GB`,
+  }
+  if (cfg.teamMailer === 'off') env.TDRIVE_MAILER = 'off'
+  else if (cfg.teamMailer === 'outbox') Object.assign(env, { TDRIVE_MAILER: 'outbox', TDRIVE_MAIL_FROM: cfg.teamMailFrom })
+  else {
+    // Amazon SES v2 as the product speaks it, sent to the relay on this team network's gateway (the host). The
+    // container cannot reach the instance role (IMDS hop limit 1 and the host firewall keep it away, on purpose: the
+    // role reads every team's env parameter); the relay checks the sender (this team's address) and the From, then
+    // signs with the role. These AWS_* values are placeholders the product needs to sign at all: not credentials.
+    Object.assign(env, {
+      TDRIVE_MAILER: 'ses', TDRIVE_MAIL_FROM: cfg.teamMailFrom, TDRIVE_SES_REGION: cfg.aws.region,
+      TDRIVE_SES_ENDPOINT: `http://${net.gateway}:${cfg.mailRelayPort}`,
+      AWS_ACCESS_KEY_ID: 'tdcloud-mail-relay', AWS_SECRET_ACCESS_KEY: 'not-a-secret-the-host-relay-signs',
+    })
+  }
+  return env
 }
 
 export function checkPassword(pw: unknown): string {

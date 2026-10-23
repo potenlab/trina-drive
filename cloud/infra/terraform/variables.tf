@@ -52,7 +52,7 @@ variable "host_instance_type" {
 }
 
 variable "host_data_gb" {
-  description = "Team data volume per host (gp3, XFS with per-team project quotas). Plan quotas are 50 GB (Team) and 200 GB (Business), but most teams use far less: size for actual use and grow the volume online."
+  description = "Team data volume per host (gp3, XFS with per-team project quotas). Plans include 100 GB (Team) and 1 TB (Business) of files (XFS caps 220 GB / 2,020 GB with database and backup staging), but most teams use far less: size for actual use and grow the volume online."
   type        = number
   default     = 300
 }
@@ -88,4 +88,28 @@ variable "manage_ses_identity" {
   description = "Create the SES domain identity for mail_domain (then add its DKIM CNAMEs at Gabia and request production access)."
   type        = bool
   default     = true
+}
+
+variable "team_mail_address" {
+  description = "Address every team instance sends from (invites, password resets, notifications), in mail_domain. Empty = drive@<mail_domain>. The hosts' role may send from this address only."
+  type        = string
+  default     = ""
+}
+
+variable "team_mail_name" {
+  description = "Display name of the team instances' mail."
+  type        = string
+  default     = "Trina Drive"
+}
+
+variable "team_subnets" {
+  description = "Pool for the team networks on the hosts: one /28 per team (gateway = mail relay, .2 = Caddy, .3 = the team). Must not overlap vpc_cidr. Same value as the control plane's TDCLOUD_TEAM_SUBNETS."
+  type        = string
+  default     = "10.128.0.0/11"
+}
+
+variable "front_proxies" {
+  description = "CIDR ranges of a load balancer or CDN in front of the hosts' Caddy, if one is ever added (none today: DNS points at the hosts' Elastic IPs). Caddy then takes the client's address from X-Forwarded-For only from these (README, Client addresses)."
+  type        = list(string)
+  default     = []
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Removes the local Trina Cloud: team containers, networks and volumes (label tdcloud.team), the control plane and
-# Caddy, and cloud/dev/.state. Touches nothing without the tdcloud label or outside the tdcloud-dev compose project.
+# Removes the local Trina Cloud: team containers, networks and volumes (label tdcloud.team), the control plane, Caddy,
+# the mail relay, and cloud/dev/.state. Touches nothing without the tdcloud label or outside the tdcloud-dev compose
+# project.
 set -uo pipefail
 cd "$(dirname "$0")/../.." || exit 1
 DEV=$PWD/cloud/dev
@@ -16,7 +17,7 @@ done
 if [ -f "$STATE/dev.env" ]; then
   docker compose --env-file "$STATE/dev.env" -f "$DEV/compose.yml" down -v --remove-orphans >/dev/null 2>&1
 else
-  docker rm -f tdc-control tdc-caddy >/dev/null 2>&1
+  docker rm -f tdc-control tdc-caddy tdc-mail >/dev/null 2>&1
   docker network rm tdc-control >/dev/null 2>&1
   docker volume rm tdcloud-dev_caddy-data tdcloud-dev_caddy-config >/dev/null 2>&1
 fi

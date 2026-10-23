@@ -72,7 +72,8 @@ export function makeHandler(cloud: Cloud) {
   const clientIp = (req: Request, peer: string | undefined) => {
     const p = peer ?? 'unknown'
     if (!cfg.trustedProxies.includes(p) && !cfg.trustedProxies.includes('*')) return p
-    return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || p
+    // the entry the trusted proxy appended (Caddy sends exactly one); never a value further left that a client wrote
+    return req.headers.get('x-forwarded-for')?.split(',').at(-1)?.trim() || p
   }
   const readCookie = (req: Request) => {
     for (const part of (req.headers.get('cookie') ?? '').split(';')) {

@@ -1,4 +1,5 @@
 import type { PlanLimits } from '../plans'
+import type { TeamNet } from '../teamnet'
 
 /** Everything a driver needs to run one team's instance. */
 export interface TeamSpec {
@@ -9,6 +10,8 @@ export interface TeamSpec {
   /** https://<slug>.<domain>[:port] — OAuth issuer, passkey RP ID, base of mailed links */
   url: string
   plan: PlanLimits
+  /** the team network's fixed subnet and addresses (Caddy's is the one trusted proxy) */
+  net: TeamNet
   image: string
   /** extra environment for the team container (written to a 0600 env file / SSM SecureString, never on a command line) */
   env: Record<string, string>

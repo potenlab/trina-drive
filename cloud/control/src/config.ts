@@ -2,9 +2,16 @@
 // except PADDLE_WEBHOOK_SECRET, TDCLOUD_CADDY_ASK_KEY and the master key file: those come from env files (0600) or,
 // on AWS, SSM Parameter Store SecureStrings that the control host's systemd unit reads at start.
 import path from 'node:path'
+import { parsePool } from './teamnet'
+
+/** 10.128.0.0–10.159.255.255: clear of the VPC (10.42.0.0/16), Docker's default pools and the dev network */
+export const DEFAULT_TEAM_SUBNETS = '10.128.0.0/11'
 
 export type DriverName = 'local' | 'aws' | 'fake'
 export type MailerName = 'outbox' | 'ses'
+/** how team instances send mail (invites, password resets, notifications): through the host's mail relay (SES on AWS,
+ * a file sink in dev), into a file inside the team's volume, or not at all */
+export type TeamMailerName = 'relay' | 'outbox' | 'off'
 
 export interface Config {
   /** production: refuses dev-only pieces (outbox mailer, local master key, http control URL) unless explicitly allowed */
@@ -39,6 +46,13 @@ export interface Config {
   mailFrom: string
   /** where operator alerts go (failed provisioning, unlinked payments) */
   opsEmail: string
+  teamMailer: TeamMailerName
+  /** From of every team instance's mail (one SES identity; the relay and the host role's IAM allow only this address) */
+  teamMailFrom: string
+  /** the relay's port on each team network's gateway (the host) */
+  mailRelayPort: number
+  /** the pool every team network's /28 comes from (teamnet.ts); the same on every host and in the relay */
+  teamSubnets: string
   masterKeyFile: string | null
   kmsKeyId: string | null
   /** dir:/path or s3://bucket/prefix */
@@ -85,6 +99,12 @@ const int = (v: string | undefined, dflt: number, name: string) => {
   return n
 }
 
+/** "Name <a@b.c>" or "a@b.c" → a@b.c (lower case), or null. */
+export function mailAddress(from: string): string | null {
+  const m = /<([^<>\s]+@[^<>\s]+)>\s*$/.exec(from) ?? /^\s*([^<>\s]+@[^<>\s]+)\s*$/.exec(from)
+  return m ? m[1]!.toLowerCase() : null
+}
+
 /** A DNS name of 2+ labels, lower case, no trailing dot. */
 export function checkDomain(d: string): string {
   const v = d.trim().toLowerCase().replace(/\.$/, '')
@@ -103,6 +123,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (!['local', 'aws', 'fake'].includes(driver)) throw new ConfigError('TDCLOUD_DRIVER must be local, aws or fake')
   const mailer = (env.TDCLOUD_MAILER || 'outbox') as MailerName
   if (!['outbox', 'ses'].includes(mailer)) throw new ConfigError('TDCLOUD_MAILER must be outbox or ses')
+  const teamMailer = (env.TDCLOUD_TEAM_MAILER || 'relay') as TeamMailerName
+  if (!['relay', 'outbox', 'off'].includes(teamMailer)) throw new ConfigError('TDCLOUD_TEAM_MAILER must be relay, outbox or off')
+  const teamSubnets = env.TDCLOUD_TEAM_SUBNETS || DEFAULT_TEAM_SUBNETS
+  try { parsePool(teamSubnets) } catch (e) { throw new ConfigError((e as Error).message) }
 
   const prices: Record<string, PlanId> = {}
   const checkout: Config['paddle']['checkout'] = {}
@@ -131,6 +155,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     mailer,
     mailFrom: env.TDCLOUD_MAIL_FROM || 'Trina Cloud <cloud@trina.app>',
     opsEmail: env.TDCLOUD_OPS_EMAIL || 'contact@trina.app',
+    teamMailer,
+    teamMailFrom: env.TDCLOUD_TEAM_MAIL_FROM || 'Trina Drive <drive@trina.app>',
+    mailRelayPort: int(env.TDCLOUD_MAIL_RELAY_PORT, 8025, 'TDCLOUD_MAIL_RELAY_PORT'),
+    teamSubnets,
     masterKeyFile: env.TDCLOUD_MASTER_KEY_FILE || null,
     kmsKeyId: env.TDCLOUD_KMS_KEY_ID || null,
     backupTarget: env.TDCLOUD_BACKUP_TARGET || `dir:${path.join(stateDir, 'backups')}`,
@@ -157,10 +185,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     metricsEveryMinutes: int(env.TDCLOUD_METRICS_EVERY_MINUTES, 15, 'TDCLOUD_METRICS_EVERY_MINUTES'),
   }
 
+  if (!mailAddress(cfg.teamMailFrom)) throw new ConfigError(`TDCLOUD_TEAM_MAIL_FROM is not a mail address: ${cfg.teamMailFrom}`)
   if (production) {
     const problems: string[] = []
     if (!cfg.controlUrl.startsWith('https://')) problems.push('TDCLOUD_CONTROL_URL must be https')
     if (cfg.mailer === 'outbox') problems.push('TDCLOUD_MAILER=outbox writes setup links to a file: use ses')
+    if (cfg.teamMailer === 'outbox') problems.push('TDCLOUD_TEAM_MAILER=outbox keeps invites inside the team volume: use relay')
     if (!cfg.kmsKeyId && !cfg.masterKeyFile) problems.push('set TDCLOUD_KMS_KEY_ID (or TDCLOUD_MASTER_KEY_FILE)')
     if (!cfg.paddle.webhookSecret) problems.push('PADDLE_WEBHOOK_SECRET is required')
     if (cfg.driver === 'fake') problems.push('TDCLOUD_DRIVER=fake is for tests')

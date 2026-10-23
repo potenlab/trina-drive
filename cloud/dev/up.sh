@@ -8,7 +8,8 @@
 #   cloud/dev/up.sh --rebuild       rebuild the three images first
 #   cloud/dev/down.sh               remove everything (teams, volumes, state)
 #
-# Then: https://cloud.localhost:8443 (sign up; mail goes to cloud/dev/.state/outbox.log), https://acme.cloud.localhost:8443
+# Then: https://cloud.localhost:8443 (sign up; mail goes to cloud/dev/.state/outbox.log, the teams' own mail to
+# cloud/dev/.state/team-mail.log through the relay), https://acme.cloud.localhost:8443
 # (trust cloud/dev/.state/caddy-root.crt in your browser, or accept the warning). No cloud account, nothing leaves the machine.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -74,13 +75,18 @@ TDCLOUD_IMAGE=$TDCLOUD_IMAGE
 TDCLOUD_APPARMOR=$APPARMOR
 TDCLOUD_CADDY_ASK_KEY=$(rand)
 PADDLE_WEBHOOK_SECRET=pdl_ntfset_dev_$(rand)
+TDCLOUD_TEAM_MAIL_FROM=Trina Drive (dev) <drive@trina.test>
 EOF
 umask 022
 
-say "start control plane + Caddy"
+say "start control plane + Caddy + mail relay"
 docker compose --env-file "$STATE/dev.env" -f "$DEV/compose.yml" up -d --quiet-pull 2>&1 | grep -v '^ *$' || true
 for _ in $(seq 60); do
   docker exec tdc-control bun -e "fetch('http://127.0.0.1:8790/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))" 2>/dev/null && break
+  sleep 1
+done
+for _ in $(seq 30); do
+  docker exec tdc-mail bun -e "fetch('http://127.0.0.1:8025/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))" 2>/dev/null && break
   sleep 1
 done
 # Caddy's local CA (made when it issued https://cloud.localhost's certificate)
@@ -103,6 +109,7 @@ cat <<EOF
 
 Trina Cloud (local) is up.
   control plane   https://$TDCLOUD_DOMAIN:$TDCLOUD_PUBLIC_PORT        (mail: $STATE/outbox.log)
+  team mail       $STATE/team-mail.log  (invites, resets: through the relay tdc-mail)
   teams           https://<slug>.$TDCLOUD_DOMAIN:$TDCLOUD_PUBLIC_PORT
   TLS root        $STATE/caddy-root.crt
   admin CLI       docker exec tdc-control bun /app/src/main.ts teams list

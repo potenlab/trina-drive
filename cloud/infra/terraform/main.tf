@@ -19,4 +19,9 @@ locals {
   ssm_control_env = "/${var.name}/control/env"
   ssm_ask_key     = "/${var.name}/caddy-ask-key"
   ssm_teams       = "/${var.name}/teams"
+  # mail: the control plane sends as cloud@, the team instances (through each host's relay) as team_mail_address
+  control_mail_address = "cloud@${var.mail_domain}"
+  team_mail_address    = var.team_mail_address != "" ? var.team_mail_address : "drive@${var.mail_domain}"
+  team_mail_from       = "${var.team_mail_name} <${local.team_mail_address}>"
+  ses_identity_arn     = "arn:${local.partition}:ses:${var.region}:${local.account}:identity/${var.mail_domain}"
 }
