@@ -5,7 +5,8 @@
 import Lines from '../Lines.astro'
 import type { CopyB } from '../../content/en-b'
 import Base from '../../layouts/Base.astro'
-import { LINKS, SITE_URL } from '../../site'
+import { CLOUD_LIVE, LINKS, SITE_URL } from '../../site'
+import CloudTrust from '../CloudTrust.astro'
 import Footer from '../Footer.astro'
 import ClientMark from '../ClientMark.astro'
 import Compare from '../Compare.astro'
@@ -36,14 +37,17 @@ const d = t.devs
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-bg" aria-hidden="true"></div>
       <div class="container hero-copy">
-        <a class="pill" href="#works"><span class="pill-dot" aria-hidden="true"></span>{h.pill}<span class="pill-arrow" aria-hidden="true">→</span></a>
+        <a class="pill" href="#cloud"><span class="pill-dot" aria-hidden="true"></span>{h.pill}<span class="pill-arrow" aria-hidden="true">→</span></a>
         <h1 id="hero-title">{h.title} <span class="accent-text">{h.titleAccent}</span></h1>
         <p class="hero-sub">{h.sub}</p>
         <div class="hero-ctas">
-          <a class="btn btn-primary btn-lg" data-cta="see-how" href="#features">{h.primary}<Icon name="arrow" /></a>
+          {CLOUD_LIVE
+            ? <button class="btn btn-primary btn-lg" type="button" data-plan="team" data-cta="start-trial">{h.primaryLive}<Icon name="arrow" /></button>
+            : <a class="btn btn-primary btn-lg" data-cta="early-access" href={LINKS.earlyAccess(t.lang)}>{h.primary}<Icon name="arrow" /></a>}
           <a class="btn btn-secondary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{h.secondary}</a>
         </div>
-        <a class="hero-gh" href={LINKS.github} rel="noopener"><Icon name="github" />{h.github}<span aria-hidden="true">→</span></a>
+        <p class="hero-note">{CLOUD_LIVE ? h.noteLive : h.note}</p>
+        <a class="hero-gh" data-cta="self-host" href={LINKS.github} rel="noopener"><Icon name="github" />{h.github}<span aria-hidden="true">→</span></a>
       </div>
       <div class="container b-stage">
         <div class="stage-glow" aria-hidden="true"></div>
@@ -132,13 +136,13 @@ const d = t.devs
 
     <Safe t={t} />
 
-    <!-- set up for you -->
+    <!-- how it works: team space → add files → connect the AI app; self-host / on-site as the alternative -->
     <section class="section" id="how" aria-labelledby="how-title">
       <div class="container">
         <div class="section-head" data-reveal>
           <span class="eyebrow">{st.eyebrow}</span>
           <h2 id="how-title"><Lines text={st.title} /></h2>
-          <p>{st.sub}</p>
+          {st.sub && <p>{st.sub}</p>}
         </div>
         <ol class="steps">
           {st.steps.map((s, i) => (
@@ -150,11 +154,16 @@ const d = t.devs
           ))}
         </ol>
         <div class="setup-row" data-reveal>
-          <a class="btn btn-primary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{h.secondary}<Icon name="arrow" /></a>
+          {CLOUD_LIVE
+            ? <button class="btn btn-primary btn-lg" type="button" data-plan="team" data-cta="start-trial">{h.primaryLive}<Icon name="arrow" /></button>
+            : <a class="btn btn-primary btn-lg" data-cta="early-access" href={LINKS.earlyAccess(t.lang)}>{h.primary}<Icon name="arrow" /></a>}
           <p class="setup-self"><b>{st.selfTitle}</b> {st.selfBody} <a href={LINKS.installGuide} rel="noopener">{st.selfLink} →</a></p>
         </div>
       </div>
     </section>
+
+    <!-- Trina Cloud: hosted storage, in four short facts (design commitments while in early access) -->
+    <CloudTrust t={t} />
 
     <Pricing t={t} />
 
@@ -213,9 +222,11 @@ const d = t.devs
           <div class="cta-bg" aria-hidden="true"></div>
           <span class="cta-logo" aria-hidden="true"><Logo /></span>
           <h2 id="start-title"><Lines text={t.cta.title} /></h2>
-          <p>{t.cta.sub}</p>
+          <p>{CLOUD_LIVE ? t.cta.subLive : t.cta.sub}</p>
           <div class="hero-ctas">
-            <a class="btn btn-primary btn-lg" data-cta="book-call" href={LINKS.bookCall(t.lang)}>{t.cta.primary}<Icon name="arrow" /></a>
+            {CLOUD_LIVE
+              ? <button class="btn btn-primary btn-lg" type="button" data-plan="team" data-cta="start-trial">{t.cta.primaryLive}<Icon name="arrow" /></button>
+              : <a class="btn btn-primary btn-lg" data-cta="early-access" href={LINKS.earlyAccess(t.lang)}>{t.cta.primary}<Icon name="arrow" /></a>}
             <a class="btn btn-secondary btn-lg" href="#pricing">{t.cta.secondary}</a>
           </div>
         </div>
