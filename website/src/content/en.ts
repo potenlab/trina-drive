@@ -7,9 +7,13 @@
 
 const en = {
   lang: 'en' as 'en' | 'ko',
+  // title ≤ 60 and description ≤ 155 characters (search results cut the rest; test/seo.test.ts checks every page).
   meta: {
-    title: 'Trina Drive — the team drive your AI can read',
+    title: 'Trina Drive — AI knowledge base & team drive for AI',
     description:
+      'The team drive your AI can read. Claude, ChatGPT, Cursor or any MCP app searches your team’s files with each person’s permissions. Hosted or open source.',
+    // Longer summary for structured data and /llms.txt.
+    long:
       'A team drive like Google Drive, where each person’s AI (Claude, ChatGPT, Codex, Cursor) can search and read the files that person may open. Hosted on Trina Cloud, or open source (Apache-2.0) to self-host free.',
     ogImage: '/og.png',
     ogAlt: 'Trina Drive: the team drive your AI can read',
@@ -114,7 +118,7 @@ const en = {
 // against real Google credentials or real Finder / Explorer clients). The first card is wide and
   // carries the drive's features as chips.
   product: {
-    eyebrow: 'Product',
+    eyebrow: 'AI knowledge base for teams',
     title: 'Everything a team drive needs.\nPlus your team’s AI.',
     beta: 'Beta',
     // Decorative upload illustration in the wide drive card.
@@ -344,6 +348,15 @@ const en = {
     moreBody: 'A person answers within one business day.',
     items: [
       {
+        q: 'What is Trina Drive?',
+        a: 'A team drive that is also your team’s AI knowledge base. It works as an MCP file server: each person’s AI app (Claude, ChatGPT, Codex, Cursor or any MCP client) searches and reads only the files that person may open.',
+      },
+      {
+        q: 'Is it a Google Drive alternative?',
+        a: 'For files your AI should read, yes: folders, versions and trash, plus AI access per person. You can import from Google Drive (beta).',
+        link: { text: 'Trina Drive vs Google Drive', href: '/compare/google-drive' },
+      },
+      {
         q: 'What is Trina Cloud?',
         a: 'Trina Drive, hosted by us. Your team gets its own isolated instance in the US. Nothing to install.',
       },
@@ -394,6 +407,8 @@ const en = {
       security: 'Security',
       docs: 'Docs',
       github: 'GitHub',
+      selfHost: 'Self-hosting guide',
+      compare: 'Trina Drive vs Google Drive',
       terms: 'Terms of Service',
       privacy: 'Privacy Policy',
       refund: 'Refund Policy',
@@ -420,7 +435,9 @@ const en = {
   // /security: the page behind the home page's promises.
   securityPage: {
     title: 'Security — what Trina Drive promises, and where it stops',
-    description: 'Trina Drive’s guarantees, its known limits, what changes between Trina Cloud, self-hosted and Enterprise on-site installs, and how to report a vulnerability.',
+    description: 'Trina Drive’s five security guarantees, its known limits, Trina Cloud vs self-hosted vs on-site, and how to report a vulnerability.',
+    ogImage: '/og/security.png',
+    ogAlt: 'Trina Drive security: what we promise, and where it stops',
     eyebrow: 'Security',
     h1: 'What we promise, and where it stops.',
     lead: 'Trina Drive does not try to make an AI agent trustworthy. It limits what any one agent connection can reach, keeps originals out of its reach, and records what it read. These are the promises, and the limits that come with them.',
@@ -458,6 +475,46 @@ const en = {
     ],
     modelLink: 'Full security model on GitHub',
     reportEmail: 'security@trina.app',
+    back: 'Back to home',
+  },
+  // /compare/google-drive. Google Drive facts are limited to what Google and the AI vendors document publicly; nothing
+  // about speed or answer quality. Re-check before changing, and keep the "as of" note.
+  compareGd: {
+    title: 'Trina Drive vs Google Drive for AI teams',
+    description: 'Trina Drive vs Google Drive when your team’s AI apps (Claude, ChatGPT, Cursor) should read your files: hosting, open source, AI access, price.',
+    ogImage: '/og/compare-google-drive.png',
+    ogAlt: 'Trina Drive vs Google Drive for AI teams',
+    crumb: 'Trina Drive vs Google Drive',
+    eyebrow: 'Compare',
+    h1: 'Trina Drive vs Google Drive for AI teams',
+    lead: 'Google Drive is a general-purpose drive with Google’s editors built in. Trina Drive is a team drive built for the AI apps your team already uses: each person’s AI reads only what that person may, and every read is logged.',
+    tableTitle: 'At a glance',
+    caption: 'Trina Drive compared with Google Drive',
+    cols: ['Trina Drive', 'Google Drive'],
+    rows: [
+      { label: 'Made for', cells: ['Team files that each person’s AI should read', 'File storage and real-time editing in Docs, Sheets and Slides'] },
+      { label: 'Where it runs', cells: ['Trina Cloud (US), or your own server', 'Google’s cloud'] },
+      { label: 'Open source', cells: ['Yes, Apache-2.0. Self-hosting is free', 'No'] },
+      { label: 'AI apps', cells: ['Claude Code, Codex, Cursor and any MCP client today; Claude and ChatGPT connectors rolling out', 'Gemini built in on eligible Google Workspace plans; ChatGPT and Claude offer their own Google Drive connectors'] },
+      { label: 'What a connected AI can see', cells: ['Only folders its person may open and that allow that person’s AI. New folders start hidden from every AI', 'What the connected Google account can open'] },
+      { label: 'Price', cells: ['Free; Team $99 / month (up to 10 people); Business $349 / month (up to 40 people); self-hosting $0', 'Per user, by Google Workspace plan'] },
+    ],
+    addsTitle: 'What Trina Drive adds for AI',
+    adds: [
+      { title: '“No AI” folders', body: 'Keep a folder from every AI, even for people who can open it.' },
+      { title: 'Hidden means it doesn’t exist', body: 'A folder you can’t open never shows up for your AI. Not even its name.' },
+      { title: 'Drafts, not edits', body: 'Through Trina Drive, AI writes drafts. A person decides where they go.' },
+      { title: 'Every read on the record', body: 'Each file an AI opens is logged: which person, which app, which file.' },
+    ],
+    fitTitle: 'When Google Drive fits better',
+    fit: [
+      'Your team writes together in Docs, Sheets and Slides in real time. Trina Drive stores files; it is not a document editor.',
+      'You don’t plan to let AI apps read your team’s files.',
+    ],
+    bothTitle: 'Or use both',
+    both: 'Import files from Google Drive (beta): Docs, Sheets and Slides arrive as Word, Excel and PowerPoint.',
+    pricing: 'See pricing',
+    note: 'Based on public documentation as of October 2026. Something out of date? Write to us and we will fix it.',
     back: 'Back to home',
   },
   notFound: { title: 'Page not found', body: 'That page does not exist — or you are not allowed to see it.', back: 'Go home' },

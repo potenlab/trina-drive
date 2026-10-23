@@ -1,15 +1,16 @@
 /* Trina Drive site. Signal Orange on warm paper: ink #14110f, paper #f6f2ea, accent #ff5b1f (fills, always with ink
    text) and #c43d0a (text and links on light, AA); #ff6a33 on dark. Hairline borders, Geist (self-hosted, OFL) for
-   Latin; Hangul falls back to the system's Korean font. */
+   Latin; Hangul falls back to the system's Korean font. The fonts are subset to Latin + punctuation + arrows
+   (pyftsubset, see src/assets/fonts/README) and fingerprinted by Vite under /_astro/, so they cache for a year. */
 
 @font-face {
   font-family: "Geist";
-  src: url("/fonts/Geist-Variable.woff2") format("woff2");
+  src: url("../assets/fonts/Geist-Variable.woff2") format("woff2");
   font-weight: 100 900; font-style: normal; font-display: swap;
 }
 @font-face {
   font-family: "Geist Mono";
-  src: url("/fonts/GeistMono-Variable.woff2") format("woff2");
+  src: url("../assets/fonts/GeistMono-Variable.woff2") format("woff2");
   font-weight: 100 900; font-style: normal; font-display: swap;
 }
 
@@ -745,7 +746,7 @@ html[lang="ko"] .cta-box h2 { line-height: 1.28; letter-spacing: -0.03em; font-w
 /* ---------- footer ---------- */
 .footer { position: relative; margin-top: 40px; border-top: 1px solid var(--border); padding: 64px 0 40px; font-size: 14px; color: var(--fg-muted); overflow: hidden; }
 .footer-grid { display: grid; grid-template-columns: 1.4fr repeat(3, minmax(0, 1fr)); gap: 32px; }
-.footer h4 { margin: 0 0 14px; font-size: 13px; font-weight: 600; color: var(--fg); }
+.footer h2 { margin: 0 0 14px; font-size: 13px; font-weight: 600; color: var(--fg); }
 .footer ul { display: grid; gap: 9px; }
 .footer a { text-decoration: none; }
 .footer .logo { color: var(--fg); }
@@ -802,6 +803,15 @@ html[lang="ko"] .secpage-hero h1 { line-height: 1.22; letter-spacing: -0.03em; f
   .secpage-cards, .secpage-cards-3 { grid-template-columns: minmax(0, 1fr); }
   .guarantees li { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 20px; }
 }
+
+/* /compare/google-drive (reuses the /security page and comparison table styles) */
+.cmp-wrap { margin-top: 20px; }
+.cmp-table { min-width: 560px; table-layout: fixed; }
+.cmp-table thead td { width: 22%; }
+.cmp-table thead th { width: 39%; }
+.cmp-table .cmp-us { color: var(--fg); }
+.cmp-table thead .cmp-us { color: var(--accent); }
+.cmp-ctas { justify-content: flex-start; margin-top: 24px; }
 
 /* legal pages (Markdown rendered into .prose) and /thanks */
 .legal { padding-top: 72px; padding-bottom: 96px; max-width: 760px; }

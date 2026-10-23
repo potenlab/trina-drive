@@ -35,9 +35,9 @@ const enB = {
   ...en,
   meta: {
     ...en.meta,
-    title: 'Trina Drive — a team drive you can ask Claude or ChatGPT about',
+    title: 'Trina Drive — ask Claude or ChatGPT about your team’s files',
     description:
-      'Keep your team’s files in Trina Drive and ask Claude or ChatGPT about last quarter’s numbers, past proposals or any contract — answers come from the real documents, and each person’s AI only sees what they may. Hosted on Trina Cloud, or open source to self-host free.',
+      'Keep your team’s files in Trina Drive and ask Claude or ChatGPT about them. Answers come from the real documents; each person’s AI sees only what they may.',
   },
   hero: {
     ...en.hero,

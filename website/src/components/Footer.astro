@@ -15,11 +15,11 @@ const a = (id: string) => `${home}#${id}`
   <div class="container">
     <div class="footer-grid">
       <div class="footer-brand">
-        <a class="logo" href={home}><Logo /><span>Trina Drive</span></a>
+        <a class="logo" href={home} aria-label="Trina Drive home"><Logo /><span>Trina Drive</span></a>
         <p class="footer-tag">{f.tagline}</p>
       </div>
       <div>
-        <h4>{f.product}</h4>
+        <h2>{f.product}</h2>
         <ul>
           <li><a href={a('product')}>{l.product}</a></li>
           <li><a href={a('open-source')}>{l.openSource}</a></li>
@@ -28,16 +28,18 @@ const a = (id: string) => `${home}#${id}`
         </ul>
       </div>
       <div>
-        <h4>{f.resources}</h4>
+        <h2>{f.resources}</h2>
         <ul>
           <li><a href={LINKS.docs} rel="noopener">{l.docs}</a></li>
           <li><a href={LINKS.github} rel="noopener">{l.github}</a></li>
+          <li><a href={LINKS.installGuide} rel="noopener">{l.selfHost}</a></li>
           <li><a href="/security">{l.security}</a></li>
+          <li><a href="/compare/google-drive">{l.compare}</a></li>
           <li><a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a></li>
         </ul>
       </div>
       <div>
-        <h4>{f.legal}</h4>
+        <h2>{f.legal}</h2>
         <ul>
           <li><a href="/terms">{l.terms}</a></li>
           <li><a href="/privacy">{l.privacy}</a></li>

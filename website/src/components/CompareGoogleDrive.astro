@@ -1,0 +1,80 @@
+---
+// /compare/google-drive: a short, factual comparison for teams deciding where their AI should read files. Copy:
+// t.compareGd (Google facts limited to public documentation, with an "as of" note). Layout reuses the /security page
+// styles and the comparison table styles.
+import type { Copy } from '../content/en'
+import Base from '../layouts/Base.astro'
+import { LINKS } from '../site'
+import { breadcrumbJsonLd } from '../seo'
+import Footer from './Footer.astro'
+import Icon from './Icon.astro'
+import Nav from './Nav.astro'
+import StartCta from './StartCta.astro'
+
+interface Props { t: Copy }
+const { t } = Astro.props
+const c = t.compareGd
+const home = '/'
+const path = '/compare/google-drive'
+---
+<Base t={t} title={c.title} description={c.description} ogImage={c.ogImage} ogAlt={c.ogAlt} jsonLd={breadcrumbJsonLd(c.crumb, path)}>
+  <Nav t={t} home={home} />
+  <main id="main" class="secpage cmp">
+    <section class="secpage-hero">
+      <div class="container">
+        <span class="eyebrow">{c.eyebrow}</span>
+        <h1>{c.h1}</h1>
+        <p class="secpage-lead">{c.lead}</p>
+      </div>
+    </section>
+
+    <section class="container secpage-block" aria-labelledby="cmp-glance">
+      <h2 id="cmp-glance">{c.tableTitle}</h2>
+      <div class="compare-wrap cmp-wrap" role="region" aria-labelledby="cmp-glance" tabindex="0">
+        <table class="compare cmp-table">
+          <caption class="sr-only">{c.caption}</caption>
+          <thead><tr><td></td>{c.cols.map((h, i) => <th scope="col" class={i === 0 ? 'cmp-us' : undefined}>{h}</th>)}</tr></thead>
+          <tbody>
+            {c.rows.map((r) => (
+              <tr>
+                <th scope="row">{r.label}</th>
+                {r.cells.map((x, i) => <td class={i === 0 ? 'cmp-us' : undefined}>{x}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p class="compare-note">{c.note}</p>
+    </section>
+
+    <section class="container secpage-block" aria-labelledby="cmp-adds">
+      <h2 id="cmp-adds">{c.addsTitle}</h2>
+      <div class="secpage-cards">
+        {c.adds.map((a) => <div class="secpage-card"><h3>{a.title}</h3><p>{a.body}</p></div>)}
+      </div>
+      <p class="secpage-links"><a href="/security">{t.security.link} →</a></p>
+    </section>
+
+    <section class="container secpage-block" aria-labelledby="cmp-fit">
+      <h2 id="cmp-fit">{c.fitTitle}</h2>
+      <ul class="limits">
+        {c.fit.map((l) => <li><Icon name="minus" />{l}</li>)}
+      </ul>
+    </section>
+
+    <section class="container secpage-block" aria-labelledby="cmp-both">
+      <h2 id="cmp-both">{c.bothTitle}</h2>
+      <p class="secpage-sub">{c.both}</p>
+      <div class="hero-ctas cmp-ctas">
+        <StartCta label={t.hero.primary} lang={t.lang} size="md" />
+        <a class="btn btn-secondary" href="/#pricing">{c.pricing}</a>
+        <a class="btn btn-ghost" data-cta="self-host" href={LINKS.installGuide} rel="noopener">{t.openSource.secondary}<span aria-hidden="true">→</span></a>
+      </div>
+      <a class="back" href={home}>← {c.back}</a>
+    </section>
+  </main>
+  <Footer t={t} home={home} />
+  <script>
+    import '../scripts/main'
+  </script>
+</Base>

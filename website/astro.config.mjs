@@ -6,7 +6,8 @@ import { defineConfig } from 'astro/config'
 export default defineConfig({
   site: 'https://drive.trina.app',
   output: 'static',
-  trailingSlash: 'ignore',
+  // No trailing slashes, same as vercel.json (trailingSlash: false): one URL per page for search engines.
+  trailingSlash: 'never',
   build: { format: 'file', inlineStylesheets: 'never' },
   compressHTML: true,
   devToolbar: { enabled: false },

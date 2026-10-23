@@ -5,6 +5,7 @@
 import type { Copy } from '../content/en'
 import Base from '../layouts/Base.astro'
 import { LINKS } from '../site'
+import { breadcrumbJsonLd } from '../seo'
 import Footer from './Footer.astro'
 import Icon from './Icon.astro'
 import Nav from './Nav.astro'
@@ -14,7 +15,7 @@ const { t } = Astro.props
 const sp = t.securityPage
 const home = '/'
 ---
-<Base t={t} title={sp.title} description={sp.description}>
+<Base t={t} title={sp.title} description={sp.description} ogImage={sp.ogImage} ogAlt={sp.ogAlt} jsonLd={breadcrumbJsonLd('Security', '/security')}>
   <Nav t={t} home={home} />
   <main id="main" class="secpage">
     <section class="secpage-hero">

@@ -3,7 +3,8 @@
 // apps it works with → product grid → how it works → Trina Cloud → open source → pricing → FAQ → final CTA.
 import type { Copy } from '../content/en'
 import Base from '../layouts/Base.astro'
-import { CLOUD_LIVE, LINKS, SITE_URL, CONTACT_EMAIL } from '../site'
+import { CLOUD_LIVE, LINKS, SITE_URL } from '../site'
+import { homeJsonLd } from '../seo'
 import Benchmark from './Benchmark.astro'
 import ChatCard from './ChatCard.astro'
 import CloudTrust from './CloudTrust.astro'
@@ -26,39 +27,8 @@ const { t, abLink = false } = Astro.props
 const home = '/'
 const h = t.hero
 
-const jsonLd = {
-  '@context': 'https://schema.org',
-  '@graph': [
-    {
-      '@type': 'Organization',
-      '@id': `${SITE_URL}/#org`,
-      name: 'Trina Inc.',
-      url: SITE_URL,
-      email: CONTACT_EMAIL,
-      logo: `${SITE_URL}/apple-touch-icon.png`,
-    },
-    {
-      '@type': 'SoftwareApplication',
-      name: 'Trina Drive',
-      url: new URL(home, SITE_URL).href,
-      applicationCategory: 'BusinessApplication',
-      operatingSystem: 'Web, macOS, Linux',
-      description: t.meta.description,
-      license: 'https://www.apache.org/licenses/LICENSE-2.0',
-      publisher: { '@id': `${SITE_URL}/#org` },
-      offers: [
-        { '@type': 'Offer', name: 'Free', price: '0', priceCurrency: 'USD' },
-        { '@type': 'Offer', name: 'Team', price: '99', priceCurrency: 'USD' },
-        { '@type': 'Offer', name: 'Business', price: '349', priceCurrency: 'USD' },
-        { '@type': 'Offer', name: 'Self-hosted', price: '0', priceCurrency: 'USD' },
-      ],
-    },
-    {
-      '@type': 'FAQPage',
-      mainEntity: t.faq.items.map((i) => ({ '@type': 'Question', name: i.q, acceptedAnswer: { '@type': 'Answer', text: i.a } })),
-    },
-  ],
-}
+// Organization, WebSite, SoftwareApplication (one offer per price shown), source code and the FAQ, built from t.
+const jsonLd = homeJsonLd(t)
 ---
 <Base t={t} jsonLd={abLink ? undefined : jsonLd} preloadHero variant="a" noindex={abLink} canonicalHref={abLink ? `${SITE_URL}/` : undefined}>
   <Nav t={t} home={home} />
