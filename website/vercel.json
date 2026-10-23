@@ -6,6 +6,10 @@
   "outputDirectory": "dist",
   "cleanUrls": true,
   "trailingSlash": false,
+  "redirects": [
+    { "source": "/ko", "destination": "/", "permanent": true },
+    { "source": "/ko/:path*", "destination": "/:path*", "permanent": true }
+  ],
   "headers": [
     {
       "source": "/(.*)",
