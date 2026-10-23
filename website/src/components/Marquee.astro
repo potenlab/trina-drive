@@ -1,0 +1,33 @@
+---
+// "Works with any AI that speaks MCP": an endless, CSS-only logo marquee. The list is drawn twice side by side and
+// the track slides left by exactly one copy (translateX(-50%)), so the loop has no seam. The second copy is hidden
+// from assistive tech. Hover pauses it; edges fade out with a mask; prefers-reduced-motion shows one static, wrapped
+// row instead. Marks come from content/brands.ts: official logo files where the brand allows it, a neutral icon for
+// Claude products (Anthropic requires approval), plain text for the rest. Styles: styles/global.css (.mq-*).
+import { markFor } from '../content/brands'
+import ClientMark from './ClientMark.astro'
+interface Props { title: string; items: string[]; note: string; trademarks: string }
+const { title, items, note, trademarks } = Astro.props
+// ~4.5 s per item keeps the pace slow (about 35-40 px/s) whatever the list length.
+const dur = `--mq-dur:${(items.length * 4.5).toFixed(1)}s`
+const row = items.map((name) => ({ name, mark: markFor(name).kind !== 'none' }))
+---
+<div class="mq-wrap">
+  <p class="cred-title mq-title">{title}</p>
+  <div class="mq" style={dur}>
+    <div class="mq-track">
+      {[0, 1].map((copy) => (
+        <ul class="mq-list" aria-hidden={copy === 1 ? 'true' : undefined} role={copy === 0 ? 'list' : undefined}>
+          {row.map((x) => (
+            <li class="mq-item" data-mark={x.mark ? 'yes' : 'no'}>
+              {x.mark && <ClientMark name={x.name} />}
+              <span class="mq-name">{x.name}</span>
+            </li>
+          ))}
+        </ul>
+      ))}
+    </div>
+  </div>
+  <p class="mq-note">{note}</p>
+  <p class="marks-note">{trademarks}</p>
+</div>
