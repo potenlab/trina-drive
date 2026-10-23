@@ -15,8 +15,8 @@
   .dots { display: flex; gap: 7px; } .dots i { width: 12px; height: 12px; border-radius: 50%; background: #2a2f37; }
   .title { flex: 1; text-align: center; margin-right: 60px; }
   .who { display: flex; gap: 14px; } .who b { font-weight: 500; }
-  .screen { flex: 1; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 14px 20px 18px; }
-  .line { flex: none; white-space: pre-wrap; word-break: break-all; min-height: 1.5em; }
+  .screen { flex: 1; min-height: 0; overflow: hidden; padding: 14px 20px 18px; }
+  .line { white-space: pre-wrap; word-break: break-all; min-height: 1.5em; }
   .note { color: var(--muted); font-style: italic; }
   .p { color: var(--accent); }
   .err { color: var(--err); } .dim { color: var(--muted); }
@@ -62,7 +62,9 @@ function render(t) {
     for (const l of e.s.stderr.replace(/\n$/, '').split('\n')) if (e.s.stderr) out.push(`<div class="line ${cls}">${esc(l)}</div>`)
   }
   if (!cursorShown && t >= timeline.at(-1).outAt) out.push(`<div class="line"><span class="p">$ </span>${Math.floor(t * 2) % 2 ? '' : '<span class="cur"></span>'}</div>`)
-  document.getElementById('screen').innerHTML = out.join('')
+  const screen = document.getElementById('screen')
+  screen.innerHTML = out.join('')
+  screen.scrollTop = screen.scrollHeight // starts at the top, then scrolls like a terminal
 }
 window.render = render
 window.ready = fetch(new URLSearchParams(location.search).get('data') ?? 'demo.json').then((r) => r.json()).then(build).then(() => document.fonts.ready)
