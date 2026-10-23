@@ -38,6 +38,7 @@ import { createShareApproval } from './approvals'
 import { inviteHandler } from './invite'
 import { copiesUnder, notifyWidened, withRejudge, type Judgement } from './rejudge'
 import { everyoneGroup } from './rules'
+import { isSkillLibrary } from '../skills/core'
 
 export type Kind = 'admin' | 'manager' | 'editor' | 'none'
 const ROLE_LEVEL: Record<Role, number> = { viewer: 1, editor: 2, manager: 2 }
@@ -382,6 +383,8 @@ export function planChange(db: DB, r: Rights, f: FolderRow, a: Actor, kind: Kind
   if (body.editors_can_share !== undefined) {
     if (typeof body.editors_can_share !== 'boolean') throw bad('bad_toggle', 'editors_can_share: true or false')
     if (!mgr) throw err(403, 'manager_only', 'only a manager or an admin changes whether Editors can share')
+    // a skill library (src/skills) keeps it off: whoever widens a library's readers decides whose AI gets its instructions
+    if (body.editors_can_share && isSkillLibrary(db, f.id)) throw err(409, 'skill_library', 'this folder is a skill library: Editors never change its sharing')
     const cur = (f as FolderX).editors_can_share
     if (cur !== (body.editors_can_share ? 1 : 0)) steps.push({ k: 'editors', on: body.editors_can_share })
   }

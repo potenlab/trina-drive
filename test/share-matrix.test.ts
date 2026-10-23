@@ -87,6 +87,17 @@ describe('O1: "Editors can change permissions and share"', () => {
     expect(e.db.query<{ new_value: string }, [number]>("SELECT new_value FROM folder_history WHERE folder_id = ? AND field = 'editors_can_share'").all(e.proj.id)).toEqual([{ new_value: '0' }])
   })
 
+  test('a skill library keeps "Editors can share" off: designating turns it off, turning it back on is refused', async () => {
+    e = await shareSetup()
+    const { designate } = await import('../src/skills/core')
+    designate(e.db, e.db.query<import('../src/store').FolderRow, [number]>('SELECT * FROM folders WHERE id = ?').get(e.proj.id)!, 'projects', e.pid('dion'))
+    const kim = await e.as('kim')
+    expect((await e.view(kim, '/Projects')).data).toMatchObject({ can_share: false, editors_can_share: { effective: false, own: false } })
+    const on = await e.share(await e.as('dion'), { path: '/Projects', editors_can_share: true })
+    expect([on.status, on.data.error]).toEqual([409, 'skill_library'])
+    expect((await e.share(kim, { path: '/Projects', add: [{ subject: e.person('park'), role: 'viewer' }] })).data.error).toBe('editors_cannot_share')
+  })
+
   test('an Editor\'s change is audited "by editor" and the folder\'s managers are told (kind + count + link)', async () => {
     e = await shareSetup()
     const kim = await e.as('kim')
