@@ -50,7 +50,7 @@ function teamsPage(c: RouteCtx) {
   const cards = teams.map((t) => {
     const st = storageOf(c.cloud, t), seats = c.cloud.members.seats(t)
     return `<article class="card team-card"><div class="tc-top"><span class="avatar sq">${esc((t.name[0] ?? 'T').toUpperCase())}</span><div style="min-width:0;flex:1"><h2><a href="/t/${esc(t.slug)}">${esc(t.name)}</a></h2><p>${esc(c.cloud.url(t).replace(/^https:\/\//, ''))}</p></div>${stateBadge(c.cloud, t)}</div>
-<div class="tc-meta"><span>${esc(planName(t))}</span><span aria-hidden="true">·</span><span>${seats.used}${seats.max ? ` of ${seats.max}` : ''} ${seats.used === 1 ? 'person' : 'people'}</span><span aria-hidden="true">·</span><span>${esc(bytes(st.used))} of ${esc(bytes(st.quota))}</span><span class="grow"></span>${roleBadge(t.role)}</div>
+<div class="tc-meta"><span>${esc(planName(t))}</span><span aria-hidden="true">·</span><span>${seats.used}${seats.max ? ` of ${seats.max}` : ''} ${seats.used === 1 && !seats.max ? 'person' : 'people'}</span><span aria-hidden="true">·</span><span>${esc(bytes(st.used))} of ${esc(bytes(st.quota))}</span><span class="grow"></span>${roleBadge(t.role)}</div>
 ${meter(c.cloud, t)}<div class="tc-actions">${openButton(c, t, teams.length === 1)}<a class="btn btn-ghost" href="/t/${esc(t.slug)}">Manage</a></div></article>`
   }).join('')
   const empty = teams.length ? '' : `<div class="card card-pad" style="margin-bottom:16px"><h2 style="font-size:16px;margin-bottom:6px">No team yet</h2><p class="muted">Create one, or ask a teammate to invite ${esc(s.email)}.</p></div>`
@@ -110,7 +110,7 @@ function overviewPage(c: RouteCtx) {
 <dt>Last used</dt><dd>${esc(when(sto.usage?.last_activity_at ?? t.last_activity_at))}</dd><dt>Last backup</dt><dd>${esc(when(t.last_backup_at))}</dd>
 <dt>Created</dt><dd>${esc(dateTime(t.created_at))}</dd><dt>Your role</dt><dd>${roleBadge(role)}</dd></dl></div></div></section>`
   const wake = paused ? `<div class="banner"><p><b>This drive is paused</b> after a week without activity. Nothing is deleted.</p><form method="post" action="/t/${esc(t.slug)}/wake">${csrfField(s.csrf)}<button class="btn btn-dark btn-sm">Wake up</button></form></div>` : ''
-  return teamShell(c, s, t, role, 'overview', t.name, `${wake}${stats}<div class="grid-2">${connect}${activity}</div>`)
+  return teamShell(c, s, t, role, 'overview', t.name, `${wake}${stats}${connect}${activity}`)
 }
 
 // ---------------------------------------------------------------- Members

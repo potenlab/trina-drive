@@ -153,10 +153,12 @@ form{margin:0}
 label.field{display:block;margin:0 0 14px;font-size:13.5px;font-weight:550;color:var(--fg)}
 label.field>span.hint,.hint{display:block;margin-top:5px;font-weight:400;color:var(--fg-faint);font-size:12.5px}
 input[type=text],input[type=email],input[type=password],input:not([type]),input[type=search],select,textarea{display:block;width:100%;margin-top:6px;padding:9px 11px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg-elev);color:var(--fg);font:inherit;font-size:14.5px;font-weight:400;transition:border-color .15s,box-shadow .15s}
+select{min-height:41px}
+.copied-tip{font-size:12px;color:var(--ok);margin-left:4px}.ok-text{color:var(--ok);font-size:13px;margin-top:6px}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
 input[readonly]{background:var(--inset);color:var(--fg-muted)}
 input.code{font-family:var(--font-mono);letter-spacing:.2em;font-size:18px;text-align:center}
-.inline{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}.inline>*{margin:0}
+.inline{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}.inline>*{margin:0}
 .inline input,.inline select{margin-top:0}
 .addon{display:flex;align-items:stretch;margin-top:6px}.addon input{margin:0;border-radius:var(--radius-sm) 0 0 var(--radius-sm)}
 .addon span{display:flex;align-items:center;padding:0 11px;border:1px solid var(--border-strong);border-left:0;border-radius:0 var(--radius-sm) var(--radius-sm) 0;background:var(--inset);color:var(--fg-muted);font-size:13.5px;white-space:nowrap}
@@ -193,7 +195,7 @@ input.code{font-family:var(--font-mono);letter-spacing:.2em;font-size:18px;text-
 .sec-foot .muted{margin-right:auto;font-size:13px}
 .danger-zone{border-color:color-mix(in srgb,var(--danger) 35%,var(--border))}
 .danger-zone .sec-head h2{color:var(--danger)}
-.kv{display:grid;grid-template-columns:minmax(120px,190px) minmax(0,1fr);gap:10px 18px;font-size:14px}
+.kv{display:grid;grid-template-columns:minmax(110px,170px) minmax(0,1fr);gap:10px 18px;font-size:14px}
 .kv dt{color:var(--fg-muted)}.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .copy{display:flex;align-items:center;gap:6px;min-width:0}
 .copy code{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 9px;border-radius:7px;background:var(--inset);border:1px solid var(--border)}
@@ -289,8 +291,9 @@ body.auth{min-height:100vh;display:flex;flex-direction:column;background:radial-
 .panel .err{color:var(--danger)}
 .panel label{display:block;margin:0 0 14px;font-size:13.5px;font-weight:550}
 .panel button:not(.link-btn):not(.icon-btn){display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 16px;border-radius:var(--radius-sm);border:1px solid transparent;background:var(--btn);color:var(--btn-fg);font:inherit;font-weight:550;cursor:pointer;width:100%}
-.panel button.btn-primary{background:var(--cta);color:var(--cta-fg)}
-.panel button.plain,.panel button.btn-secondary{background:var(--bg-elev);color:var(--fg);border-color:var(--border-strong)}
+.panel button.btn-primary:not(.link-btn):not(.icon-btn){background:var(--cta);color:var(--cta-fg)}
+.panel button.btn-primary:not(.link-btn):not(.icon-btn):hover{background:var(--cta-hover)}
+.panel button.plain:not(.link-btn):not(.icon-btn),.panel button.btn-secondary:not(.link-btn):not(.icon-btn){background:var(--bg-elev);color:var(--fg);border-color:var(--border-strong)}
 .panel .card{padding:16px;margin:16px 0;box-shadow:none}
 .panel .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .panel .btn{width:auto}
@@ -317,7 +320,7 @@ body.auth{min-height:100vh;display:flex;flex-direction:column;background:radial-
   .table.stack thead{display:none}
   .table.stack tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;padding:12px 16px;border-bottom:1px solid var(--border)}
   .table.stack tr:last-child{border-bottom:0}
-  .table.stack td{padding:0;border:0}.table.stack td.wide{grid-column:1/-1}
+  .table.stack td{padding:0;border:0}.table.stack td.wide{grid-column:1}
   .table.stack td.actions{grid-row:1;grid-column:2}
   .sec-head,.sec-body{padding-left:16px;padding-right:16px}.sec-foot{padding:12px 16px;flex-wrap:wrap}
   .panel{padding:22px}
