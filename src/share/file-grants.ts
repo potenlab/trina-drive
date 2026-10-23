@@ -28,6 +28,7 @@ import { consumeStepUp } from '../web/mfa'
 import fs from 'node:fs'
 import type { FileShareEntry, FileShareView, FileSharedItem } from './api-types'
 import { inviteHandler } from './invite'
+import { recordShareInvite } from './invites'
 import { applyJudgement, locateCopies, type Judgement, type Snapshot } from './rejudge'
 import type { WidenedRow } from '../inplace/widened'
 
@@ -467,7 +468,8 @@ function emitWidened(emit: WebCtx['opts']['emit'] | undefined, j: Judgement) {
 
 /**
  * Non-members by mail (admin only): the team's invite flow; when it hands back the invited person's row, the file is
- * shared with them now. Otherwise `granted: false` (pending invites for files are applied by S16, not in this version).
+ * shared with them now. Otherwise `granted: false` and a pending invite is kept (S16): the member sync applies it when
+ * that address becomes a member (src/share/invites.ts applyShareInvites).
  */
 async function runFileInvites(op: Op, it: FileItem, invites: { email: string; role: 'viewer' | 'editor' }[], notifyOn: boolean) {
   const out: { email: string; status: 'invited' | 'member'; granted: boolean }[] = []
@@ -490,6 +492,18 @@ async function runFileInvites(op: Op, it: FileItem, invites: { email: string; ro
         })()
         granted = true
         if (notifyOn) await tell(op, [res.personId], 'shared', '/#/shared')
+      }
+    }
+    if (!granted) {
+      // S16: given when this address becomes a member (src/share/invites.ts, called by the member sync)
+      const again = fileAt(op.w, op.actor, it.vpath)
+      if (again) {
+        const prepare = prepareRow(db, again.e)
+        db.transaction(() => {
+          const row = prepare()
+          db.query('UPDATE mfiles SET folder_id = ?, name = ? WHERE id = ?').run(again.F.id, again.e.real.slice(again.e.real.lastIndexOf('/') + 1), row.id)
+          recordShareInvite(db, inv.email, { kind: 'file', fileUid: row.uid, level: LEVEL[inv.role], by: op.actor.personId, vpath: it.vpath })
+        })()
       }
     }
     out.push({ email: inv.email, status: res.status, granted })

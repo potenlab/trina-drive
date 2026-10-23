@@ -50,5 +50,11 @@ export const shareMigrations: Migration[] = [
     DELETE FROM file_grants WHERE subject_type = 'group' AND NOT EXISTS
       (SELECT 1 FROM groups g WHERE g.id = file_grants.subject_id AND g.uid = file_grants.subject_uid);`) },
   { id: 'share.via_file', phase: 'core', up: (db) => { addColumns(db, 'touches', [['via_file', 'INTEGER']]); addColumns(db, 'draft_src', [['via_file', 'INTEGER']]) } },
+  // S16: a share given by mail to someone who is not a member yet; applied when that address becomes an active person
+  // (src/share/invites.ts applyShareInvites, called by the member sync), dropped after 30 days
+  { id: 'share.invites', phase: 'core', up: (db) => db.exec(`CREATE TABLE IF NOT EXISTS share_invites (
+      id INTEGER PRIMARY KEY, email TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('folder','file')), folder_id INTEGER, file_uid TEXT,
+      level INTEGER NOT NULL CHECK (level IN (1,2)), granted_by INTEGER NOT NULL, granted_at INTEGER NOT NULL, applied_at INTEGER, dropped_at INTEGER);
+    CREATE INDEX IF NOT EXISTS share_invites_email ON share_invites (email) WHERE applied_at IS NULL AND dropped_at IS NULL;`) },
   { id: 'share.audit_person', phase: 'core', up: (db) => db.exec('CREATE INDEX IF NOT EXISTS audit_person ON audit (person_id, id)') },
 ]

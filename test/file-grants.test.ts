@@ -7,6 +7,10 @@ import { Access } from '../src/policy'
 import { addGroup, addMember, createToken, setRule } from '../src/store'
 import { splitVirtual } from '../src/names'
 import { setPromote } from '../src/promote'
+import { setInviteHandler } from '../src/share/invite'
+import { applyShareInvites } from '../src/share/invites'
+import { sharedWithMe } from '../src/share/service'
+import { addPerson } from '../src/store'
 import { fileShareSetup, Q3, SIB, type FileShareEnv } from './file-grants-helpers'
 
 let e: FileShareEnv
@@ -398,6 +402,32 @@ describe('I8 agents ≤ person; I9 provenance; I15 widening', () => {
     const r = await e.tool('kim-ai', 'promote', { draft: '/drafts/over.md', folder: '/Projects', name: 'shared.md', overwrite: true })
     await managedIdle(e.db)
     expect((r.structuredContent as { status: string }).status).toBe('input_required') // widening: lee gains it
+  })
+})
+
+describe('S16: invitations by mail (admin only)', () => {
+  test('an admin shares a file with a non-member; once they join it is in their Shared with me; a manager is refused', async () => {
+    setInviteHandler(async () => ({ status: 'invited' }))
+    try {
+      setRule(e.db, e.team.path, 'dion', 'read')
+      const dion = await e.as('dion')
+      const r = await e.shareFile(dion, Q3, { add: [{ subject: { email: 'Mina@Example.org' }, role: 'viewer' }] })
+      expect(r.status).toBe(200)
+      expect(r.data.invited).toEqual([{ email: 'Mina@Example.org', status: 'invited', granted: false }])
+      expect((await e.shareFile(e.boss, Q3, { add: [{ subject: { email: 'x@example.org' }, role: 'viewer' }] })).data.error).toBe('invite_admin_only')
+      const mina = addPerson(e.db, 'mina')
+      expect(applyShareInvites(e.db, mina.id, 'mina@example.org')).toBe(1)
+      expect(applyShareInvites(e.db, mina.id, 'mina@example.org')).toBe(0) // applied once
+      const items = sharedWithMe(e.w, { personId: mina.id, admin: false }).items
+      expect(items).toEqual([expect.objectContaining({ kind: 'file', path: Q3, role: 'viewer', shared_by: { id: e.pid('dion'), name: 'dion' } })])
+      expect(Access.forPerson(e.db, mina.id).lookup(splitVirtual(SIB))).toBeNull()
+      // older than 30 days: dropped, not applied
+      const r2 = await e.shareFile(dion, SIB, { add: [{ subject: { email: 'late@example.org' }, role: 'viewer' }] })
+      expect(r2.status).toBe(200)
+      const late = addPerson(e.db, 'late')
+      expect(applyShareInvites(e.db, late.id, 'late@example.org', Date.now() + 31 * 86400_000)).toBe(0)
+      expect(Access.forPerson(e.db, late.id).lookup(splitVirtual(SIB))).toBeNull()
+    } finally { setInviteHandler(null) }
   })
 })
 
