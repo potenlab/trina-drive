@@ -2,8 +2,23 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Workspace unavailable · Trina Drive</title>
 <style>body{margin:0;font:16px/1.5 system-ui,sans-serif;background:#fbfaf7;color:#0a0b0d}main{max-width:560px;margin:15vh auto;padding:0 16px}
-@media (prefers-color-scheme:dark){body{background:#111214;color:#f2f1ee}}a{color:#ff5b1f}</style></head>
+@media (prefers-color-scheme:dark){body{background:#111214;color:#f2f1ee}}a{color:#ff5b1f}
+.btn{display:inline-block;padding:10px 16px;border-radius:8px;background:#ff5b1f;color:#fff;font-weight:600;text-decoration:none}</style></head>
 <body><main><h1>This workspace is unavailable right now</h1>
 <p>It is starting, being updated, or paused. Nothing has been deleted.</p>
+<p id="wake" hidden>A free workspace pauses after 7 days without activity. <a class="btn" id="wake-link" href="#">Wake up</a><br>
+<small>It starts again in a few seconds.</small></p>
 <p>If you run this workspace, check your subscription at <a href="https://drive.trina.app">drive.trina.app</a> or write to
-<a href="mailto:contact@trina.app">contact@trina.app</a>.</p></main></body></html>
+<a href="mailto:contact@trina.app">contact@trina.app</a>.</p></main>
+<script>
+// The same page for every team (Caddy shows it while a team's container is stopped). The Wake up button goes to the
+// control plane — the team's address minus its first label (acme.cloud.trina.app → cloud.trina.app/wake/acme) —,
+// which wakes a paused free team (other paused teams get an explanation there).
+(function () {
+  var h = location.hostname, i = h.indexOf('.')
+  if (i < 1) return
+  var slug = h.slice(0, i), control = h.slice(i + 1) + (location.port ? ':' + location.port : '')
+  document.getElementById('wake-link').href = 'https://' + control + '/wake/' + encodeURIComponent(slug)
+  document.getElementById('wake').hidden = false
+})()
+</script></body></html>

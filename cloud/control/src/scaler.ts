@@ -7,6 +7,10 @@
 //              (the host says so). A host that does not finish booting in time is terminated and launched again; after
 //              three such failures in a row scale-out stops and ops are alerted (`hosts resume`). The host limit
 //              reached: the team keeps waiting and ops are alerted. TDCLOUD_SPARE_SLOTS keeps free slots ahead.
+//   free teams take a quarter slot (plans.ts) and go where paid teams leave room — hosts that already hold paid teams
+//              first — but never past TDCLOUD_FREE_HOST_SHARE of a host's slots, and they never make the scaler launch
+//              the last TDCLOUD_FREE_RESERVE_HOSTS hosts the limit allows: that headroom is for paid teams. A free team
+//              that finds no room waits (no "limit reached" alert; ops hear after TDCLOUD_HOST_WAIT_ALERT).
 //   scale-in   a ready host that no team row names (suspended, failed and half-made teams count: their data is there)
 //              for TDCLOUD_EMPTY_HOST_GRACE is marked `draining` (no team can be placed on it any more), asked whether
 //              it holds any team directory or container (none, and reachable, or it is kept), then terminated through
@@ -21,7 +25,7 @@ import { audit } from './audit'
 import type { Config } from './config'
 import { teamById, updateTeam, type DB, type HostRow, type HostState, type TeamRow } from './db'
 import type { HostPool } from './drivers/types'
-import { planOf, SLOTS_SQL } from './plans'
+import { fmtSlots, planOf, SLOTS_SQL } from './plans'
 import { iso, random } from './util'
 
 /** boot failures in a row after which scale-out stops until `hosts resume` */
@@ -41,7 +45,12 @@ export interface ScalerDeps {
   clock?: () => number
 }
 
-export interface HostView extends HostRow { used: number; free: number; capacity: number; teams: string[] }
+export interface HostView extends HostRow { used: number; free: number; capacity: number; teams: string[]; freeUsed: number }
+
+/** slots in use on one host: all of them, and the part free teams take */
+export interface HostUse { used: number; freeUsed: number; paid: number; teams: string[] }
+/** float sums of quarter slots are exact, but a share like 0.3 × 20 is not */
+const EPS = 1e-9
 
 export interface PassResult {
   skipped?: 'busy'
@@ -91,42 +100,50 @@ export class Scaler {
       .run(...keys.map((k) => (f as Record<string, string | number | null>)[k] ?? null), this.now(), id)
   }
 
-  /** Slots in use per host: every team row that names it and is not deleted. Suspended teams, failed and half-made
-   * ones count: their data is on the host. */
-  usedSlots(): Map<string, { used: number; teams: string[] }> {
-    const m = new Map<string, { used: number; teams: string[] }>()
-    for (const r of this.d.db.query<{ host: string; slug: string; slots: number }, []>(`SELECT host, slug, ${SLOTS_SQL} AS slots FROM teams WHERE host IS NOT NULL AND status != 'deleted' ORDER BY id`).all()) {
-      const e = m.get(r.host) ?? { used: 0, teams: [] }
+  /** the slots of one host free teams may take (TDCLOUD_FREE_HOST_SHARE) */
+  get freeCapacity() { return this.d.cfg.free.hostShare * this.capacity }
+
+  /** Slots in use per host: every team row that names it and is not deleted. Suspended teams (paused free teams
+   * too), failed and half-made ones count: their data is on the host. */
+  usedSlots(): Map<string, HostUse> {
+    const m = new Map<string, HostUse>()
+    for (const r of this.d.db.query<{ host: string; slug: string; plan: string; slots: number }, []>(`SELECT host, slug, plan, ${SLOTS_SQL} AS slots FROM teams WHERE host IS NOT NULL AND status != 'deleted' ORDER BY id`).all()) {
+      const e = m.get(r.host) ?? { used: 0, freeUsed: 0, paid: 0, teams: [] }
       e.used += r.slots; e.teams.push(r.slug)
+      if (r.plan === 'free') e.freeUsed += r.slots
+      else e.paid++
       m.set(r.host, e)
     }
     return m
   }
 
-  /** paid teams with no host yet */
+  /** teams with no host yet */
   waiting(): TeamRow[] {
     return this.d.db.query<TeamRow, []>("SELECT * FROM teams WHERE status = 'provisioning' AND host IS NULL ORDER BY id").all()
   }
 
-  /** Something is in motion (a team waits, a host boots or is going away): the loop runs passes more often. */
+  /** Something is in motion (a team waits, a host boots or is going away): the loop runs passes more often. A free team
+   * that has waited past TDCLOUD_HOST_WAIT_ALERT (no room for free teams) no longer keeps the passes fast. */
   urgent(): boolean {
-    return !!this.d.db.query("SELECT 1 FROM teams WHERE status = 'provisioning' AND host IS NULL LIMIT 1").get()
+    const since = this.now() - this.d.cfg.hostWaitAlertMs
+    return !!this.d.db.query<unknown, [number]>("SELECT 1 FROM teams WHERE status = 'provisioning' AND host IS NULL AND (plan != 'free' OR waiting_since IS NULL OR waiting_since > ?) LIMIT 1").get(since)
       || !!this.d.db.query("SELECT 1 FROM hosts WHERE state IN ('booting', 'draining', 'terminating') LIMIT 1").get()
   }
 
   /** A host for this team, chosen and written in one transaction: the fullest ready host that still has room (hosts
-   * fill up one after another, so the others empty out and can be scaled in). null: none has room (yet). */
+   * fill up one after another, so the others empty out and can be scaled in). A free team also needs room within the
+   * free share, and prefers a host that already holds paid teams (their spare). null: none has room (yet). */
   claim(t: TeamRow): string | null {
-    const need = planOf(t.plan).slots
+    const need = planOf(t.plan).slots, isFree = t.plan === 'free'
     return this.d.db.transaction(() => {
       const cur = teamById(this.d.db, t.id)
       if (!cur) return null
       if (cur.host) return cur.host
       const used = this.usedSlots()
       const fits = this.d.db.query<HostRow, []>("SELECT * FROM hosts WHERE state = 'ready' AND online = 1").all()
-        .map((h) => ({ id: h.id, used: used.get(h.id)?.used ?? 0 }))
-        .filter((h) => h.used + need <= this.capacity)
-        .sort((a, b) => b.used - a.used || (a.id < b.id ? -1 : 1))
+        .map((h) => ({ id: h.id, ...(used.get(h.id) ?? { used: 0, freeUsed: 0, paid: 0 }) }))
+        .filter((h) => h.used + need <= this.capacity + EPS && (!isFree || h.freeUsed + need <= this.freeCapacity + EPS))
+        .sort((a, b) => (isFree ? Number(b.paid > 0) - Number(a.paid > 0) : 0) || b.used - a.used || (a.id < b.id ? -1 : 1))
       const pick = fits[0]
       if (!pick) return null
       updateTeam(this.d.db, t.id, { host: pick.id, waiting_since: null, wait_alerted_at: null })
@@ -139,9 +156,9 @@ export class Scaler {
   view(all = false): HostView[] {
     const used = this.usedSlots()
     return this.d.db.query<HostRow, []>(`SELECT * FROM hosts ${all ? '' : "WHERE state != 'gone'"} ORDER BY first_seen, id`).all().map((h) => {
-      const u = used.get(h.id) ?? { used: 0, teams: [] }
+      const u = used.get(h.id) ?? { used: 0, freeUsed: 0, paid: 0, teams: [] }
       const live = h.state === 'ready' || h.state === 'booting'
-      return { ...h, used: u.used, teams: u.teams, capacity: this.capacity, free: live ? Math.max(0, this.capacity - u.used) : 0 }
+      return { ...h, used: u.used, freeUsed: u.freeUsed, teams: u.teams, capacity: this.capacity, free: live ? Math.max(0, this.capacity - u.used) : 0 }
     })
   }
 
@@ -265,33 +282,49 @@ export class Scaler {
     }
 
     // 5. scale-out: place the waiting teams on free slots (ready hosts, hosts booting, launches the pool has not
-    //    started yet), the rest on new hosts; then the spare slots
-    const cap = this.capacity
+    //    started yet), the rest on new hosts; then the spare slots. Paid teams first; free teams within each host's
+    //    free share, preferring hosts with paid teams, and on new hosts only below the limit minus the reserve.
+    const cap = this.capacity, freeCap = this.freeCapacity
+    const limit = Math.min(cfg.maxHosts, st.max)
     const waiting = this.waiting()
     const hosts = db.query<HostRow, []>("SELECT * FROM hosts WHERE state IN ('ready', 'booting')").all()
-    const bins: number[] = [
-      ...hosts.filter((h) => h.state === 'ready' && h.online).map((h) => Math.max(0, cap - (used.get(h.id)?.used ?? 0))),
-      ...hosts.filter((h) => h.state === 'booting' && live.has(h.id)).map(() => cap),
-      ...Array.from({ length: Math.max(0, poolDesired - live.size) }, () => cap),
+    interface Bin { total: number; freeRoom: number; paid: boolean }
+    const bins: Bin[] = [
+      ...hosts.filter((h) => h.state === 'ready' && h.online).map((h) => {
+        const u = used.get(h.id)
+        return { total: Math.max(0, cap - (u?.used ?? 0)), freeRoom: Math.max(0, freeCap - (u?.freeUsed ?? 0)), paid: (u?.paid ?? 0) > 0 }
+      }),
+      ...hosts.filter((h) => h.state === 'booting' && live.has(h.id)).map(() => ({ total: cap, freeRoom: freeCap, paid: false })),
+      ...Array.from({ length: Math.max(0, poolDesired - live.size) }, () => ({ total: cap, freeRoom: freeCap, paid: false })),
     ]
-    const fresh: number[] = []
-    const items = waiting.map((t) => ({ t, slots: planOf(t.plan).slots })).sort((a, b) => b.slots - a.slots)
-    for (const { t, slots } of items) {
-      if (slots > cap) {
-        await this.alertOnce(`oversize.${t.id}`, `team ${t.slug} does not fit on any host`, `It needs ${slots} slots; a host has TDCLOUD_MAX_TEAMS_PER_HOST = ${cap}.`)
+    const fresh: Bin[] = []
+    let paidFresh = 0
+    const unplaced: TeamRow[] = []
+    const items = waiting.map((t) => ({ t, slots: planOf(t.plan).slots, isFree: t.plan === 'free' }))
+      .sort((a, b) => Number(a.isFree) - Number(b.isFree) || b.slots - a.slots)
+    for (const { t, slots, isFree } of items) {
+      if (slots > cap || (isFree && slots > freeCap + EPS)) {
+        await this.alertOnce(`oversize.${t.id}`, `team ${t.slug} does not fit on any host`, `It needs ${slots} slots; a host has TDCLOUD_MAX_TEAMS_PER_HOST = ${cap}${isFree ? ` (free teams: ${fmtSlots(freeCap)})` : ''}.`)
         continue
       }
-      const pickIn = (b: number[]) => b.map((f, i) => [f, i] as const).filter(([f]) => f >= slots).sort((x, y) => x[0] - y[0])[0]?.[1]
+      const fits = (b: Bin) => b.total + EPS >= slots && (!isFree || b.freeRoom + EPS >= slots)
+      // best fit (the fullest that fits); free teams take a host with paid teams first
+      const pickIn = (bs: Bin[]) => bs.map((b, i) => [b, i] as const).filter(([b]) => fits(b))
+        .sort(([x], [y]) => (isFree ? Number(y.paid) - Number(x.paid) : 0) || x.total - y.total)[0]?.[1]
+      const take = (b: Bin) => { b.total -= slots; if (isFree) b.freeRoom -= slots }
       const i = pickIn(bins)
-      if (i !== undefined) { bins[i]! -= slots; continue }
+      if (i !== undefined) { take(bins[i]!); continue }
       const j = pickIn(fresh)
-      if (j !== undefined) fresh[j]! -= slots
-      else fresh.push(cap - slots)
+      if (j !== undefined) { take(fresh[j]!); continue }
+      if (isFree && poolDesired + fresh.length + 1 > limit - cfg.free.reserveHosts) { unplaced.push(t); continue }
+      const b: Bin = { total: cap, freeRoom: freeCap, paid: !isFree }
+      take(b)
+      fresh.push(b)
+      if (!isFree) paidFresh++
     }
     let need = fresh.length
-    const freeAfter = [...bins, ...fresh].reduce((a, b) => a + b, 0)
+    const freeAfter = [...bins, ...fresh].reduce((a, b) => a + b.total, 0)
     if (freeAfter < cfg.spareSlots) need += Math.ceil((cfg.spareSlots - freeAfter) / cap)
-    const limit = Math.min(cfg.maxHosts, st.max)
     let desired = poolDesired, maintained = false
     if (need > 0) {
       const target = Math.min(limit, poolDesired + need)
@@ -306,14 +339,16 @@ export class Scaler {
         audit(db, { actor: 'system', action: 'hosts.scale_out', detail: { from: poolDesired, to: target, waiting: waiting.map((t) => t.slug), spare: cfg.spareSlots } })
         this.d.log(`scaler: desired ${poolDesired} → ${target} (waiting: ${waiting.map((t) => t.slug).join(', ') || '-'})`)
       }
-      if (poolDesired + fresh.length > limit && fresh.length > 0) {
+      // paid fresh hosts come first in `fresh` (paid teams are placed first): free teams never raise this alert
+      if (poolDesired + paidFresh > limit && paidFresh > 0) {
         await this.alertOnce('limit', 'host limit reached: a team is waiting', `Teams waiting for a host: ${waiting.map((t) => t.slug).join(', ')}. The pool runs ${st.desired} host(s); the limit is ${limit} (TDCLOUD_MAX_HOSTS = ${cfg.maxHosts}, the Auto Scaling group's max = ${st.max}).\n\nThey keep waiting and start as soon as there is room: raise TDCLOUD_MAX_HOSTS (and host_max in Terraform; mind the vCPU quota), or free a slot.`)
       }
     }
-    if (poolDesired + fresh.length <= limit || fresh.length === 0) this.clear('limit')
+    if (poolDesired + paidFresh <= limit || paidFresh === 0) this.clear('limit')
 
-    // 6. scale-in: one empty host per pass, only when nobody waits and nothing was launched just now
-    if (!waiting.length && !res.launched) {
+    // 6. scale-in: one empty host per pass, only when nobody waits (free teams with no room for them do not count: an
+    //    empty host would have been room) and nothing was launched just now
+    if (waiting.length === unplaced.length && !res.launched) {
       const gone = await this.scaleIn(desired, used)
       if (gone) { res.terminated.push(gone); desired = Math.max(0, desired - 1) }
     }
@@ -342,7 +377,7 @@ export class Scaler {
   }
 
   /** Terminates the longest-empty host past the grace period, if every check agrees. Returns its id. */
-  private async scaleIn(desired: number, used: Map<string, { used: number; teams: string[] }>): Promise<string | null> {
+  private async scaleIn(desired: number, used: Map<string, HostUse>): Promise<string | null> {
     const { db, pool, cfg } = this.d
     const now = this.now(), cap = this.capacity
     const ready = db.query<HostRow, []>("SELECT * FROM hosts WHERE state = 'ready' ORDER BY empty_since, id").all()

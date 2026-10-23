@@ -15,7 +15,7 @@ import { LocalPool, LocalRunner, localDockerDriver } from './drivers/local'
 import type { Driver, HostPool } from './drivers/types'
 import { KmsKeyWrapper, LocalKeyWrapper, type KeyWrapper } from './keys'
 import { mailerFor, type Mailer } from './mailer'
-import { planOf, SLOTS_SQL } from './plans'
+import { fmtSlots, planOf, SLOTS_SQL } from './plans'
 import { MAX_BODY_BYTES, relayFromEnv } from './relay'
 import { seal, unseal } from './seal'
 import { iso } from './util'
@@ -24,8 +24,9 @@ import { makeHandler } from './web'
 const HELP = `Trina Cloud control plane
 
   serve                                   HTTP (signup, dashboard, Paddle webhook, Caddy ask) + the job loop
-  teams list | show <slug> | usage
-  teams create <slug> --owner EMAIL [--name N] [--plan team|business] [--allow-reserved]
+  teams list [--free]                     plan, state (free teams: paused, last activity), host, disk, backup
+  teams show <slug> | usage
+  teams create <slug> --owner EMAIL [--name N] [--plan team|business|free] [--allow-reserved]
                                           a team without a Paddle subscription (dogfood, pilots): provisioned now
   teams suspend <slug> | resume <slug>    stop / start the instance (audited)
   teams backup <slug>                     a backup now (product archive + sealed files) to the backup target
@@ -35,7 +36,12 @@ const HELP = `Trina Cloud control plane
   teams upgrade <slug> | --all            backup, then a new container from TDCLOUD_IMAGE on the same data
   teams retry <slug>                      provision again after a failure
   teams link <slug> <subscription_id>     attach a Paddle subscription that arrived without custom_data
-  teams set-plan <slug> team|business
+  teams set-plan <slug> team|business     (a free team upgrades through Paddle; there is no downgrade to free)
+  free stats                              free teams by state, the cap, the waitlist, slots on hosts, next deletions, cost
+  free waitlist                           confirmed sign-ups waiting for room (TDCLOUD_MAX_FREE_TEAMS)
+  free admit <email|id> [--force]         give a waitlisted sign-up its team (--force: past the cap)
+  free sweep                              one pass of the inactivity lifecycle now (the control plane runs it every minute)
+  free wake <slug>                        start a paused free team (as the Wake up button does)
   hosts list [--all]                      team hosts: state, slots used/free, teams, empty since; the pool's size and limits
   hosts scale                             one scaler pass now (the running control plane makes one every minute,
                                           every few seconds while a team waits or a host boots)
@@ -143,7 +149,7 @@ async function serve(cfg: Config) {
   cloud.log(`Trina Cloud control plane on http://${cfg.listenHost}:${server.port}  (public ${cfg.controlUrl}; teams at *.${cfg.domain}; driver ${cloud.driver.name}; mail ${cfg.mailer}; keys ${cloud.keys.kind}; backups ${cloud.target.description})`)
   if (cloud.scaler) cloud.log(`host scaler: ${cloud.scaler.pool.name}, up to ${cfg.maxHosts} hosts of ${cfg.maxTeamsPerHost} slots, ${cfg.spareSlots} spare, empty hosts go after ${dur(cfg.emptyHostGraceMs)}`)
   let busy = false
-  let lastBackupScan = 0, lastMetrics = 0, lastScale = 0
+  let lastBackupScan = 0, lastMetrics = 0, lastScale = 0, lastFree = 0
   setInterval(async () => {
     if (busy) return
     busy = true
@@ -154,6 +160,8 @@ async function serve(cfg: Config) {
         await cloud.scaler.tick().catch(() => { /* logged and alerted by the scaler */ })
       }
       await cloud.runDueJobs()
+      // the Free plan's inactivity lifecycle (free.ts): every minute, or more often with a short activity interval
+      if (Date.now() - lastFree > Math.min(60_000, cfg.free.activityEveryMs)) { lastFree = Date.now(); await cloud.free.sweep().catch((e) => cloud.log(`free sweep: ${(e as Error).message}`)) }
       if (Date.now() - lastBackupScan > 600_000) { lastBackupScan = Date.now(); cloud.scheduleBackups() }
       if (Date.now() - lastMetrics > cfg.metricsEveryMinutes * 60_000) { lastMetrics = Date.now(); await cloud.measure() }
     } catch (e) { cloud.log(`loop: ${(e as Error).stack}`) } finally { busy = false }
@@ -161,10 +169,14 @@ async function serve(cfg: Config) {
   return new Promise(() => {})
 }
 
+const TEAM_HEAD = `${'TEAM'.padEnd(20)} ${'STATE'.padEnd(16)} ${'PLAN'.padEnd(9)} ${'HOST'.padEnd(20)} ${'DISK'.padEnd(14)} ${'LAST ACTIVITY'.padEnd(20)} ${'LAST BACKUP'.padEnd(20)} URL`
 function teamLine(c: Cloud, t: TeamRow) {
   const gb = t.disk_bytes != null ? `${(t.disk_bytes / 1024 ** 3).toFixed(2)}/${planOf(t.plan).storageGb} GB` : '-'
   const host = t.host ?? (t.waiting_since ? `(waiting ${Math.round((Date.now() - t.waiting_since) / 60_000)} min)` : '-')
-  return `${t.slug.padEnd(20)} ${t.status.padEnd(16)} ${t.plan.padEnd(9)} ${host.padEnd(20)} ${gb.padEnd(14)} backup ${iso(t.last_backup_at)}  ${c.url(t)}`
+  // free teams: paused (inactive), a wake still waiting for use, and when people last used it (paid: not tracked)
+  const state = c.free.isPaused(t) ? 'paused' : t.plan === 'free' && t.woke_at && t.status === 'active' ? 'woken' : t.status
+  const activity = t.plan === 'free' ? iso(t.last_activity_at) : '-'
+  return `${t.slug.padEnd(20)} ${state.padEnd(16)} ${t.plan.padEnd(9)} ${host.padEnd(20)} ${gb.padEnd(14)} ${activity.padEnd(20)} ${iso(t.last_backup_at).padEnd(20)} ${c.url(t)}`
 }
 
 const dur = (ms: number) => (ms < 120_000 ? `${Math.round(ms / 1000)}s` : ms < 7200_000 ? `${Math.round(ms / 60_000)}m` : `${(ms / 3600_000).toFixed(1)}h`)
@@ -182,7 +194,7 @@ async function hostsList(c: Cloud, all: boolean) {
     pool = `desired ${st.desired}, running ${st.instances.filter((i) => i.lifecycle !== 'terminating').length}, max ${Math.min(cfg.maxHosts, st.max)} (TDCLOUD_MAX_HOSTS ${cfg.maxHosts}, pool max ${st.max})`
   } catch (e) { pool = `pool not readable: ${(e as Error).message}` }
   console.log(`pool       ${s.pool.name}: ${pool}`)
-  console.log(`per host   ${cfg.maxTeamsPerHost} slots (Team 1, Business 2); spare slots ${cfg.spareSlots}; empty hosts go after ${dur(cfg.emptyHostGraceMs)}; boot timeout ${dur(cfg.hostBootTimeoutMs)}`)
+  console.log(`per host   ${cfg.maxTeamsPerHost} slots (Team 1, Business 2, Free ${planOf('free').slots}; free teams at most ${fmtSlots(s.freeCapacity)}, never the last ${cfg.free.reserveHosts} host(s)); spare slots ${cfg.spareSlots}; empty hosts go after ${dur(cfg.emptyHostGraceMs)}; boot timeout ${dur(cfg.hostBootTimeoutMs)}`)
   if (s.bootFailures) console.log(`boot fails ${s.bootFailures} in a row${s.bootFailures >= 3 ? ' — scale-out STOPPED (hosts resume)' : ''}`)
   const waiting = s.waiting()
   console.log(`waiting    ${waiting.length ? waiting.map((t) => `${t.slug} (${t.waiting_since ? dur(Date.now() - t.waiting_since) : 'new'})`).join(', ') : '-'}`)
@@ -192,7 +204,7 @@ async function hostsList(c: Cloud, all: boolean) {
   for (const h of rows) {
     const empty = h.empty_since != null ? `${iso(h.empty_since)} (${dur(Date.now() - h.empty_since)})` : '-'
     const extra = [h.teams.join(','), h.keep ? 'KEEP' : '', h.online ? '' : 'offline', h.note ?? ''].filter(Boolean).join('  ')
-    console.log(`${h.id.padEnd(21)} ${h.state.padEnd(11)} ${`${h.used}/${h.capacity}`.padEnd(7)} ${String(h.free).padEnd(5)} ${empty.padEnd(28)} ${(h.public_ip ?? '-').padEnd(16)} ${extra}`)
+    console.log(`${h.id.padEnd(21)} ${h.state.padEnd(11)} ${`${fmtSlots(h.used)}/${h.capacity}`.padEnd(7)} ${fmtSlots(h.free).padEnd(5)} ${empty.padEnd(28)} ${(h.public_ip ?? '-').padEnd(16)} ${extra}`)
   }
   if (!rows.length) console.log('(no hosts)')
 }
@@ -217,7 +229,8 @@ export async function main(argv: string[]): Promise<number> {
   const team = () => { const t = rest[0] ? teamBySlug(cloud.db, rest[0]) : null; if (!t) throw new CloudError('usage', `no team ${rest[0] ?? '(give a slug)'}`); return t }
   switch (`${cmd} ${sub ?? ''}`.trim()) {
     case 'teams list':
-      for (const t of cloud.db.query<TeamRow, []>('SELECT * FROM teams ORDER BY id').all()) console.log(teamLine(cloud, t))
+      console.log(TEAM_HEAD)
+      for (const t of cloud.db.query<TeamRow, []>(`SELECT * FROM teams ${rest.includes('--free') ? "WHERE plan = 'free'" : ''} ORDER BY id`).all()) console.log(teamLine(cloud, t))
       return 0
     case 'teams show': {
       const t = team()
@@ -230,9 +243,9 @@ export async function main(argv: string[]): Promise<number> {
       const owner = take(rest, '--owner'), name = take(rest, '--name'), plan = take(rest, '--plan')
       const allowReserved = rest.includes('--allow-reserved')
       const slug = rest.find((a) => !a.startsWith('--'))
-      if (!slug || !owner) throw new CloudError('usage', 'teams create <slug> --owner EMAIL [--name NAME] [--plan team|business] [--allow-reserved]')
-      if (plan && plan !== 'team' && plan !== 'business') throw new CloudError('usage', '--plan team or business')
-      const t = await cloud.adminCreateTeam({ email: owner, slug, name, plan: plan as 'team' | 'business' | undefined, allowReserved, actor })
+      if (!slug || !owner) throw new CloudError('usage', 'teams create <slug> --owner EMAIL [--name NAME] [--plan team|business|free] [--allow-reserved]')
+      if (plan && plan !== 'team' && plan !== 'business' && plan !== 'free') throw new CloudError('usage', '--plan team, business or free')
+      const t = await cloud.adminCreateTeam({ email: owner, slug, name, plan: plan as 'team' | 'business' | 'free' | undefined, allowReserved, actor })
       // the running control plane's job loop provisions it (running the job here too would race with it)
       console.error(`${t.slug}: queued; waiting for the control plane to provision it…`)
       const deadline = Date.now() + 15 * 60_000
@@ -257,7 +270,8 @@ export async function main(argv: string[]): Promise<number> {
     case 'teams link': { const t = team(); updateTeam(cloud.db, t.id, { subscription_id: rest[1] ?? null }); console.log(`linked ${t.slug} to ${rest[1]}; the next event for it applies`); return 0 }
     case 'teams set-plan': {
       const t = team(); const plan = rest[1] === 'business' ? 'business' : rest[1] === 'team' ? 'team' : null
-      if (!plan) throw new CloudError('usage', 'team or business')
+      if (!plan) throw new CloudError('usage', 'team or business (there is no downgrade to free)')
+      if (t.plan === 'free') throw new CloudError('usage', `${t.slug} is a free team: it upgrades through a Paddle checkout from the dashboard (or teams link + an event), so billing and plan agree`)
       updateTeam(cloud.db, t.id, { plan }); cloud.enqueue('limits', t.id); await cloud.runDueJobs(); console.log(`${t.slug}: ${plan}`); return 0
     }
     case 'teams delete': {
@@ -301,6 +315,38 @@ export async function main(argv: string[]): Promise<number> {
       cloud.db.query('VACUUM INTO ?').run(out)
       fs.chmodSync(out, 0o600)
       console.log(`snapshot: ${out}`)
+      return 0
+    }
+    case 'free stats': {
+      const st = cloud.free.stats()
+      if (rest.includes('--json')) { console.log(JSON.stringify(st, null, 2)); return 0 }
+      console.log(`free teams     ${st.total} of ${st.cap} (TDCLOUD_MAX_FREE_TEAMS): ${st.active} active, ${st.paused} paused, ${st.provisioning} starting${st.other ? `, ${st.other} other` : ''}`)
+      console.log(`also           ${st.deleted} deleted, ${st.upgraded} upgraded to a paid plan`)
+      console.log(`sign-ups       ${st.waitlist} on the waitlist, ${st.unconfirmed} waiting for email confirmation`)
+      console.log(`idle rules     warn after ${dur(cfg.free.idleWarnMs)}, pause after ${dur(cfg.free.idlePauseMs)}, delete after ${dur(cfg.free.deleteAfterMs)} paused; activity read every ${dur(cfg.free.activityEveryMs)}`)
+      console.log(`hosts          ${st.hosts.length ? st.hosts.map((h) => `${h.host} ${fmtSlots(h.free_slots)} free of ${fmtSlots(h.used)}/${h.capacity} slots`).join('; ') : '-'}`)
+      console.log(`next deletions ${st.next_deletions.length ? st.next_deletions.map((d) => `${d.slug} ${d.on}`).join(', ') : '-'}`)
+      console.log(`cost (rough)   ~$${st.est_monthly_usd}/month (active: a quarter slot + disk and backups; paused: disk and backups)`)
+      return 0
+    }
+    case 'free waitlist': {
+      const w = cloud.free.waitlist()
+      for (const s of w) console.log(`${String(s.id).padEnd(6)} ${s.email.padEnd(32)} ${iso(s.verified_at)}  ${s.name}${s.slug ? ` (${s.slug})` : ''}`)
+      if (!w.length) console.log('(nobody waiting)')
+      return 0
+    }
+    case 'free admit': {
+      if (!rest[0]) throw new CloudError('usage', 'free admit <email|id> [--force]')
+      const t = await cloud.free.admit(rest[0], actor, rest.includes('--force'))
+      console.log(`${t.slug}: queued (the control plane provisions it; the setup link goes to the owner)`)
+      return 0
+    }
+    case 'free sweep': { const r = await cloud.free.sweep(); writeAudit(cloud.db, { actor, action: 'free.sweep' }); console.log(JSON.stringify(r)); return 0 }
+    case 'free wake': {
+      const t = team()
+      if (!cloud.free.isPaused(t)) throw new CloudError('usage', `${t.slug} is not a paused free team`)
+      await cloud.free.wake(t)
+      console.log(`${t.slug}: running (pauses again after ${dur(cfg.free.wakeGraceMs)} unless someone uses it)`)
       return 0
     }
     case 'hosts list': await hostsList(cloud, rest.includes('--all')); return 0
