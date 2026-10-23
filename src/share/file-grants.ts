@@ -518,14 +518,14 @@ export function sharedFilesWithMe(w: WebCtx, a: Actor, everyone: number | null):
   const access = Access.forPerson(db, a.personId)
   const r = new Rights(db)
   const out: FileSharedItem[] = []
-  for (const x of best.values()) {
+  for (const [uid, x] of best) {
     if (x.folder_id == null || x.name == null) continue
     const f = r.folders.get(x.folder_id)
     const fvp = f ? r.vpath(f) : null
     if (!f || !fvp) continue
     const vp = `${fvp}/${x.name.normalize('NFC')}`
     const e = access.lookup(splitVirtual(vp))
-    if (!e || e.kind !== 'file' || String(e.dev) !== x.dev || String(e.ino) !== x.ino) continue
+    if (!e || e.kind !== 'file' || String(e.dev) !== x.dev || String(e.ino) !== x.ino || rowOf(db, e)?.uid !== uid) continue
     const role = roleOf(access.levelOfFile(e))
     if (!role) continue
     out.push({ kind: 'file', path: e.vpath, name: e.vpath.slice(e.vpath.lastIndexOf('/') + 1), role,
