@@ -253,6 +253,39 @@ describe('http', () => {
     const etag = h.headers.get('etag')!
     expect((await kim('GET', `${T}/r.txt`, { headers: { 'if-none-match': etag } })).status).toBe(304)
   })
+  test('If-Match / If-None-Match on changes (RFC 7232): a stale ETag never overwrites, deletes or moves', async () => {
+    const v1 = (await kim('HEAD', `${T}/r.txt`)).headers.get('etag')!
+    // someone else saves a new version: the ETag the client holds is stale now
+    const put2 = await kim('PUT', `${T}/r.txt`, { body: 'second' })
+    const v2 = put2.headers.get('etag')!
+    expect([put2.status, v2 !== v1]).toEqual([204, true])
+    const stale = await kim('PUT', `${T}/r.txt`, { body: 'lost update', headers: { 'if-match': v1 } })
+    expect([stale.status, stale.headers.get('etag')]).toEqual([412, v2])
+    expect((await kim('GET', `${T}/r.txt`)).text).toBe('second')
+    // strong comparison: a weak tag never matches; a list matches when one of them does; * = it is there
+    expect((await kim('PUT', `${T}/r.txt`, { body: 'x', headers: { 'if-match': `W/${v2}` } })).status).toBe(412)
+    const ok = await kim('PUT', `${T}/r.txt`, { body: 'third', headers: { 'if-match': `"nope", ${v2}` } })
+    expect(ok.status).toBe(204)
+    expect((await kim('PUT', `${T}/r.txt`, { body: 'fourth', headers: { 'if-match': '*' } })).status).toBe(204)
+    expect((await kim('PUT', `${T}/new.txt`, { body: 'x', headers: { 'if-match': '*' } })).status).toBe(412)
+    expect((await kim('GET', `${T}/new.txt`)).status).toBe(404)
+    // If-None-Match: * creates only; the current ETag (weak or strong) refuses
+    expect((await kim('PUT', `${T}/new.txt`, { body: 'a', headers: { 'if-none-match': '*' } })).status).toBe(201)
+    expect((await kim('PUT', `${T}/new.txt`, { body: 'b', headers: { 'if-none-match': '*' } })).status).toBe(412)
+    const vn = (await kim('HEAD', `${T}/new.txt`)).headers.get('etag')!
+    expect((await kim('PUT', `${T}/new.txt`, { body: 'b', headers: { 'if-none-match': `W/${vn}` } })).status).toBe(412)
+    expect((await kim('PUT', `${T}/new.txt`, { body: 'b', headers: { 'if-none-match': v1 } })).status).toBe(204)
+    expect((await kim('GET', `${T}/new.txt`)).text).toBe('b')
+    // DELETE and MOVE: the source's ETag
+    const cur = (await kim('HEAD', `${T}/r.txt`)).headers.get('etag')!
+    expect((await kim('DELETE', `${T}/r.txt`, { headers: { 'if-match': v2 } })).status).toBe(412)
+    expect((await kim('MOVE', `${T}/r.txt`, { headers: { ...dest(`${T}/m.txt`), 'if-match': v2 } })).status).toBe(412)
+    expect((await kim('GET', `${T}/r.txt`)).text).toBe('fourth')
+    expect((await kim('MOVE', `${T}/r.txt`, { headers: { ...dest(`${T}/m.txt`), 'if-match': cur } })).status).toBe(201)
+    const vm = (await kim('HEAD', `${T}/m.txt`)).headers.get('etag')!
+    expect((await kim('DELETE', `${T}/m.txt`, { headers: { 'if-match': vm } })).status).toBe(204)
+    expect((await kim('GET', `${T}/m.txt`)).status).toBe(404)
+  })
   test('file bytes are never rendered on this origin (the app’s session lives here)', async () => {
     await kim('PUT', `${T}/x.html`, { body: '<script>alert(1)</script>' })
     const g = await kim('GET', `${T}/x.html`)
