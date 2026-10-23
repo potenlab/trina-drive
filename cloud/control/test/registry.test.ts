@@ -50,12 +50,16 @@ describe('control route registry', () => {
     expect((await env.call('POST', '/api/team-callback/x', { headers: { origin: 'https://acme.cloud.example.com' } })).status).toBe(200)
   })
 
-  test('nothing is registered yet: the built-in pages answer as before', async () => {
+  test('the console registers its pages (D1); web.ts keeps the ones nobody took over', async () => {
     env = setup()
-    expect(CONTROL_ROUTES).toEqual([])
+    expect(CONTROL_ROUTES.length).toBeGreaterThan(0)
+    // the console's Teams page: signed out → its sign-in page
     const r = await env.call('GET', '/')
-    expect(r.status).toBe(200)
-    expect(await r.text()).toContain('Trina Cloud')
+    expect(r.status).toBe(303)
+    expect(r.headers.get('location')).toBe('/login')
+    expect(await (await env.call('GET', '/login')).text()).toContain('Trina Cloud')
+    // web.ts's own Free page still answers
+    expect((await env.call('GET', '/free')).status).toBe(200)
   })
 })
 

@@ -21,7 +21,8 @@ const clock = () => at
 const later = (ms: number) => { at += ms }
 function start(e: Record<string, string> = {}, pool = false) {
   at = Date.now()
-  env = setup(e, { clock, pool })
+  // the lifecycle under test needs free teams to exist: the production default (0, plan 10.1 / O2) closes sign-up
+  env = setup({ TDCLOUD_MAX_FREE_TEAMS: '50', ...e }, { clock, pool })
   return env
 }
 const team = (slug: string) => teamBySlug(env.cloud.db, slug)!
@@ -340,15 +341,15 @@ describe('upgrade', () => {
     later(7 * DAY)
     await sweep()
     expect(env.cloud.free.isPaused(team('grow'))).toBe(true)
-    // the owner signs in with a link and sees the upgrade buttons for this team
+    // the owner signs in with a link and sees the paused team in the console (payment in the console is "coming soon"
+    // in v1, plan 10.1: the upgrade arrives as a Paddle event for this team, as before)
     await env.call('POST', '/api/login/link', { body: { email: 'owner@grow.test' } })
     const lt = env.mailer.sent.at(-1)!.text.match(/login\/link\?token=(\S+)/)![1]
     const l = await env.call('POST', '/login/link/confirm', { body: { token: lt }, headers: { origin: 'https://cloud.example.com' } })
     expect(l.status).toBe(303)
-    const dash = await (await env.call('GET', '/dashboard', { headers: { cookie: l.headers.get('set-cookie')!.split(';')[0]! } })).text()
-    expect(dash).toContain(`data-team="${t0.public_id}"`)
-    expect(dash).toContain('Upgrade to Team (monthly)')
-    expect(dash).toContain('Upgrade to Business (monthly)')
+    const dash = await (await env.call('GET', '/', { headers: { cookie: l.headers.get('set-cookie')!.split(';')[0]! } })).text()
+    expect(dash).toContain('href="/t/grow"')
+    expect(dash).toContain('Paused')
     env.cloud.db.query("UPDATE jobs SET done_at = 1 WHERE kind = 'wake'").run() // the sign-in's wake: not needed here
 
     expect((await webhook(env, event('subscription.created', sub(t0.public_id)))).status).toBe(200)
@@ -448,7 +449,7 @@ describe('settings', () => {
   test('defaults and refused combinations', async () => {
     const { loadConfig } = await import('../src/config')
     const f = loadConfig({}).free
-    expect([f.maxTeams, f.hostShare, f.reserveHosts, f.idleWarnMs, f.idlePauseMs, f.deleteAfterMs, f.deleteWarnMs, f.finalBackupKeepMs, f.verifyTtlMs]).toEqual([50, 0.5, 1, 6 * DAY, 7 * DAY, 90 * DAY, [60 * DAY, 83 * DAY], 30 * DAY, 24 * HOUR])
+    expect([f.maxTeams, f.hostShare, f.reserveHosts, f.idleWarnMs, f.idlePauseMs, f.deleteAfterMs, f.deleteWarnMs, f.finalBackupKeepMs, f.verifyTtlMs]).toEqual([0, 0.5, 1, 6 * DAY, 7 * DAY, 90 * DAY, [60 * DAY, 83 * DAY], 30 * DAY, 24 * HOUR])
     expect(loadConfig({ TDCLOUD_FREE_IDLE_PAUSE: '40s', TDCLOUD_FREE_IDLE_WARN: '25s' }).free.idlePauseMs).toBe(40_000)
     expect(() => loadConfig({ TDCLOUD_FREE_IDLE_WARN: '8d' })).toThrow(/shorter/)
     expect(() => loadConfig({ TDCLOUD_FREE_HOST_SHARE: '0' })).toThrow(/SHARE/)

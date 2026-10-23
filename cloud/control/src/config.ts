@@ -114,6 +114,10 @@ export interface Config {
   metricsEveryMinutes: number
   /** the Free plan (free.ts; README "Free plan") */
   free: FreeConfig
+  /** Trina Cloud SSO (docs/SSO-CONTRACT.md): teams get the TDRIVE_CLOUD_* env and TDRIVE_SSO_ONLY, the "ready" mail
+   * links to the console instead of carrying a setup token, membership is synced to each drive. TDCLOUD_SSO=0 is the
+   * pre-console behaviour (a rollback with an older product image). Default: on, except with the test driver. */
+  sso: boolean
 }
 
 export interface FreeConfig {
@@ -265,6 +269,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     },
     metricsEveryMinutes: int(env.TDCLOUD_METRICS_EVERY_MINUTES, 15, 'TDCLOUD_METRICS_EVERY_MINUTES'),
     free: freeConfig(env),
+    sso: env.TDCLOUD_SSO !== undefined && env.TDCLOUD_SSO !== '' ? env.TDCLOUD_SSO === '1' : driver !== 'fake',
   }
 
   if (!mailAddress(cfg.teamMailFrom)) throw new ConfigError(`TDCLOUD_TEAM_MAIL_FROM is not a mail address: ${cfg.teamMailFrom}`)
@@ -290,7 +295,8 @@ function freeConfig(env: Record<string, string | undefined>): FreeConfig {
   const warns = (env.TDCLOUD_FREE_DELETE_WARNINGS || '60d,83d').split(',').map((x) => x.trim()).filter(Boolean)
     .map((x) => parseDuration(x, x, 'TDCLOUD_FREE_DELETE_WARNINGS', 'd')).sort((a, b) => a - b)
   const f: FreeConfig = {
-    maxTeams: int(env.TDCLOUD_MAX_FREE_TEAMS, 50, 'TDCLOUD_MAX_FREE_TEAMS'),
+    // 0 = public free sign-up closed (owner decision O2, plan 10.1): confirmed sign-ups join the waitlist
+    maxTeams: int(env.TDCLOUD_MAX_FREE_TEAMS, 0, 'TDCLOUD_MAX_FREE_TEAMS'),
     hostShare: share,
     reserveHosts: int(env.TDCLOUD_FREE_RESERVE_HOSTS, 1, 'TDCLOUD_FREE_RESERVE_HOSTS'),
     verifyTtlMs: parseDuration(env.TDCLOUD_FREE_VERIFY_TTL, '24h', 'TDCLOUD_FREE_VERIFY_TTL'),

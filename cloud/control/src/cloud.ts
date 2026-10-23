@@ -25,6 +25,11 @@ import { generateTeamKey } from './seal'
 import { slugProblem } from './slug'
 import { teamNet, type TeamNet } from './teamnet'
 import { DAY, EMAIL_RE, HOUR, iso, now, publicId, random, sha256 } from './util'
+import { Invites } from './invites'
+import { SsoKeys } from './sso'
+import { MemberSync } from './sync'
+import { TeamMembers } from './team-members'
+import { ConsoleMfa } from './totp'
 import fs from 'node:fs'
 
 export class CloudError extends Error {
@@ -49,7 +54,18 @@ export const MAX_TEAMS_PER_USER = 5
 export const LOGIN_LINK_TTL = 15 * 60_000
 export const JOB_MAX_ATTEMPTS = 5
 
-type JobKind = 'provision' | 'suspend' | 'resume' | 'limits' | 'grace_check' | 'delete' | 'backup' | 'wake'
+type JobKind = 'provision' | 'suspend' | 'resume' | 'limits' | 'grace_check' | 'delete' | 'backup' | 'wake' | 'sync_members' | 'usage'
+
+/** How a console session was authenticated (the SSO assertion's amr). */
+export type SessionAmr = ('pwd' | 'link' | 'totp')[]
+export interface ConsoleSession {
+  userId: number; csrf: string; idHash: string; email: string; verified: boolean
+  publicId: string | null; name: string | null; amr: SessionAmr
+  /** when the password or the email link was last used in this session (ms) */
+  authTime: number
+  /** when an authenticator code was last checked in this session (ms; null = never) */
+  totpAt: number | null
+}
 
 export class Cloud {
   readonly cfg: Config; readonly db: DB; readonly driver: Driver; readonly mailer: Mailer; readonly keys: KeyWrapper; readonly target: BackupTarget
@@ -59,12 +75,23 @@ export class Cloud {
   readonly free: FreeTier
   /** the time the Free plan's lifecycle and the scaler go by (tests move it) */
   readonly clock: () => number
+  /** the console (workstream D1): team membership, invites, member sync to the drives, SSO keys, TOTP */
+  readonly members: TeamMembers
+  readonly invites: Invites
+  readonly sync: MemberSync
+  readonly sso: SsoKeys
+  readonly mfa: ConsoleMfa
   constructor(d: Deps) {
     this.cfg = d.cfg; this.db = d.db; this.driver = d.driver; this.mailer = d.mailer; this.keys = d.keys; this.target = d.target
     this.log = d.log ?? ((s) => console.log(`${new Date().toISOString()} ${s}`))
     this.clock = d.clock ?? Date.now
     this.scaler = d.pool ? new Scaler({ cfg: d.cfg, db: d.db, pool: d.pool, alert: (s, t) => this.alertOps(s, t), log: this.log, clock: d.clock }) : null
     this.free = new FreeTier(this)
+    this.members = new TeamMembers(this)
+    this.invites = new Invites(this)
+    this.sync = new MemberSync(this)
+    this.sso = new SsoKeys(this)
+    this.mfa = new ConsoleMfa(this)
   }
 
   // ---------------------------------------------------------------- accounts
@@ -80,7 +107,7 @@ export class Cloud {
       else await this.mailer.send({ to: email, subject: 'Your Trina Cloud account', text: `Someone (maybe you) tried to sign up with this address. You already have an account: sign in at ${this.cfg.controlUrl}/login\n\nIf this wasn't you, you can ignore this mail.` })
       return { userId: existing.id }
     }
-    const userId = Number(this.db.query('INSERT INTO users (email, password_hash, created_at) VALUES (?, ?, ?)').run(email, await hashPassword(pw), now()).lastInsertRowid)
+    const userId = Number(this.db.query('INSERT INTO users (email, password_hash, created_at, public_id, password_set) VALUES (?, ?, ?, ?, 1)').run(email, await hashPassword(pw), now(), publicId('usr')).lastInsertRowid)
     audit(this.db, { actor, action: 'user.signup', detail: { user: userId } })
     await this.sendVerify(userId, email)
     return { userId }
@@ -107,14 +134,30 @@ export class Cloud {
     const u = this.db.query<{ id: number; password_hash: string }, [string]>('SELECT id, password_hash FROM users WHERE email = ?').get(email)
     const ok = await verifyPassword(typeof password === 'string' ? password : '', u?.password_hash)
     if (!ok || !u) throw new CloudError('bad_login', 'wrong email or password', 401)
-    const cookie = random(32), csrf = random(24)
-    this.db.query('INSERT INTO sessions (id_hash, user_id, csrf, created_at, expires_at) VALUES (?, ?, ?, ?, ?)').run(sha256(cookie), u.id, csrf, now(), now() + SESSION_TTL)
-    return { cookie, csrf, userId: u.id }
+    if (this.mfa.enabled(u.id)) throw new CloudError('totp_required', 'this account uses two-step verification: sign in on the console page', 401)
+    return { ...this.startSession(u.id, ['pwd']), userId: u.id }
+  }
+
+  /** The account for an email + password, or 401 (same time and answer for an unknown email). */
+  async checkPassword(emailIn: unknown, password: unknown): Promise<number> {
+    const email = typeof emailIn === 'string' ? emailIn.trim().toLowerCase() : ''
+    const u = this.db.query<{ id: number; password_hash: string }, [string]>('SELECT id, password_hash FROM users WHERE email = ?').get(email)
+    const ok = await verifyPassword(typeof password === 'string' ? password : '', u?.password_hash)
+    if (!ok || !u) throw new CloudError('bad_login', 'wrong email or password', 401)
+    return u.id
+  }
+
+  /** A new console session (the cookie value is returned once; only its hash is kept). */
+  startSession(userId: number, amr: SessionAmr, ip: string | null = null): { cookie: string; csrf: string } {
+    const cookie = random(32), csrf = random(24), t = now()
+    this.db.query('INSERT INTO sessions (id_hash, user_id, csrf, created_at, expires_at, amr, auth_time, totp_at, last_seen_at, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(sha256(cookie), userId, csrf, t, t + SESSION_TTL, JSON.stringify(amr), t, amr.includes('totp') ? t : null, t, ip)
+    return { cookie, csrf }
   }
 
   /** A one-time sign-in link by mail (15 minutes): how owners of free teams (who never chose a password) reach the
    * dashboard; anyone may use it instead of the password. Unknown or unconfirmed addresses get nothing (same answer). */
-  async requestLoginLink(emailIn: unknown) {
+  async requestLoginLink(emailIn: unknown, next = '') {
     const email = typeof emailIn === 'string' ? emailIn.trim().toLowerCase() : ''
     if (!EMAIL_RE.test(email) || email.length > 254) throw new CloudError('bad_email', 'a valid email address is required')
     const u = this.db.query<{ id: number; verified_at: number | null }, [string]>('SELECT id, verified_at FROM users WHERE email = ?').get(email)
@@ -125,7 +168,7 @@ export class Cloud {
     audit(this.db, { actor: `user:${u.id}`, action: 'user.login_link_sent' })
     await this.mailer.send({ to: email, subject: 'Your Trina Cloud sign-in link', text: `Sign in to Trina Cloud (your teams, upgrades, waking a paused workspace):
 
-${this.cfg.controlUrl}/login/link?token=${secret}
+${this.cfg.controlUrl}/login/link?token=${secret}${next ? `&next=${encodeURIComponent(next)}` : ''}
 
 The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.` })
   }
@@ -134,10 +177,18 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
     if (typeof token !== 'string' || token.length > 100) throw new CloudError('bad_link', 'this link is used, expired or wrong', 404)
     const t = this.db.query<{ id: number; user_id: number }, [string, number]>("SELECT id, user_id FROM email_tokens WHERE kind = 'login' AND secret_hash = ? AND used_at IS NULL AND expires_at > ?").get(sha256(token), now())
     if (!t || this.db.query('UPDATE email_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL').run(now(), t.id).changes !== 1) throw new CloudError('bad_link', 'this link is used, expired or wrong', 404)
-    const cookie = random(32), csrf = random(24)
-    this.db.query('INSERT INTO sessions (id_hash, user_id, csrf, created_at, expires_at) VALUES (?, ?, ?, ?, ?)').run(sha256(cookie), t.user_id, csrf, now(), now() + SESSION_TTL)
     audit(this.db, { actor: `user:${t.user_id}`, action: 'user.login_link_used' })
-    return { cookie, csrf, userId: t.user_id }
+    if (this.mfa.enabled(t.user_id)) throw new CloudError('totp_required', 'this account uses two-step verification: sign in on the console page', 401)
+    return { ...this.startSession(t.user_id, ['link']), userId: t.user_id }
+  }
+
+  /** The email link's account (used up), for the console's two-step sign-in. */
+  useLoginLink(token: unknown): number {
+    if (typeof token !== 'string' || token.length > 100) throw new CloudError('bad_link', 'this link is used, expired or wrong', 404)
+    const t = this.db.query<{ id: number; user_id: number }, [string, number]>("SELECT id, user_id FROM email_tokens WHERE kind = 'login' AND secret_hash = ? AND used_at IS NULL AND expires_at > ?").get(sha256(token), now())
+    if (!t || this.db.query('UPDATE email_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL').run(now(), t.id).changes !== 1) throw new CloudError('bad_link', 'this link is used, expired or wrong', 404)
+    audit(this.db, { actor: `user:${t.user_id}`, action: 'user.login_link_used' })
+    return t.user_id
   }
 
   /** The owner signed in: their paused free teams wake up (README "Free plan"). */
@@ -145,11 +196,22 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
     for (const t of this.teamsOf(userId)) if (this.free.isPaused(t)) this.free.requestWake(t, `user:${userId}`)
   }
 
-  session(cookie: string | undefined): { userId: number; csrf: string; idHash: string; email: string; verified: boolean } | null {
+  /** The session of a console cookie value (routes/console-http.ts readSessionCookie). A value tagged `plain:` came in
+   * the unprefixed cookie: accepted only when the console is not on https (dev); on https only the __Host- cookie
+   * counts, so a same-name cookie another subdomain of the site planted is ignored (review #10). */
+  session(cookieIn: string | undefined): ConsoleSession | null {
+    let cookie = cookieIn
+    if (cookie?.startsWith('plain:')) {
+      if (this.cfg.controlUrl.startsWith('https://')) return null
+      cookie = cookie.slice(6)
+    }
     if (!cookie || cookie.length > 100) return null
-    const s = this.db.query<{ id_hash: string; user_id: number; csrf: string; email: string; verified_at: number | null }, [string, number]>(
-      'SELECT s.id_hash, s.user_id, s.csrf, u.email, u.verified_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ?').get(sha256(cookie), now())
-    return s ? { userId: s.user_id, csrf: s.csrf, idHash: s.id_hash, email: s.email, verified: s.verified_at != null } : null
+    const s = this.db.query<{ id_hash: string; user_id: number; csrf: string; email: string; verified_at: number | null; public_id: string | null; name: string | null; amr: string | null; auth_time: number | null; created_at: number; totp_at: number | null }, [string, number]>(
+      'SELECT s.id_hash, s.user_id, s.csrf, u.email, u.verified_at, u.public_id, u.name, s.amr, s.auth_time, s.created_at, s.totp_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ?').get(sha256(cookie), now())
+    if (!s) return null
+    let amr: SessionAmr = ['pwd']
+    try { if (s.amr) amr = JSON.parse(s.amr) } catch { /* the default */ }
+    return { userId: s.user_id, csrf: s.csrf, idHash: s.id_hash, email: s.email, verified: s.verified_at != null, publicId: s.public_id, name: s.name, amr, authTime: s.auth_time ?? s.created_at, totpAt: s.totp_at }
   }
   logout(idHash: string) { this.db.query('UPDATE sessions SET revoked_at = ? WHERE id_hash = ?').run(now(), idHash) }
 
@@ -171,6 +233,7 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
         const number = (this.db.query<{ n: number | null }, []>('SELECT max(number) AS n FROM teams').get()?.n ?? 0) + 1
         const id = Number(this.db.query('INSERT INTO teams (public_id, slug, name, owner_user_id, plan, status, number, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
           .run(publicId('team'), slug, name, userId, plan, 'pending_payment', number, now(), now()).lastInsertRowid)
+        this.members.addOwner(id, userId)
         return teamById(this.db, id)!
       })()
       audit(this.db, { actor: `user:${userId}`, action: 'team.create', teamId: t.id, detail: { slug, plan } })
@@ -195,7 +258,7 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
     let user = this.db.query<{ id: number }, [string]>('SELECT id FROM users WHERE email = ?').get(email)
     if (!user) {
       // an unusable password (random, never shown); the account exists so the team has an owner for its mail
-      const id = Number(this.db.query('INSERT INTO users (email, password_hash, verified_at, created_at) VALUES (?, ?, ?, ?)').run(email, await hashPassword(random(32)), now(), now()).lastInsertRowid)
+      const id = Number(this.db.query('INSERT INTO users (email, password_hash, verified_at, created_at, public_id, password_set) VALUES (?, ?, ?, ?, ?, 0)').run(email, await hashPassword(random(32)), now(), now(), publicId('usr')).lastInsertRowid)
       audit(this.db, { actor: o.actor, action: 'user.created_by_admin', detail: { user: id } })
       user = { id }
     }
@@ -209,6 +272,7 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
         const number = (this.db.query<{ n: number | null }, []>('SELECT max(number) AS n FROM teams').get()?.n ?? 0) + 1
         const id = Number(this.db.query('INSERT INTO teams (public_id, slug, name, owner_user_id, plan, status, number, sub_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
           .run(publicId('team'), slug, name, user!.id, plan, 'provisioning', number, plan === 'free' ? 'free' : 'complimentary', now(), now()).lastInsertRowid)
+        this.members.addOwner(id, user!.id)
         return teamById(this.db, id)!
       })()
     } catch (e) {
@@ -220,7 +284,8 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
     return t
   }
 
-  teamsOf(userId: number) { return this.db.query<TeamRow, [number]>("SELECT * FROM teams WHERE owner_user_id = ? AND status != 'deleted' ORDER BY id").all(userId) }
+  /** Teams this account is an active member of (any role; the console's team list). */
+  teamsOf(userId: number): TeamRow[] { return this.members.teamsOf(userId) }
   ownerEmail(t: TeamRow) { return this.db.query<{ email: string }, [number]>('SELECT email FROM users WHERE id = ?').get(t.owner_user_id)!.email }
   url(t: Pick<TeamRow, 'slug'>) { return teamUrl(this.cfg, t.slug) }
 
@@ -228,8 +293,28 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
     const plan = planOf(t.plan), net = teamNet(this.cfg.teamSubnets, t.number)
     return {
       slug: t.slug, number: t.number, uid: this.cfg.uidBase + t.number, url: this.url(t), plan, net, image: this.cfg.image,
-      env: teamEnv(this.cfg, t.public_id, plan, net),
+      env: teamEnv(this.cfg, t.public_id, plan, net, this.cfg.sso ? { keys: this.sso.published() } : undefined),
     }
+  }
+
+  /** The spec for a driver call that writes the team's env (create, recreate, setLimits): the SSO signing key exists,
+   * and a new team callback token goes into the env while the console keeps its sha256 (the previous one stays valid
+   * until the next write, so a failed write does not lock the drive out; contract "Invite from the drive"). Driver
+   * calls that only start, stop or read use spec(). */
+  async writeSpec(t: TeamRow): Promise<TeamSpec> {
+    if (!this.cfg.sso) return this.spec(t)
+    await this.sso.ensure()
+    const token = `tdcb_${random(32)}`
+    this.db.query('UPDATE teams SET callback_prev_hash = callback_hash, callback_hash = ? WHERE id = ?').run(sha256(token), t.id)
+    const s = this.spec(t)
+    return { ...s, env: { ...s.env, TDRIVE_CLOUD_CALLBACK_TOKEN: token } }
+  }
+
+  /** The team a callback token belongs to (current or previous hash), or null. */
+  teamByCallbackToken(token: string): TeamRow | null {
+    if (!/^tdcb_[A-Za-z0-9_-]{20,100}$/.test(token)) return null
+    const h = sha256(token)
+    return this.db.query<TeamRow, [string, string]>("SELECT * FROM teams WHERE (callback_hash = ? OR callback_prev_hash = ?) AND status != 'deleted'").get(h, h)
   }
 
   /** May Caddy get a certificate for this host name / route to it? (on-demand TLS `ask`) */
@@ -353,6 +438,15 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
         const msg = (e as Error).message + ((e as { detail?: string }).detail ? `\n${(e as { detail?: string }).detail}` : '')
         const attempts = j.attempts + 1
         this.log(`job ${j.kind} team ${j.team_id} failed (attempt ${attempts}): ${msg}`)
+        if (j.kind === 'sync_members') {
+          // review #5: a membership change (a removal above all) is retried until the drive takes it, with backoff;
+          // Members shows it in red meanwhile and ops hear about it once, at the fifth failure
+          this.sync.failed(j.team_id, msg)
+          this.db.query('UPDATE jobs SET attempts = ?, last_error = ?, run_at = ? WHERE id = ?').run(attempts, msg.slice(0, 4000), now() + Math.min(30 * 60_000, 5_000 * 2 ** Math.min(attempts, 12)), j.id)
+          if (attempts === JOB_MAX_ATTEMPTS) await this.alertOps(`member sync for team ${teamById(this.db, j.team_id)?.slug ?? j.team_id} keeps failing`, `${msg}\n\nIt is retried until it succeeds (removals are not applied on the drive until then). See Members in the console, or: members sync <slug>`)
+          continue
+        }
+        if (j.kind === 'usage') { this.db.query('UPDATE jobs SET done_at = ?, attempts = ?, last_error = ? WHERE id = ?').run(now(), attempts, msg.slice(0, 4000), j.id); continue }
         if (attempts >= JOB_MAX_ATTEMPTS) {
           this.db.query('UPDATE jobs SET done_at = ?, attempts = ?, last_error = ? WHERE id = ?').run(now(), attempts, msg.slice(0, 4000), j.id)
           const t = teamById(this.db, j.team_id)
@@ -375,10 +469,10 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
       case 'suspend': return this.suspend(t, 'billing', 'system')
       case 'resume': return this.resume(t, 'system')
       case 'limits':
-        if (t.host && ['active', 'past_due'].includes(t.status)) await this.driver.setLimits(t.host, this.spec(t))
+        if (t.host && ['active', 'past_due'].includes(t.status)) { await this.driver.setLimits(t.host, await this.writeSpec(t)); await this.sync.gate(t).catch((e) => this.log(`${t.slug}: member sync after the plan change: ${(e as Error).message} (retried by its job)`)) }
         else if (t.host && t.status === 'suspended' && (await this.driver.state(t.host, t.slug)) !== 'missing') {
           // the new plan's container on the same data, left stopped like the team
-          await this.driver.recreate(t.host, this.spec(t))
+          await this.driver.recreate(t.host, await this.writeSpec(t))
           if (teamById(this.db, t.id)?.status === 'suspended') await this.driver.stop(t.host, t.slug)
         }
         return
@@ -386,6 +480,8 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
       case 'delete': return this.deleteIfDue(t)
       case 'backup': if (t.host && ['active', 'past_due'].includes(t.status)) await this.backup(t, 'scheduled', 'system'); return
       case 'wake': return this.free.wake(t)
+      case 'sync_members': await this.sync.run(t); return
+      case 'usage': return this.sync.usage(t)
     }
   }
 
@@ -402,7 +498,7 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
       updateTeam(this.db, t.id, { host })
     }
     if ((await this.driver.state(host, t.slug)) !== 'missing') await this.driver.destroy(host, t.slug)
-    const spec = this.spec(t)
+    const spec = await this.writeSpec(t)
     const r = await this.driver.create(host, spec)
     const filesKey = generateTeamKey()
     const wrapped = await this.keys.wrap(new TextEncoder().encode(JSON.stringify({ product: r.productBackupSecret, files: filesKey.secretKey })), { team: t.public_id, purpose: 'backup-keys' })
@@ -413,10 +509,15 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
     audit(this.db, { actor: 'system', action: 'team.provisioned', teamId: t.id, detail: { host, driver: this.driver.name, plan: t.plan, keys: this.keys.kind } })
     this.log(`provisioned ${t.slug} on ${host}`)
     this.enqueue('backup', t.id, now() + HOUR)
+    // the drive gets its members (the owner first); SSO works before that too (the assertion carries the role)
+    if (this.cfg.sso) this.sync.changed(t.id)
     // the team is up either way: a mail failure (SES sandbox, an unverified identity) must not fail the job, whose
     // retry would find the team active and do nothing. The token is gone with the failed mail: `teams resend-setup`.
     try {
-      await this.sendSetupLink(t, r.setupToken)
+      // SSO (review #6): the setup token is never mailed — people come in through the console ("Open drive"); the
+      // token made by `tdrive init` dies unused (the drive refuses /api/setup under TDRIVE_SSO_ONLY)
+      if (this.cfg.sso) await this.sendReadyMail(t)
+      else await this.sendSetupLink(t, r.setupToken)
     } catch (e) {
       audit(this.db, { actor: 'system', action: 'team.setup_link_failed', teamId: t.id, detail: { error: (e as Error).message.slice(0, 300) } })
       await this.alertOps(`setup link for ${t.slug} not sent`, `${(e as Error).message}\n\nWhen mail works: teams resend-setup ${t.slug}`)
@@ -463,6 +564,25 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
     audit(this.db, { actor: 'system', action: 'team.setup_link_sent', teamId: t.id })
   }
 
+  /** SSO mode's "ready" mail: a link to open the drive through the console, no token. */
+  private async sendReadyMail(t: TeamRow) {
+    const url = this.url(t)
+    await this.mailer.send({
+      to: this.ownerEmail(t),
+      subject: `Your Trina Drive is ready: ${url.replace(/^https:\/\//, '')}`,
+      text: [
+        `${t.name}'s Trina Drive is running at ${url}`, '',
+        `Open it from Trina Cloud (you sign in there; no separate password for the drive):`,
+        `${this.cfg.controlUrl}/open/${t.slug}`, '',
+        `Invite your team: ${this.cfg.controlUrl}/t/${t.slug}/members`,
+        `Connect Claude or ChatGPT: Settings → Connectors → Add custom connector → ${url}/mcp`, '',
+        ...(t.plan === 'free' ? [`Free plan: ${planOf('free').storageGb} GB of files and up to ${planOf('free').maxPeople} people. It pauses after ${Math.round(this.cfg.free.idlePauseMs / DAY)} days without activity (nothing is deleted; one click wakes it).`, ''] : []),
+        'As the owner you set up two-step verification (an authenticator app) the first time you open it.',
+      ].join('\n'),
+    })
+    audit(this.db, { actor: 'system', action: 'team.ready_mail_sent', teamId: t.id })
+  }
+
   async resendSetup(t: TeamRow, actor: string) {
     if (!t.host || !['active', 'past_due'].includes(t.status)) throw new CloudError('not_running', 'the team is not running')
     const token = await this.driver.reissueSetupToken(t.host, this.spec(t))
@@ -477,7 +597,7 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
     updateTeam(this.db, t.id, { status: 'suspended', suspended_at: now(), suspend_reason: reason })
     audit(this.db, { actor, action: 'team.suspend', teamId: t.id, detail: { reason } })
     // free.ts writes its own mail for an inactivity pause
-    if (reason !== 'admin' && reason !== 'inactive') void this.mailOwner(t, 'Your Trina Drive is paused', `${this.url(t)} is paused (${reason}). Nothing has been deleted. Update your subscription at ${this.cfg.controlUrl}/dashboard to turn it back on.`)
+    if (reason !== 'admin' && reason !== 'inactive' && reason !== OWNER_DELETION) void this.mailOwner(t, 'Your Trina Drive is paused', `${this.url(t)} is paused (${reason}). Nothing has been deleted. Update your subscription at ${this.cfg.controlUrl}/dashboard to turn it back on.`)
   }
 
   async resume(t: TeamRow, actor: string) {
@@ -490,6 +610,9 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
       return
     }
     await this.driver.start(t.host, this.spec(t))
+    // review #5: the drive applies the current membership (removals made while it was stopped) before the team counts
+    // as running; if it cannot, the container stops again and the job retries (the team stays paused)
+    try { await this.sync.gate(t) } catch (e) { await this.driver.stop(t.host, t.slug).catch(() => {}); throw e }
     updateTeam(this.db, t.id, { status: 'active', suspended_at: null, suspend_reason: null, grace_until: null, delete_after: null })
     this.db.query("UPDATE jobs SET done_at = ? WHERE team_id = ? AND kind = 'delete' AND done_at IS NULL").run(now(), t.id)
     audit(this.db, { actor, action: 'team.resume', teamId: t.id })
@@ -510,8 +633,21 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
 
   private async deleteIfDue(t: TeamRow) {
     const fresh = teamById(this.db, t.id)!
-    if (fresh.status !== 'suspended' || fresh.sub_status !== 'canceled' || !fresh.delete_after || fresh.delete_after > now()) return
+    if (fresh.status !== 'suspended' || !(fresh.sub_status === 'canceled' || fresh.suspend_reason === OWNER_DELETION) || !fresh.delete_after || fresh.delete_after > now()) return
     await this.deleteTeam(fresh, 'system')
+  }
+
+  /** The owner deletes the team in the console: paused now, a final backup and deletion after deleteAfterDays (the
+   * same path as a canceled subscription; operations can `teams resume` it until then). */
+  async requestDeletion(t: TeamRow, actor: string) {
+    if (['deleting', 'deleted'].includes(t.status)) return
+    const at = now() + this.cfg.deleteAfterDays * DAY
+    if (t.status === 'suspended' || !t.host) updateTeam(this.db, t.id, { status: 'suspended', suspended_at: t.suspended_at ?? now(), suspend_reason: OWNER_DELETION })
+    else await this.suspend(t, OWNER_DELETION, actor)
+    updateTeam(this.db, t.id, { delete_after: at, suspend_reason: OWNER_DELETION })
+    this.enqueue('delete', t.id, at)
+    audit(this.db, { actor, action: 'team.delete_requested', teamId: t.id, detail: { at: iso(at) } })
+    void this.mailOwner(t, `${t.name} will be deleted on ${iso(at).slice(0, 10)}`, `${this.url(t)} is paused now and will be deleted on ${iso(at).slice(0, 10)}, after a final backup. To keep it, write to ${this.cfg.opsEmail} before then.`)
   }
 
   /** Final export (kept in the backup target), then the instance and its data are removed. The slug stays taken. */
@@ -537,8 +673,9 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
     if (!t.host || !['active', 'past_due', 'suspended'].includes(t.status)) throw new CloudError('not_running', `${t.slug} has no instance`)
     const running = (await this.driver.state(t.host, t.slug)) === 'running'
     if (running) await this.backup(t, 'manual', actor)
-    await this.driver.recreate(t.host, this.spec(t))
+    await this.driver.recreate(t.host, await this.writeSpec(t))
     if (!running || t.status === 'suspended') await this.driver.stop(t.host, t.slug)
+    else await this.sync.gate(t).catch((e) => this.log(`${t.slug}: member sync after upgrade: ${(e as Error).message} (retried by its job)`))
     audit(this.db, { actor, action: 'team.upgrade', teamId: t.id, detail: { image: this.cfg.image } })
   }
 
@@ -610,6 +747,8 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
     for (const t of this.db.query<{ id: number }, [number]>("SELECT id FROM teams WHERE status IN ('active', 'past_due') AND backup_pub IS NOT NULL AND coalesce(last_backup_at, 0) < ?").all(due)) {
       if (!this.db.query("SELECT 1 FROM jobs WHERE kind = 'backup' AND team_id = ? AND done_at IS NULL").get(t.id)) this.enqueue('backup', t.id)
     }
+    // the console's periodic work rides on this tick: daily member-sync reconciliation, hourly usage
+    this.sync.schedule()
   }
 
   // ---------------------------------------------------------------- mail helpers
@@ -624,7 +763,9 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
 
 /** The team container's environment (its 0600 env file / SSM SecureString). Rewritten before every (re)start of the
  * container, so a plan change or a new setting reaches existing teams on their next recreate (upgrade, plan change). */
-export function teamEnv(cfg: Config, publicId: string, plan: PlanLimits, net: TeamNet): Record<string, string> {
+export const OWNER_DELETION = 'deletion requested by the owner'
+
+export function teamEnv(cfg: Config, publicId: string, plan: PlanLimits, net: TeamNet, sso?: { keys: { kid: string; x: string }[] }): Record<string, string> {
   const env: Record<string, string> = {
     TZ: 'UTC',
     TDRIVE_CLOUD_TEAM: publicId,
@@ -637,6 +778,13 @@ export function teamEnv(cfg: Config, publicId: string, plan: PlanLimits, net: Te
     // managed storage with the plan's quota (files, trash, earlier versions, unfinished uploads)
     TDRIVE_STORAGE: 'managed',
     TDRIVE_STORAGE_QUOTA: `${plan.storageGb}GB`,
+  }
+  // Trina Cloud SSO and member sync (docs/SSO-CONTRACT.md); TDRIVE_CLOUD_CALLBACK_TOKEN is added by Cloud.writeSpec
+  if (sso) {
+    Object.assign(env, {
+      TDRIVE_CLOUD_ISSUER: cfg.controlUrl, TDRIVE_CLOUD_CONSOLE_URL: cfg.controlUrl, TDRIVE_SSO_ONLY: '1',
+      TDRIVE_CLOUD_SSO_KEYS: JSON.stringify(sso.keys),
+    })
   }
   // Free: at most this many active people (the product refuses one more on the web and the CLI)
   if (plan.maxPeople != null) env.TDRIVE_MAX_PEOPLE = String(plan.maxPeople)
