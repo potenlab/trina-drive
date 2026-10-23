@@ -1,7 +1,7 @@
 ---
 // "Start your team drive": the one Trina Cloud call to action (hero, final CTA, steps). While CLOUD_LIVE is false
-// (src/site.ts) it asks for early access by email; once true it opens the Cloud Team checkout (14-day trial) through
-// startCheckout() in scripts/main.ts.
+// (src/site.ts) it opens the console sign-up, which takes early-access requests; once true it opens the Cloud Team
+// checkout (14-day trial) through startCheckout() in scripts/main.ts.
 import { CLOUD_LIVE, LINKS, type Lang } from '../site'
 import Icon from './Icon.astro'
 interface Props { label: string; lang: Lang; size?: 'lg' | 'md' }
@@ -10,4 +10,4 @@ const cls = `btn btn-primary${size === 'lg' ? ' btn-lg' : ''}`
 ---
 {CLOUD_LIVE
   ? <button class={cls} type="button" data-plan="team" data-cta="start-trial">{label}<Icon name="arrow" /></button>
-  : <a class={cls} data-cta="early-access" href={LINKS.earlyAccess(lang)}>{label}<Icon name="arrow" /></a>}
+  : <a class={cls} data-cta="early-access" href={LINKS.signUp()}>{label}<Icon name="arrow" /></a>}
