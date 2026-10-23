@@ -1,0 +1,83 @@
+# Trina Cloud end-to-end (manual): the local stack on the runner's Docker (control plane + Caddy + team containers),
+# the legacy checks (cloud/dev/e2e.ts) and the Phase 1 scenarios (cloud/dev/e2e/run.ts) with headless Chromium/WebKit;
+# or the same scenarios against AWS (target: aws) with a test team. Never on pull requests: it takes 20–40 minutes.
+name: E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: local (stack on the runner) or aws (https://<team>.cloud.trina.app)
+        type: choice
+        options: [local, aws]
+        default: local
+      only:
+        description: scenario ids (e.g. S12,S17); empty = all of phase 1
+        type: string
+        default: ''
+      legacy:
+        description: also run the legacy checks (cloud/dev/e2e.ts) first (local)
+        type: boolean
+        default: true
+      strict:
+        description: fail on PENDING/PARTIAL too (the release gate)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      E2E_SHOTS_DIR: ${{ github.workspace }}/e2e-shots
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.12
+      - run: bun install --frozen-lockfile
+      - name: Browsers (playwright-core 1.64.1 in e2e/ui, Chromium + WebKit)
+        run: |
+          bun install --cwd e2e/ui --frozen-lockfile
+          bunx playwright@1.64.1 install --with-deps chromium webkit
+      - name: Local stack
+        if: inputs.target == 'local'
+        run: |
+          if [ "${{ inputs.legacy }}" = "true" ]; then cloud/dev/up.sh; else cloud/dev/up.sh --no-teams; fi
+      - name: AWS test team
+        if: inputs.target == 'aws'
+        env:
+          E2E_PEOPLE_JSON: ${{ secrets.E2E_PEOPLE_JSON }}
+        run: |
+          umask 077
+          printf '%s' "$E2E_PEOPLE_JSON" > "$RUNNER_TEMP/people.json"
+          echo "E2E_PEOPLE=$RUNNER_TEMP/people.json" >> "$GITHUB_ENV"
+      - name: Phase 1 scenarios
+        env:
+          E2E_TARGET: ${{ inputs.target }}
+          E2E_TEAM: ${{ inputs.target == 'aws' && vars.E2E_TEAM || '' }}
+          E2E_OTHER_TEAM: ${{ inputs.target == 'aws' && vars.E2E_OTHER_TEAM || '' }}
+        run: |
+          args="--json e2e-results.json"
+          [ -n "${{ inputs.only }}" ] && args="$args --only ${{ inputs.only }}" || args="$args --phase 1"
+          [ "${{ inputs.strict }}" = "true" ] && args="$args --strict"
+          bun cloud/dev/e2e/run.ts $args
+      - name: Results and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ inputs.target }}
+          path: |
+            e2e-results.json
+            e2e-shots/
+          if-no-files-found: ignore
+      - name: Remove the local stack
+        if: always() && inputs.target == 'local'
+        run: cloud/dev/down.sh

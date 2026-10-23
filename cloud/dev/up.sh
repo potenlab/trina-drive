@@ -6,6 +6,8 @@
 #   cloud/dev/up.sh                 clean start: build images if missing, start, provision two teams, run the checks
 #   cloud/dev/up.sh --no-teams      only the control plane and Caddy
 #   cloud/dev/up.sh --rebuild       rebuild the three images first
+#   cloud/dev/up.sh --phase1        then the Trina Cloud v1 Phase 1 scenarios (cloud/dev/e2e/run.ts --phase 1; with
+#                                   --no-teams they run on a fresh stack without the legacy checks)
 #   cloud/dev/down.sh               remove everything (teams, volumes, state)
 #
 # Then: https://cloud.localhost:8443 (sign up; mail goes to cloud/dev/.state/outbox.log, the teams' own mail to
@@ -16,12 +18,13 @@ cd "$(dirname "$0")/../.."
 ROOT=$PWD
 DEV=$ROOT/cloud/dev
 STATE=$DEV/.state
-TEAMS=1 REBUILD=0
+TEAMS=1 REBUILD=0 PHASE1=0
 for a in "$@"; do
   case $a in
     --no-teams) TEAMS=0 ;;
     --rebuild) REBUILD=1 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    --phase1) PHASE1=1 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "unknown option $a" >&2; exit 2 ;;
   esac
 done
@@ -103,6 +106,10 @@ curl -sS --cacert "$STATE/caddy-root.crt" --resolve "$TDCLOUD_DOMAIN:$TDCLOUD_PU
 if [ $TEAMS = 1 ]; then
   say "provision two teams and run the end-to-end checks"
   bun "$DEV/e2e.ts"
+fi
+if [ $PHASE1 = 1 ]; then
+  say "Trina Cloud v1 Phase 1 scenarios"
+  bun "$DEV/e2e/run.ts" --phase 1
 fi
 
 cat <<EOF

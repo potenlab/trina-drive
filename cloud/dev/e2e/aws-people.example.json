@@ -1,0 +1,8 @@
+{
+  "$comment": "E2E_PEOPLE for --target aws: console accounts that are members of the test team E2E_TEAM (never trina). admin = owner/admin with its console authenticator secret (base32). Keep the real file outside the repo (mode 600).",
+  "admin": { "name": "alex", "email": "e2e-owner@example.com", "password": "…", "totp": "BASE32SECRET" },
+  "boss": { "email": "e2e-boss@example.com", "password": "…" },
+  "mina": { "email": "e2e-mina@example.com", "password": "…" },
+  "sam": { "email": "e2e-sam@example.com", "password": "…" },
+  "kim": { "email": "e2e-kim@example.com", "password": "…" }
+}

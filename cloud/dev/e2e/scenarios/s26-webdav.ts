@@ -11,7 +11,7 @@ export default {
   async run(t) {
     const fx = t.fx
     const auth = davAuth(fx.login('mina'), await fx.appPassword('mina'))
-    const D = (m: string, p: string, o: Parameters<typeof dav>[4] = {}) => dav(t.http, fx.slug, auth, m, p, o)
+    const D = (m: string, p: string, o: NonNullable<Parameters<typeof dav>[5]> = {}) => dav(t.http, fx.slug, auth, m, p, o)
     const dest = (p: string) => `${fx.url}/dav${p.split('/').map(encodeURIComponent).join('/')}`
     const run = `s26-${Date.now().toString(36)}`, dir = `/공용/${run}`
 

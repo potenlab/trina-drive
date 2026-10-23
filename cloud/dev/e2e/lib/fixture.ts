@@ -196,7 +196,7 @@ export class Fixture {
   private async readyAws(): Promise<this> {
     const file = process.env.E2E_PEOPLE
     if (!file || !fs.existsSync(file)) throw new Error('AWS target: E2E_PEOPLE must name a JSON file with admin/boss/mina/sam/kim console accounts of the test team')
-    const p = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, { email: string; password: string; totp?: string; name?: string }>
+    const p = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, { email: string; password: string; totp?: string; name?: string }> // shape: cloud/dev/e2e/aws-people.example.json
     if (!this.s) {
       this.s = { slug: this.slug, mode: 'sso', admin: { name: p.admin?.name ?? 'admin', email: p.admin!.email, password: p.admin!.password, consoleTotp: p.admin!.totp },
         people: {}, sessions: {}, tokens: {}, appPasswords: {}, log: [] }

@@ -31,13 +31,13 @@ export class SoftPasskey {
 
   private cose(): Buffer {
     const jwk = this.key.publicKey.export({ format: 'jwk' }) as { x: string; y: string }
-    return cbor(new Map<Cbor, Cbor>([[1, 2], [3, -7], [-1, 1], [-2, Buffer.from(jwk.x, 'base64url')], [-3, Buffer.from(jwk.y, 'base64url')]]))
+    return cbor(new Map<Cbor, Cbor>([[1, 2], [3, -7], [-1, 1], [-2, new Uint8Array(Buffer.from(jwk.x, 'base64url'))], [-3, new Uint8Array(Buffer.from(jwk.y, 'base64url'))]]))
   }
   private authData(rpId: string, attested: boolean): Buffer {
     const flags = 0x01 | 0x04 | (attested ? 0x40 : 0) // user present, user verified, attested credential data
     const c = Buffer.alloc(4); c.writeUInt32BE(++this.count)
-    const parts = [sha(rpId), Buffer.from([flags]), c]
-    if (attested) { const len = Buffer.alloc(2); len.writeUInt16BE(this.credId.length); parts.push(Buffer.alloc(16), len, this.credId, this.cose()) }
+    const parts: Buffer[] = [sha(rpId), Buffer.from([flags]), c]
+    if (attested) { const len = Buffer.alloc(2); len.writeUInt16BE(this.credId.length); parts.push(Buffer.alloc(16), len, Buffer.from(this.credId), Buffer.from(this.cose())) }
     return Buffer.concat(parts)
   }
   private clientData(type: string, challenge: string) {

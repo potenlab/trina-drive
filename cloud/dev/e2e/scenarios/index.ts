@@ -26,8 +26,13 @@ import s34 from './s34-isolation'
 import s35 from './s35-edge'
 import s37 from './s37-design'
 import s40 from './s40-mcp-versions'
+import s41 from './s41-narrow-promote-widen'
+import s42 from './s42-o1-matrix'
 import s43 from './s43-agents-never-share'
+import s44 from './s44-sync'
+import s45 from './s45-reauth'
+import s46 from './s46-console-security'
 import s47 from './s47-noai-webdav'
 import s48 from './s48-mobile-webkit'
 
-export const SCENARIOS: Scenario[] = [s01, s02, s03, s04, s05, s06, s08, s10, s12, m01, s14, s15, s17, s18, s19, s24, s25, s26, s28, s29, s32, s33, s34, s35, s37, s40, s43, s47, s48]
+export const SCENARIOS: Scenario[] = [s01, s02, s03, s04, s05, s06, s08, s10, s12, s14, s15, s17, s18, s19, s24, s25, s26, s28, s29, s32, s33, s34, s35, s37, s40, s41, s42, s43, s44, s45, s46, s47, s48, m01]

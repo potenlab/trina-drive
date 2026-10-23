@@ -55,7 +55,7 @@ export class Drive {
   mkdir(p: string, name: string) { return this.api('POST', '/files/folder', { path: p, name, exist_ok: true }) }
   async upload(folder: string, name: string, content: string | Uint8Array, conflict: 'fail' | 'rename' | 'replace' = 'replace'): Promise<Res> {
     const fd = new FormData()
-    fd.append('file', new File([typeof content === 'string' ? new TextEncoder().encode(content) : content], name))
+    fd.append('file', new File([typeof content === 'string' ? content : new Uint8Array(content)], name))
     const body = new Response(fd)
     const type = body.headers.get('content-type')! // read before the body: Bun drops it once the body is consumed
     const bytes = new Uint8Array(await body.arrayBuffer())
@@ -71,7 +71,7 @@ export class Drive {
     while (off < bytes.length) {
       if (opts.stopAfter !== undefined && n >= opts.stopAfter) return { id, res: st }
       const chunk = bytes.subarray(off, Math.min(off + cs, bytes.length))
-      const r = await this.api('PUT', `/uploads/${id}?offset=${off}`, undefined, { raw: chunk, headers: { 'content-type': 'application/octet-stream', 'x-chunk-sha256': crypto.createHash('sha256').update(chunk).digest('hex') } })
+      const r = await this.api('PUT', `/uploads/${id}?offset=${off}`, undefined, { raw: new Uint8Array(chunk), headers: { 'content-type': 'application/octet-stream', 'x-chunk-sha256': crypto.createHash('sha256').update(chunk).digest('hex') } })
       if (r.status !== 200) return { id, res: r }
       off += chunk.length; n++
     }
@@ -84,7 +84,7 @@ export class Drive {
     const cs = st.json().chunk_size as number
     while (off < bytes.length) {
       const chunk = bytes.subarray(off, Math.min(off + cs, bytes.length))
-      const r = await this.api('PUT', `/uploads/${id}?offset=${off}`, undefined, { raw: chunk, headers: { 'content-type': 'application/octet-stream' } })
+      const r = await this.api('PUT', `/uploads/${id}?offset=${off}`, undefined, { raw: new Uint8Array(chunk), headers: { 'content-type': 'application/octet-stream' } })
       if (r.status !== 200) return r
       off += chunk.length
     }
@@ -92,7 +92,7 @@ export class Drive {
   }
 
   // ---------- tokens, app passwords ----------
-  async token(name: string, o: { scope?: string[] | null; read_only?: boolean; ttl?: string; password?: string } = {}): Promise<string> {
+  async token(name: string, o: { scope?: (string | number)[] | null; read_only?: boolean; ttl?: string; password?: string } = {}): Promise<string> {
     let r = await this.api('POST', '/tokens', { name, ttl: o.ttl ?? '1d', ...(o.scope ? { scope: o.scope } : {}), ...(o.read_only ? { read_only: true } : {}) })
     if (r.status === 403 && /reauth/.test(r.text) && o.password) {
       await this.api('POST', '/me/reauth', { password: o.password })
