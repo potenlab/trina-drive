@@ -112,6 +112,8 @@ const en = {
       { name: 'claude.ai', status: 'soon' },
       { name: 'ChatGPT', status: 'soon' },
     ],
+    // Shown next to the logos (A band, B "works" section). Logo rules: public/logos/SOURCES.md.
+    trademarks: 'Trademarks belong to their owners; Trina Drive is not affiliated with or endorsed by them.',
   },
   // Enterprise way vs small-team way. No dollar figures for ontology projects: qualitative facts only.
   kb: {

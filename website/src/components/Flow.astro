@@ -4,6 +4,7 @@
 // (i + 0.5) / n of the column height — which is where the rail's curve for it starts or ends. Packets travel along the
 // rails (CSS stroke-dashoffset); no animation with prefers-reduced-motion.
 import type { Copy } from '../content/en'
+import ClientMark from './ClientMark.astro'
 import Icon from './Icon.astro'
 import Logo from './Logo.astro'
 interface Props { t: Copy }
@@ -22,7 +23,7 @@ const curve = (i: number, n: number, toCenter: boolean) => {
     <ul class="flow-items">
       {clients.map((c) => (
         <li class="flow-item" data-status={c.status}>
-          <span class="flow-mark"><Icon name="sparkle" /></span>
+          <ClientMark name={c.name} />
           <span class="flow-name">{c.name}</span>
           <small>{c.status === 'today' ? t.clients.today : t.clients.soon}</small>
         </li>

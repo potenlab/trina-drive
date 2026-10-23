@@ -1,0 +1,22 @@
+---
+// The mark next to a supported AI app's name (the name itself is written by the caller). Official logos are drawn
+// exactly as supplied: the brand's own light/dark file per theme, never recolored, filtered or cropped. Every mark sits
+// in the same square slot (--cm-slot) so rows line up; padded files (OpenAI Blossom) fill the slot because their clear
+// space is inside the file, other marks are drawn at half the slot with the rest as clear space. Decorative: aria-hidden.
+import { LOGOS, markFor } from '../content/brands'
+import Icon from './Icon.astro'
+interface Props { name: string; class?: string }
+const { name, class: cls } = Astro.props
+const m = markFor(name)
+const logo = m.kind === 'logo' ? LOGOS[m.brand] : null
+---
+<span class:list={['cm', cls]} data-brand={m.kind === 'logo' ? m.brand : 'none'} aria-hidden="true">
+  {logo ? (
+    <>
+      <img class="cm-img cm-on-light" src={logo.light} alt="" width={logo.padded ? 64 : Math.round(32 * logo.aspect)} height={logo.padded ? 64 : 32} decoding="async" draggable="false" data-padded={String(logo.padded)} />
+      <img class="cm-img cm-on-dark" src={logo.dark} alt="" width={logo.padded ? 64 : Math.round(32 * logo.aspect)} height={logo.padded ? 64 : 32} decoding="async" draggable="false" data-padded={String(logo.padded)} />
+    </>
+  ) : (
+    <Icon name={m.kind === 'icon' ? m.icon : 'sparkle'} />
+  )}
+</span>

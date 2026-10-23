@@ -6,6 +6,7 @@ import type { CopyB } from '../../content/en-b'
 import Base from '../../layouts/Base.astro'
 import { LINKS, SITE_URL } from '../../site'
 import Footer from '../Footer.astro'
+import ClientMark from '../ClientMark.astro'
 import Icon from '../Icon.astro'
 import Logo from '../Logo.astro'
 import Nav from '../Nav.astro'
@@ -85,14 +86,14 @@ const d = t.devs
             <ul class="wk-apps">
               {w.apps.map((a) => (
                 <li class="wk-app" data-status={a.status}>
-                  <span class="wk-app-name">{a.name}{a.note && <small>{a.note}</small>}</span>
+                  <span class="wk-app-main"><ClientMark name={a.name} /><span class="wk-app-name">{a.name}{a.note && <small>{a.note}</small>}</span></span>
                   <span class="wk-status">{a.status === 'today' ? w.today : w.soon}</span>
                 </li>
               ))}
             </ul>
             <p class="wk-dev-title">{w.devTitle}</p>
             <ul class="wk-dev">
-              {w.devApps.map((a) => <li>{a}</li>)}
+              {w.devApps.map((a) => <li><ClientMark name={a} />{a}</li>)}
             </ul>
           </div>
           <div class="wk-hub" aria-hidden="true">
@@ -110,6 +111,7 @@ const d = t.devs
             <p class="wk-note">{w.filesNote}</p>
           </div>
         </div>
+        <p class="wk-tm">{t.clients.trademarks}</p>
       </div>
     </section>
 
@@ -231,6 +233,9 @@ const d = t.devs
             <h2 id="dev-title">{d.title}</h2>
             <p>{d.sub}</p>
           </div>
+          <ul class="wk-dev dev-tools" aria-label={w.devTitle}>
+            {w.devApps.map((a) => <li><ClientMark name={a} />{a}</li>)}
+          </ul>
           <ul class="dev-points">{d.points.map((p) => <li><Icon name="check" />{p}</li>)}</ul>
           <div class="install">
             <code><span class="prompt" aria-hidden="true">$ </span>{d.install}</code>
