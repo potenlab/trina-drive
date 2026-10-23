@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="t d">
+  <title id="t">How Trina Drive works</title>
+  <desc id="d">AI apps connect over MCP to a Trina Drive server in your office. Every request goes through one permission check (the person's rules intersected with the token's scope) before it reaches your existing folders, which stay read-only. Agents write to a draft box that remembers sources, and every call is written to a hash-chained audit log.</desc>
+  <style>
+    .bg { fill: #ffffff } .card { fill: #ffffff; stroke: #d4d6d2 } .soft { fill: #f6f7f6; stroke: #e7e8e5 }
+    .srv { fill: #f7fbf9; stroke: #0a7a53; stroke-dasharray: 6 5 } .gate { fill: #e7f6ef; stroke: #0a7a53 }
+    .h { font: 650 17px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #0a0b0d }
+    .t { font: 500 14px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #0a0b0d }
+    .m { font: 400 13px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #4d535b }
+    .k { font: 600 12px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; letter-spacing: .06em; fill: #656b74 }
+    .a { font: 600 13px Geist, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #0a7a53 }
+    .code { font: 500 13px "Geist Mono", ui-monospace, Menlo, Consolas, monospace; fill: #0a0b0d }
+    .ln { stroke: #0a7a53; stroke-width: 2; fill: none } .ln2 { stroke: #8b929c; stroke-width: 1.6; fill: none; stroke-dasharray: 5 4 }
+    .ah { fill: #0a7a53 } .ah2 { fill: #8b929c } .pill { fill: #e7f6ef } .pill2 { fill: #fdf3e2 } .p2 { fill: #8a5a00 }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117 } .card { fill: #11161d; stroke: #30363d } .soft { fill: #161b22; stroke: #30363d }
+      .srv { fill: #0f1a16; stroke: #3ddc97 } .gate { fill: #0f2a20; stroke: #3ddc97 }
+      .h, .t, .code { fill: #f2f3f5 } .m { fill: #a7adb6 } .k { fill: #8a919b } .a { fill: #3ddc97 }
+      .ln { stroke: #3ddc97 } .ah { fill: #3ddc97 } .pill { fill: #0f2a20 } .pill2 { fill: #2a2110 } .p2 { fill: #f5c26b }
+    }
+  </style>
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0L10 5L0 10z"/></marker>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah2" d="M0 0L10 5L0 10z"/></marker>
+  </defs>
+  <rect class="bg" width="1200" height="600" rx="20"/>
+
+  <!-- left: clients -->
+  <text class="k" x="40" y="58">EACH PERSON'S AI APP</text>
+  <rect class="card" x="40" y="74" width="270" height="108" rx="14"/>
+  <text class="t" x="60" y="104">Claude Code · Codex · Cursor</text>
+  <text class="m" x="60" y="128">personal token, user scope</text>
+  <text class="code" x="60" y="152">tdrive mcp add claude</text>
+  <rect class="pill" x="232" y="113" width="62" height="22" rx="11"/><text class="a" x="246" y="129">today</text>
+
+  <rect class="card" x="40" y="198" width="270" height="108" rx="14"/>
+  <text class="t" x="60" y="228">Claude app · claude.ai · ChatGPT</text>
+  <text class="m" x="60" y="252">OAuth 2.1 custom connector,</text>
+  <text class="m" x="60" y="272">through a Cloudflare tunnel</text>
+  <rect class="pill2" x="60" y="282" width="118" height="20" rx="10"/><text class="p2" x="70" y="297" style="font:600 12px Geist, Inter, -apple-system, Helvetica, Arial, sans-serif">v0.2, rolling out</text>
+
+  <rect class="soft" x="40" y="322" width="270" height="88" rx="14"/>
+  <text class="t" x="60" y="352">People, in the browser</text>
+  <text class="m" x="60" y="376">files, folder rules, tokens,</text>
+  <text class="m" x="60" y="396">approvals, audit</text>
+
+  <!-- server -->
+  <rect class="srv" x="370" y="40" width="500" height="520" rx="20"/>
+  <text class="k" x="394" y="70">TRINA DRIVE SERVER · MAC MINI OR LINUX + DOCKER, IN YOUR OFFICE</text>
+
+  <rect class="card" x="394" y="88" width="452" height="76" rx="12"/>
+  <text class="t" x="414" y="116">MCP endpoint  /mcp</text>
+  <text class="code" x="414" y="142">bash (ls, grep -r, cat) · read · write · promote</text>
+
+  <rect class="gate" x="394" y="196" width="452" height="92" rx="14" stroke-width="2"/>
+  <text class="h" x="414" y="228">One permission check</text>
+  <text class="m" x="414" y="252">the person's AI rules ∩ the token's scope</text>
+  <text class="m" x="414" y="274">hidden looks exactly like missing · "No AI" folders closed</text>
+
+  <rect class="card" x="394" y="320" width="214" height="100" rx="12"/>
+  <text class="t" x="412" y="348">Sandboxed workers</text>
+  <text class="m" x="412" y="372">shell, and the text inside</text>
+  <text class="m" x="412" y="392">PDF · Word · Excel ·</text>
+  <text class="m" x="412" y="410">PowerPoint · HWP</text>
+
+  <rect class="card" x="632" y="320" width="214" height="100" rx="12"/>
+  <text class="t" x="650" y="348">Draft box</text>
+  <text class="m" x="650" y="372">AI writes here, never to</text>
+  <text class="m" x="650" y="392">originals; each draft keeps</text>
+  <text class="m" x="650" y="410">its source folders</text>
+
+  <rect class="card" x="394" y="444" width="452" height="92" rx="12"/>
+  <text class="t" x="412" y="474">Audit log</text>
+  <text class="m" x="412" y="498">every call: who, which app, which files · hash-chained,</text>
+  <text class="m" x="412" y="518">signed anchors kept off the server · tdrive audit verify</text>
+
+  <!-- right: folders -->
+  <text class="k" x="930" y="58">YOUR EXISTING FOLDERS</text>
+  <rect class="card" x="930" y="74" width="230" height="214" rx="14"/>
+  <text class="t" x="950" y="106">NAS · shared drive ·</text>
+  <text class="t" x="950" y="128">a folder on the office Mac</text>
+  <text class="code" x="950" y="166">/finance</text><text class="code" x="950" y="190">/contracts</text>
+  <text class="code" x="950" y="214">/sales  /hr  /shared</text>
+  <text class="m" x="950" y="248">files stay where they are;</text>
+  <text class="m" x="950" y="268">mounted read-only</text>
+
+  <rect class="soft" x="930" y="320" width="230" height="100" rx="14"/>
+  <text class="t" x="950" y="350">Promote a draft</text>
+  <text class="m" x="950" y="374">new file only; if more people</text>
+  <text class="m" x="950" y="394">would see it, a person</text>
+  <text class="m" x="950" y="412">approves (passkey / TOTP)</text>
+
+  <!-- arrows -->
+  <path class="ln" d="M310 126 H392" marker-end="url(#ar)"/>
+  <path class="ln" d="M310 252 C 352 252, 352 142, 392 142" marker-end="url(#ar)"/>
+  <path class="ln2" d="M310 366 C 356 366, 352 262, 392 262" marker-end="url(#ar2)"/>
+  <text class="m" x="326" y="322">web</text>
+  <text class="a" x="330" y="116">MCP</text>
+  <path class="ln" d="M620 164 V196" marker-end="url(#ar)"/>
+  <path class="ln" d="M846 242 H930" marker-end="url(#ar)"/>
+  <text class="a" x="858" y="232">read</text>
+  <path class="ln" d="M500 288 V320" marker-end="url(#ar)"/>
+  <path class="ln" d="M739 288 V320" marker-end="url(#ar)"/>
+  <path class="ln2" d="M846 370 H930" marker-end="url(#ar2)"/>
+  <path class="ln2" d="M620 420 V444" marker-end="url(#ar2)"/>
+</svg>

@@ -5,14 +5,18 @@ Everything here is a **draft** for the public launch. Nothing has been posted.
 ## GitHub repository settings
 
 - **Name:** `potenlab/trina-drive` (renamed by the coordinator, not in this branch).
-- **Description:** Give your team's AI agents your company files: per-person permissions, originals untouched,
-  everything logged. Self-hosted MCP file server for Claude Code, Codex, Cursor, claude.ai and ChatGPT.
+- **Description (set 2026-10-23):** Your company folders, as your team's AI knowledge base. Ask Claude, ChatGPT, Codex
+  or Cursor about your files: no uploads, each person's AI sees only what they may, through Trina Drive AI writes
+  drafts (not originals), every read logged. Self-hosted.
 - **Website:** https://drive.trina.app
 - **Topics:** `mcp`, `ai-agents`, `claude-code`, `self-hosted`, `permissions`, `file-server`, `nas`, `rag`, `codex`
-  (optional extras if there is room: `model-context-protocol`, `audit-log`, `cursor`, `hwp`).
-- **Social preview image:** 1280×640, logo + the one-line pitch (TODO).
-- Enable: Issues, Discussions (Q&A, Ideas, Show and tell), private vulnerability reporting, Dependabot alerts.
-  Branch protection on `main`: CI must pass.
+  (optional extras if there is room: `model-context-protocol`, `audit-log`, `cursor`, `hwp`). Set, plus `chatgpt`,
+  `knowledge-base`, `document-search`.
+- **Social preview image:** `docs/assets/social-preview.png` (1280×640). GitHub has no API for it: upload it by hand
+  in Settings → General → Social preview.
+- Enable: Issues, Discussions (Q&A, Ideas, Show and tell), private vulnerability reporting, Dependabot alerts (all on
+  since 2026-10-23; welcome post: Discussions #1). Branch protection on `main`: CI must pass (not yet: CI is red on
+  `main`, turn it on once it's green).
 
 ## Launch checklist
 
@@ -25,11 +29,13 @@ Everything here is a **draft** for the public launch. Nothing has been posted.
 - [ ] CI green on `main` (Ubuntu + macOS); badge shows passing
 - [ ] Signed and notarized macOS release (Developer ID) on GitHub Releases with `.sha256`
 - [ ] Docker image published (`ghcr.io/potenlab/trina-drive`), SBOM attached
-- [ ] `docs/assets/demo.gif` recorded (kim vs boss in Claude Code, ≤ 20 s, ≤ 5 MB) and uncommented in both READMEs
+- [x] `docs/assets/demo.gif` recorded (Mina in Sales vs Sam in Finance, real `tdrive sh` / MCP output, 23 s, 0.6 MB)
+  and in both READMEs; how to re-record: `docs/assets/src/README.txt`
 - [ ] drive.trina.app live with `#pricing`; README links checked
 - [ ] Fresh-machine test: README quickstart from a clean clone, macOS installer on a clean Mac, Docker on a clean VM
 - [ ] Comparison table re-checked against vendors' current docs (Box, Google Drive MCP, Glean, Dust, QNAP)
 - [ ] Repo renamed, description, topics, social preview set; old `shelf` names gone (`git grep -i shelf`)
+  (renamed, description and topics done; social preview still to upload by hand)
 
 **Launch day (Tuesday–Thursday, 8–10 am US Eastern for HN):**
 
@@ -37,7 +43,8 @@ Everything here is a **draft** for the public launch. Nothing has been posted.
 - [ ] r/selfhosted post (the same day or the day after; not cross-posted to several subs at once)
 - [ ] GeekNews (news.hada.io) 보여줘 post, Korean time morning
 - [ ] X / LinkedIn / Threads short post with the GIF
-- [ ] Watch issues; label `good first issue` for a handful of small tasks
+- [ ] Watch issues; label `good first issue` for a handful of small tasks (10 starter issues #2–#11 filed, three of
+  them `good first issue`)
 
 **After (first two weeks):**
 

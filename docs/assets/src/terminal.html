@@ -1,0 +1,74 @@
+<!doctype html>
+<!-- Plays demo.json (real output captured by demo-steps.ts) as a terminal session. capture.mjs calls render(t) for each
+     frame and screenshots it; ffmpeg turns the frames into demo.gif. Open it in a browser to preview (it plays itself). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Trina Drive demo</title>
+<style>
+  @font-face { font-family: "Geist Mono"; src: url("../../../website/public/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; }
+  :root { --bg: #0c0e11; --fg: #e6e8eb; --muted: #8b929c; --border: #23272e; --accent: #3ddc97; --err: #ff8b7e; --mina: #7fd1ff; --sam: #f5c26b; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1080px; height: 640px; background: var(--bg); overflow: hidden; }
+  body { font: 15px/1.5 "Geist Mono", ui-monospace, Menlo, monospace; color: var(--fg); display: flex; flex-direction: column; }
+  .bar { flex: none; height: 40px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid var(--border); background: #111418; font-size: 13px; color: var(--muted); }
+  .dots { display: flex; gap: 7px; } .dots i { width: 12px; height: 12px; border-radius: 50%; background: #2a2f37; }
+  .title { flex: 1; text-align: center; margin-right: 60px; }
+  .who { display: flex; gap: 14px; } .who b { font-weight: 500; }
+  .screen { flex: 1; min-height: 0; overflow: hidden; padding: 14px 20px 18px; }
+  .line { white-space: pre-wrap; word-break: break-all; min-height: 1.5em; }
+  .note { color: var(--muted); font-style: italic; }
+  .p { color: var(--accent); }
+  .err { color: var(--err); } .dim { color: var(--muted); }
+  .mina { color: var(--mina); } .sam { color: var(--sam); }
+  .cur { display: inline-block; width: 9px; height: 1.15em; vertical-align: -0.2em; background: var(--fg); }
+</style>
+</head>
+<body>
+  <div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="title">tdrive · Trina Drive sample company · real output</span>
+    <span class="who"><span class="mina">$MINA <b>Sales</b></span><span class="sam">$SAM <b>Finance</b></span></span></div>
+  <div class="screen" id="screen"></div>
+<script>
+const CPS = 75, NOTE_GAP = 0.3, AFTER_TYPE = 0.3, END_HOLD = 2.5
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
+const paint = (cmd) => esc(cmd).replace(/\$MINA/g, '<span class="mina">$MINA</span>').replace(/\$SAM/g, '<span class="sam">$SAM</span>')
+let timeline = [], DURATION = 0
+function build(steps) {
+  let t = 0
+  timeline = steps.map((s) => {
+    const e = { s, noteAt: s.note ? t : null }
+    if (s.note) t += NOTE_GAP
+    e.typeAt = t; e.typeEnd = t + s.cmd.length / CPS; t = e.typeEnd + AFTER_TYPE
+    e.outAt = t
+    const lines = (s.stdout + s.stderr).split('\n').filter(Boolean).length
+    t += Math.min(2.0, 0.7 + 0.15 * lines)
+    return e
+  })
+  DURATION = t + END_HOLD
+  window.DURATION = DURATION
+}
+function render(t) {
+  const out = []
+  let cursorShown = false
+  for (const e of timeline) {
+    if (e.noteAt !== null && t >= e.noteAt) out.push(`<div class="line note"># ${esc(e.s.note)}</div>`)
+    if (t < e.typeAt) { if (e.noteAt !== null && t >= e.noteAt) { out.push('<div class="line"><span class="p">$ </span><span class="cur"></span></div>'); cursorShown = true } break }
+    const n = Math.min(e.s.cmd.length, Math.floor((t - e.typeAt) * CPS))
+    const typing = t < e.outAt
+    out.push(`<div class="line"><span class="p">$ </span>${paint(e.s.cmd.slice(0, n))}${typing ? '<span class="cur"></span>' : ''}</div>`)
+    if (typing) { cursorShown = true; break }
+    for (const l of e.s.stdout.replace(/\n$/, '').split('\n')) if (e.s.stdout) out.push(`<div class="line">${esc(l)}</div>`)
+    const cls = e.s.exit ? 'err' : 'dim'
+    for (const l of e.s.stderr.replace(/\n$/, '').split('\n')) if (e.s.stderr) out.push(`<div class="line ${cls}">${esc(l)}</div>`)
+  }
+  if (!cursorShown && t >= timeline.at(-1).outAt) out.push(`<div class="line"><span class="p">$ </span>${Math.floor(t * 2) % 2 ? '' : '<span class="cur"></span>'}</div>`)
+  const screen = document.getElementById('screen')
+  screen.innerHTML = out.join('')
+  screen.scrollTop = screen.scrollHeight // starts at the top, then scrolls like a terminal
+}
+window.render = render
+window.ready = fetch(new URLSearchParams(location.search).get('data') ?? 'demo.json').then((r) => r.json()).then(build).then(() => document.fonts.ready)
+if (!new URLSearchParams(location.search).has('capture')) window.ready.then(() => { const t0 = performance.now(); const tick = () => { render(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(tick) }; tick() })
+</script>
+</body>
+</html>
