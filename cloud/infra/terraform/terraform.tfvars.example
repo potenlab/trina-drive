@@ -12,3 +12,5 @@ caddy_image_tag   = "2.10.2-1"
 # a deploy identity without kms:PutKeyPolicy / iam:TagRole (README, Deploy step 0):
 # kms_admin_arns                         = ["arn:aws:iam::<account>:user/tdcloud-deploy"]
 # create_autoscaling_service_linked_role = false
+# mail_upstream = "resend"         # resend (default) | ses | smtp; the key: SSM /tdcloud/{control,hosts}/resend-api-key
+# resend_domain = "drive.trina.app" # verified in Resend (Tokyo); DNS at Cloudflare (cloud/scripts/resend-domain.ts)

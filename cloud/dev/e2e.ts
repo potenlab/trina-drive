@@ -29,7 +29,7 @@ const CONTROL = `https://${DOMAIN}:${PORT}`
 const teamUrl = (slug: string) => `https://${slug}.${DOMAIN}:${PORT}`
 const CA = fs.readFileSync(path.join(STATE, 'caddy-root.crt'), 'utf8')
 const OUTBOX = path.join(STATE, 'outbox.log')
-/** the dev mail sink: what the host's mail relay would have handed to SES (cloud/control/src/relay.ts) */
+/** the dev mail sink (relay upstream outbox:<file>): what the host's mail relay would have handed to Resend (cloud/control/src/relay.ts) */
 const TEAM_MAIL = path.join(STATE, 'team-mail.log')
 const RELAY_PORT = 8025
 

@@ -7,16 +7,27 @@
 //   - a sender that is a team's own container address (teamnet.ts: x.x.x.3 of a team /28) — Caddy, the host, anything
 //     else is refused; a team container has no capability to take another address;
 //   - SES v2 SendEmail, Content.Simple, one To recipient, no Cc/Bcc, From = the configured team address (so the role's
-//     IAM condition ses:FromAddress, cloud/infra/terraform/iam.tf, is met and nothing else could be);
+//     IAM condition ses:FromAddress, cloud/infra/terraform/iam.tf, is met and nothing else could be), with the
+//     configured display name or "<team> via <that name>" (e.g. "Acme via Trina Drive <drive@drive.trina.app>": letters,
+//     digits, spaces and . , & ' ( ) _ - only, at most 64 characters);
 //   - at most perHour / perDay messages per team.
 //
-// Then it sends with the instance role's credentials (upstream `ses`) or, in development, appends the message to a
-// JSON-lines file (upstream `outbox:<file>`, the dev mail sink cloud/dev/e2e.ts reads). The incoming request's
-// signature is ignored: the team's AWS_* values are placeholders (control/src/cloud.ts, teamEnv).
+// Then it hands the message to its upstream (TDCLOUD_MAIL_UPSTREAM):
+//
+//   resend          Resend's HTTPS API (resend.ts) with the key from the SSM SecureString TDCLOUD_RESEND_API_KEY_PARAM,
+//                   read with the instance role (the default on AWS: SES gave the account no production access);
+//   ses             SES v2 SendEmail signed with the instance role (kept for later);
+//   smtp            SMTP submission (smtp.ts; by default Resend's SMTP with the same key);
+//   outbox:<file>   development: one JSON line per message (the dev mail sink cloud/dev/e2e.ts reads).
+//
+// The checks above come first whatever the upstream: the team does not choose where its mail goes or as whom. The
+// incoming request's signature is ignored: the team's AWS_* values are placeholders (control/src/cloud.ts, teamEnv).
 import fs from 'node:fs'
 import path from 'node:path'
 import { AwsClient, CredentialProvider } from './aws'
 import { DEFAULT_TEAM_SUBNETS, mailAddress } from './config'
+import { ResendClient, resendSecret, resendSettings } from './resend'
+import { SmtpSender, smtpSettings } from './smtp'
 import { teamOfAddress } from './teamnet'
 import { EMAIL_RE } from './util'
 
@@ -25,7 +36,8 @@ export interface RelayUpstream { readonly name: string; send(m: RelayMail): Prom
 
 export interface RelayOptions {
   pool: string
-  /** the From every team uses ("Trina Drive <drive@trina.app>"); the message goes out with exactly this */
+  /** the From every team uses ("Trina Drive <drive@drive.trina.app>"); the message goes out with this address and
+   * this display name, or "<team> via <this display name>" when the team asked for that */
   from: string
   upstream: RelayUpstream
   perHour?: number
@@ -44,6 +56,19 @@ export function makeRelay(o: RelayOptions) {
   const log = o.log ?? ((s: string) => console.log(`${new Date().toISOString()} ${s}`))
   const fromAddr = mailAddress(o.from)
   if (!fromAddr) throw new Error(`relay From is not a mail address: ${o.from}`)
+  const fromName = /^\s*"?([^"<>]*?)"?\s*<[^<>]+>\s*$/.exec(o.from)?.[1]?.trim() ?? ''
+  /** the From that goes out for the team's From, or null when it is not allowed */
+  const outFrom = (asked: string): string | null => {
+    if (mailAddress(asked) !== fromAddr) return null
+    const name = /^\s*"?([^"<>\\]*?)"?\s*<[^<>]+>\s*$/.exec(asked)?.[1]?.trim() ?? (/^[^<>]*$/.test(asked) ? '' : null)
+    if (name === null) return null
+    if (name === '' || name === fromName) return o.from
+    const suffix = ` via ${fromName}`
+    if (!fromName || !name.endsWith(suffix)) return null
+    const team = name.slice(0, -suffix.length).replace(/\s+/g, ' ').trim()
+    if (!/^[\p{L}\p{N} .,&'()_-]{1,64}$/u.test(team)) return null
+    return `"${team}${suffix}" <${fromAddr}>`
+  }
   const sent = new Map<number, number[]>()
 
   const allowed = (team: number) => {
@@ -66,7 +91,8 @@ export function makeRelay(o: RelayOptions) {
 
     const extra = Object.keys(b ?? {}).filter((k) => !['FromEmailAddress', 'Destination', 'Content', 'ConfigurationSetName'].includes(k))
     if (extra.length) return bad(`not relayed: ${extra.join(', ')}`)
-    if (typeof b.FromEmailAddress !== 'string' || mailAddress(b.FromEmailAddress) !== fromAddr) return bad(`From must be ${fromAddr}`)
+    const from = typeof b.FromEmailAddress === 'string' ? outFrom(b.FromEmailAddress) : null
+    if (!from) return bad(`From must be ${fromAddr} (as "${fromName}" or "<team> via ${fromName}")`)
     const d = b.Destination as { ToAddresses?: unknown; CcAddresses?: unknown; BccAddresses?: unknown } | undefined
     const to = Array.isArray(d?.ToAddresses) && d.ToAddresses.length === 1 ? d.ToAddresses[0] : null
     if (!d || Object.keys(d).some((k) => k !== 'ToAddresses') || typeof to !== 'string' || !EMAIL_RE.test(to) || to.length > 254) return bad('exactly one To recipient, no Cc or Bcc')
@@ -78,7 +104,7 @@ export function makeRelay(o: RelayOptions) {
 
     if (!allowed(team)) { log(`mail refused: team ${team}: over ${perHour}/hour or ${perDay}/day`); return sesError(429, 'TooManyRequestsException', 'this team sent too much mail; try again later') }
     try {
-      const id = await o.upstream.send({ team, from: o.from, to, subject, text, ...(html !== undefined ? { html } : {}) })
+      const id = await o.upstream.send({ team, from, to, subject, text, ...(html !== undefined ? { html } : {}) })
       sent.get(team)!.push(now())
       log(`mail team ${team} → …@${to.split('@')[1]} (${o.upstream.name} ${id})`)
       return Response.json({ MessageId: id })
@@ -108,6 +134,22 @@ export class SesUpstream implements RelayUpstream {
   }
 }
 
+/** Resend's HTTPS API; the key from SSM (instance role) or a 0600 file. Retries 429/5xx within the team's wait. */
+export class ResendUpstream implements RelayUpstream {
+  readonly name = 'resend'
+  constructor(private readonly client: Pick<ResendClient, 'send'>) {}
+  send(m: RelayMail) {
+    return this.client.send({ from: m.from, to: m.to, subject: m.subject, text: m.text, ...(m.html !== undefined ? { html: m.html } : {}), tags: { source: 'team', team: String(m.team) } })
+  }
+}
+
+/** SMTP submission (default: Resend's SMTP endpoint with the Resend key as password). */
+export class SmtpUpstream implements RelayUpstream {
+  readonly name = 'smtp'
+  constructor(private readonly sender: Pick<SmtpSender, 'send'>) {}
+  send(m: RelayMail) { return this.sender.send({ from: m.from, to: m.to, subject: m.subject, text: m.text, ...(m.html !== undefined ? { html: m.html } : {}) }) }
+}
+
 /** Development: one JSON line per message (the dev mail sink). */
 export class FileUpstream implements RelayUpstream {
   readonly name = 'outbox'
@@ -120,19 +162,31 @@ export class FileUpstream implements RelayUpstream {
   }
 }
 
+/** TDCLOUD_MAIL_UPSTREAM (the older name TDCLOUD_MAIL_RELAY_UPSTREAM still works); `ses` when neither is set. */
+export function upstreamFromEnv(env: Record<string, string | undefined>, aws?: AwsClient): RelayUpstream {
+  const up = env.TDCLOUD_MAIL_UPSTREAM || env.TDCLOUD_MAIL_RELAY_UPSTREAM || 'ses'
+  const region = env.AWS_REGION || env.AWS_DEFAULT_REGION || 'ap-northeast-2'
+  const client = () => aws ?? new AwsClient(region, new CredentialProvider(env))
+  if (up === 'ses') return new SesUpstream(client(), env.TDCLOUD_SES_CONFIGURATION_SET || undefined)
+  if (up === 'resend') {
+    const s = resendSettings(env)
+    // the team waits for the answer (the product's SES mailer gives up after 15 s): retries fit in 12
+    return new ResendUpstream(new ResendClient({ key: resendSecret(s, client()), endpoint: s.endpoint, deadlineMs: 12_000, timeoutMs: 8_000 }))
+  }
+  if (up === 'smtp') return new SmtpUpstream(new SmtpSender(smtpSettings(env), client(), { timeoutMs: 10_000 }))
+  if (up.startsWith('outbox:')) return new FileUpstream(up.slice(7))
+  throw new Error('TDCLOUD_MAIL_UPSTREAM must be resend, ses, smtp or outbox:<file>')
+}
+
 /** `mail-relay` from the environment (cloud/host/bootstrap.sh, cloud/dev/compose.yml). */
-export function relayFromEnv(env: Record<string, string | undefined> = process.env) {
+export function relayFromEnv(env: Record<string, string | undefined> = process.env, opts: { aws?: AwsClient; log?: (s: string) => void } = {}) {
   const from = env.TDCLOUD_TEAM_MAIL_FROM
   if (!from) throw new Error('TDCLOUD_TEAM_MAIL_FROM is required')
-  const up = env.TDCLOUD_MAIL_RELAY_UPSTREAM || 'ses'
-  const region = env.AWS_REGION || env.AWS_DEFAULT_REGION || 'ap-northeast-2'
-  const upstream: RelayUpstream = up === 'ses' ? new SesUpstream(new AwsClient(region, new CredentialProvider(env)), env.TDCLOUD_SES_CONFIGURATION_SET || undefined)
-    : up.startsWith('outbox:') ? new FileUpstream(up.slice(7))
-      : (() => { throw new Error('TDCLOUD_MAIL_RELAY_UPSTREAM must be ses or outbox:<file>') })()
+  const upstream = upstreamFromEnv(env, opts.aws)
   const [host, port] = (env.TDCLOUD_MAIL_RELAY_LISTEN || '0.0.0.0:8025').split(':')
   const num = (v: string | undefined, d: number) => (v && Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : d)
   return {
     host: host || '0.0.0.0', port: num(port, 8025), upstream,
-    handle: makeRelay({ pool: env.TDCLOUD_TEAM_SUBNETS || DEFAULT_TEAM_SUBNETS, from, upstream, perHour: num(env.TDCLOUD_MAIL_RELAY_PER_HOUR, 60), perDay: num(env.TDCLOUD_MAIL_RELAY_PER_DAY, 500) }),
+    handle: makeRelay({ pool: env.TDCLOUD_TEAM_SUBNETS || DEFAULT_TEAM_SUBNETS, from, upstream, perHour: num(env.TDCLOUD_MAIL_RELAY_PER_HOUR, 60), perDay: num(env.TDCLOUD_MAIL_RELAY_PER_DAY, 500), ...(opts.log ? { log: opts.log } : {}) }),
   }
 }

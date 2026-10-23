@@ -47,7 +47,8 @@ output "control_env_template" {
     TDCLOUD_IMAGE=${local.images.trina}
     TDCLOUD_HELPER_IMAGE=${local.images.control}
     TDCLOUD_CADDY_CONTAINER=tdc-caddy
-    TDCLOUD_MAILER=ses
+    TDCLOUD_MAILER=${var.mail_upstream}
+    TDCLOUD_RESEND_API_KEY_PARAM=${local.ssm_control_mail_key}
     TDCLOUD_MAIL_FROM=Trina Cloud <${local.control_mail_address}>
     TDCLOUD_TEAM_MAILER=relay
     TDCLOUD_TEAM_MAIL_FROM=${local.team_mail_from}

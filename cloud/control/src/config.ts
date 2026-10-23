@@ -1,14 +1,17 @@
 // Control-plane configuration, all from the environment (cloud/README.md, "Configuration"). Nothing here is a secret
 // except PADDLE_WEBHOOK_SECRET, TDCLOUD_CADDY_ASK_KEY and the master key file: those come from env files (0600) or,
-// on AWS, SSM Parameter Store SecureStrings that the control host's systemd unit reads at start.
+// on AWS, SSM Parameter Store SecureStrings that the control host's systemd unit reads at start. The Resend API key is
+// not in the environment at all: only the name of its SecureString (or of a 0600 file), read when mail goes out.
 import path from 'node:path'
+import { resendSettings, type ResendSettings } from './resend'
+import { smtpSettings, type SmtpSettings } from './smtp'
 import { parsePool } from './teamnet'
 
 /** 10.128.0.0–10.159.255.255: clear of the VPC (10.42.0.0/16), Docker's default pools and the dev network */
 export const DEFAULT_TEAM_SUBNETS = '10.128.0.0/11'
 
 export type DriverName = 'local' | 'aws' | 'fake'
-export type MailerName = 'outbox' | 'ses'
+export type MailerName = 'outbox' | 'resend' | 'ses' | 'smtp'
 /** how team instances send mail (invites, password resets, notifications): through the host's mail relay (SES on AWS,
  * a file sink in dev), into a file inside the team's volume, or not at all */
 export type TeamMailerName = 'relay' | 'outbox' | 'off'
@@ -61,6 +64,10 @@ export interface Config {
   uidBase: number
   mailer: MailerName
   mailFrom: string
+  /** TDCLOUD_MAILER=resend: where the API key is (SSM parameter or 0600 file) and the API's URL */
+  resend: ResendSettings
+  /** TDCLOUD_MAILER=smtp */
+  smtp: SmtpSettings
   /** where operator alerts go (failed provisioning, unlinked payments) */
   opsEmail: string
   teamMailer: TeamMailerName
@@ -149,7 +156,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const driver = (env.TDCLOUD_DRIVER || 'local') as DriverName
   if (!['local', 'aws', 'fake'].includes(driver)) throw new ConfigError('TDCLOUD_DRIVER must be local, aws or fake')
   const mailer = (env.TDCLOUD_MAILER || 'outbox') as MailerName
-  if (!['outbox', 'ses'].includes(mailer)) throw new ConfigError('TDCLOUD_MAILER must be outbox or ses')
+  if (!['outbox', 'resend', 'ses', 'smtp'].includes(mailer)) throw new ConfigError('TDCLOUD_MAILER must be outbox, resend, ses or smtp')
+  let resend: ResendSettings, smtp: SmtpSettings
+  try { resend = resendSettings(env); smtp = smtpSettings(env) } catch (e) { throw new ConfigError((e as Error).message) }
   const teamMailer = (env.TDCLOUD_TEAM_MAILER || 'relay') as TeamMailerName
   if (!['relay', 'outbox', 'off'].includes(teamMailer)) throw new ConfigError('TDCLOUD_TEAM_MAILER must be relay, outbox or off')
   const teamSubnets = env.TDCLOUD_TEAM_SUBNETS || DEFAULT_TEAM_SUBNETS
@@ -189,6 +198,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     uidBase: int(env.TDCLOUD_UID_BASE, 20000, 'TDCLOUD_UID_BASE'),
     mailer,
     mailFrom: env.TDCLOUD_MAIL_FROM || 'Trina Cloud <cloud@trina.app>',
+    resend, smtp,
     opsEmail: env.TDCLOUD_OPS_EMAIL || 'contact@trina.app',
     teamMailer,
     teamMailFrom: env.TDCLOUD_TEAM_MAIL_FROM || 'Trina Drive <drive@trina.app>',
@@ -225,7 +235,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (production) {
     const problems: string[] = []
     if (!cfg.controlUrl.startsWith('https://')) problems.push('TDCLOUD_CONTROL_URL must be https')
-    if (cfg.mailer === 'outbox') problems.push('TDCLOUD_MAILER=outbox writes setup links to a file: use ses')
+    if (cfg.mailer === 'outbox') problems.push('TDCLOUD_MAILER=outbox writes setup links to a file: use resend (or ses)')
+    if (cfg.mailer === 'resend' && !cfg.resend.keyParam) problems.push('TDCLOUD_MAILER=resend needs TDCLOUD_RESEND_API_KEY_PARAM (the SSM SecureString with the key)')
     if (cfg.teamMailer === 'outbox') problems.push('TDCLOUD_TEAM_MAILER=outbox keeps invites inside the team volume: use relay')
     if (!cfg.kmsKeyId && !cfg.masterKeyFile) problems.push('set TDCLOUD_KMS_KEY_ID (or TDCLOUD_MASTER_KEY_FILE)')
     if (!cfg.paddle.webhookSecret) problems.push('PADDLE_WEBHOOK_SECRET is required')

@@ -107,6 +107,12 @@ data "aws_iam_policy_document" "host" {
       values   = [local.team_mail_address]
     }
   }
+  # the relay's Resend API key (TDCLOUD_RESEND_API_KEY_PARAM): this one parameter, nothing else under hosts/
+  statement {
+    sid       = "MailKey"
+    actions   = ["ssm:GetParameter"]
+    resources = ["${local.param}${local.ssm_hosts_mail_key}"]
+  }
 }
 
 resource "aws_iam_role_policy" "host" {
@@ -190,6 +196,12 @@ data "aws_iam_policy_document" "control" {
       variable = "ses:FromAddress"
       values   = [local.control_mail_address]
     }
+  }
+  # the control plane's Resend API key (TDCLOUD_RESEND_API_KEY_PARAM), read when mail goes out
+  statement {
+    sid       = "MailKey"
+    actions   = ["ssm:GetParameter"]
+    resources = ["${local.param}${local.ssm_control_mail_key}"]
   }
   statement {
     sid       = "EcrLogin"
