@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import fs from 'node:fs'
 import path from 'node:path'
 import { metaSet } from '../src/managed/settings'
+import { parseTrustedProxies } from '../src/web/proxy'
+import { serveWeb } from '../src/web/server'
 import { davSetup, type Dav, type DavEnv } from './dav-helpers'
 import { PASSWORD } from './web-helpers'
 
@@ -300,6 +302,22 @@ describe('what a mounted drive keeps from the product', () => {
     expect((await kim('PROPFIND', '/dav/', { addr: '10.0.0.2', headers: { depth: '0' } })).status).toBe(207)
     for (let i = 0; i < 50; i++) await kim('PROPFIND', '/dav/', { addr: '10.0.0.9', auth: e.basic(`n${i}`, 'x'), headers: { depth: '0' } })
     expect((await kim('PROPFIND', '/dav/', { addr: '10.0.0.9', headers: { depth: '0' } })).status).toBe(429)
+  })
+  test('behind a trusted proxy (the real listener): failed sign-ins count per forwarded client, not per proxy', async () => {
+    const pw = await e.appPassword(await e.as('lee'))
+    const s = serveWeb(e.ctx, 0, '127.0.0.1', { webDir: '/nonexistent', trustedProxy: parseTrustedProxies('127.0.0.1'), mailer: e.w.mailer })
+    try {
+      const url = `http://127.0.0.1:${s.server.port}/dav/`
+      const go = (client: string, user: string, secret: string) => fetch(url, { method: 'PROPFIND', headers: {
+        depth: '0', 'x-forwarded-for': client, 'x-forwarded-proto': 'https', authorization: e.basic(user, secret) } }).then((r) => r.status)
+      // fifty failures from one client behind the proxy (different names, so the per-name limit stays out of it)
+      for (let i = 0; i < 50; i++) expect(await go('203.0.113.7', `nobody${i}`, 'tdrive_app_wrong')).toBe(401)
+      expect(await go('203.0.113.7', 'lee', pw)).toBe(429)
+      // another client behind the same proxy is not affected
+      expect(await go('198.51.100.9', 'lee', pw)).toBe(207)
+      // a remote client behind the proxy over plain http (no X-Forwarded-Proto: https) is refused, though the Host is loopback
+      expect(await fetch(url, { method: 'PROPFIND', headers: { depth: '0', 'x-forwarded-for': '198.51.100.9', authorization: e.basic('lee', pw) } }).then((r) => r.status)).toBe(403)
+    } finally { s.server.stop(true) }
   })
   test('revoked, deactivated, reset: the next request is refused', async () => {
     const b = await e.as('lee')

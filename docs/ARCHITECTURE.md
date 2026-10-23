@@ -309,7 +309,8 @@ Explorer (Map network drive). Settings → "Mount as a drive" shows the address 
   revoked by a password reset, refused for inactive people) and their sign-in name or address. Agent tokens and Bearer
   are never accepted. Plain http is refused before any password is looked at, unless both the peer and the Host are
   loopback; `X-Forwarded-Proto: https` from the proxy counts as https. Failed sign-ins: 10 per name and 50 per address
-  per 15 minutes (SQLite, like the web sign-in) → 429.
+  per 15 minutes (SQLite, like the web sign-in) → 429. The address is the client's as `serve --trusted-proxy`
+  resolves it (src/web/proxy.ts), so people behind one proxy (Caddy in Trina Cloud) do not share a limit.
 - **What.** `Access.forPerson` like the web; only managed team folders are listed (in-place NAS folders are hidden:
   they change where they live, and read-only folders on a drive invite saves that can only fail). Hidden == missing
   (404, or 409 "the folder does not exist" for a new name under it — the same answer as for a folder that is not there).
