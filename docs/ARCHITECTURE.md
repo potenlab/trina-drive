@@ -58,6 +58,9 @@ src/redact.ts      secrets out of audit rows                src/ratelimit.ts  si
 src/client/mcp.ts  `mcp add claude|codex|cursor` (runs on the person's computer)
 src/managed/       managed storage (cloud mode): settings, file system side (core.ts), what people do decided by the
                    policy (ops.ts), resumable uploads, team folders, the HTTP side (web.ts)
+src/dav/           WebDAV mount at /dav/ (handler.ts), app passwords (apppw.ts), locks, a small strict XML parser
+src/gdrive/        Google Drive import: config, Google client (injectable fetch), sealed tokens (store.ts), jobs (importer.ts), HTTP
+src/secretbox.ts   AES-256-GCM sealing of small secrets with the install's data key
 src/notify/        events, recipients, messages (R11), notifier (inbox, coalescing, rate limit, digest), channels
                    (Slack, outbox, smtp), bulk-read alarm, connections, audit anchor, its CLI and tables (schema.ts)
 sim/provenance-day.ts   plan ★8 replay                      test/           bun test
@@ -135,6 +138,8 @@ or `src/policy.ts` (drafts, R4 with the session as a full-scope token). What the
 | drafts (own, R4) | `GET drafts` (+ locked count and dates), `GET drafts/:id/download` |
 | files (read, R1) | `GET files?path=` (list; `writable`/`managed` per folder), `GET files/stat`, `GET files/download` (attachment only; streamed in managed storage), `GET files/text` (extracted, 1 MB), `GET files/who`, `GET search?q=&path=` — see "Files on the web" |
 | managed storage (write, R0/R1) | `POST files/folder` `{path, name, exist_ok?}`, `POST files/upload?path=&conflict=fail\|rename\|replace` (multipart, field `file`, ≤ 16 MB), `POST uploads` `{path, name, size, sha256?, conflict?}` → `PUT uploads/:id?offset=` (raw chunk ≤ 8 MB, `X-Chunk-Sha256`) → `POST uploads/:id/complete` `{conflict?}` (`GET`/`DELETE uploads/:id`), `POST files/rename` `{path, name}`, `POST files/move` `{paths, to, conflict?}`, `POST files/copy` `{paths, to}`, `POST files/delete` `{paths}` (→ trash), `GET files/versions?path=`, `GET files/versions/download?path=&v=`, `POST files/versions/restore` `{path, version}`, `GET trash`, `POST trash/:id/restore`, `DELETE trash/:id`, `POST trash/empty`, `POST files/share` `{path}` (→ folder page id, managers), `GET storage` (admin) — see "Managed storage" |
+| Google Drive import | `GET gdrive` (`{enabled:false}` unless configured), `POST gdrive/connect` `{return_path}` → `{url}`, `GET gdrive/callback` (from Google), `GET gdrive/picker`, `DELETE gdrive`, `POST gdrive/import` `{path, items:[{id}]}` → job, `GET gdrive/jobs`, `GET gdrive/jobs/:id` — see "Google Drive import" |
+| app passwords (own) | `GET me/app-passwords` (+ the address to mount), `POST me/app-passwords` `{name, password?}` (fresh login; shown once), `DELETE me/app-passwords/:id` — see "Mount as a drive" |
 | OAuth consent | `GET oauth/requests/:id`, `POST oauth/requests/:id/approve` `{folders \| all, read_only, ttl}`, `POST oauth/requests/:id/deny` → `{redirect_to}` (src/oauth/consent.ts) |
 | audit | `GET audit?view=mine` · `view=folders` (folders you manage; others' command lines hidden) · `view=summary` (admin: who, which connection, how many; hash-chain check) |
 | second step of sign-in | `POST login` answers `{second_factor: {ticket, methods, passkey}}` (no cookie) for someone with a second factor; `POST login/second` `{ticket, method: passkey\|totp\|recovery, response\|code}` → session. A reset link (`links/accept`) asks for it too |
@@ -287,6 +292,70 @@ mode (NAS / Mac folders read where they are) is unchanged; both can live on one 
   line with files put in by hand.
 - **The reconciler** never walks managed folders: only this server writes there, each change is audited as it is made,
   and a person's move is not an R10 quarantine.
+
+## Mount as a drive (WebDAV)
+
+`src/dav/`. Managed storage can be mounted in Finder (Go → Connect to Server, `https://<server>/dav/`) or Windows
+Explorer (Map network drive). Settings → "Mount as a drive" shows the address and the steps.
+
+- **Protocol.** RFC 4918 class 1 and 2: `OPTIONS` (also at `/`, which Windows asks first), `PROPFIND` depth 0/1
+  (infinity → 403 `propfind-finite-depth`; live props incl. RFC 4331 quota), `GET`/`HEAD` with one byte range,
+  `If-None-Match`/`If-Range`, `PUT` (streamed to staging, chunked bodies fine, no partial PUT), `MKCOL`, `DELETE` (to the
+  trash), `MOVE`/`COPY` (`Destination`, `Overwrite`, depth 0/infinity for folders), `LOCK`/`UNLOCK` (exclusive and
+  shared write locks, depth 0/infinity, refresh, lock-null = an empty file, at most 1 h, kept in memory, owned by the
+  person), `If` headers (tokens and ETags, `Not`, tagged lists) and `PROPPATCH` (answered per property; dead properties
+  are not kept, `DAV:` ones are protected). Request XML ≤ 64 KB, no DTDs.
+- **Who.** Basic auth with a person's **app password** (Settings; 160 random bits, shown once, sha256 kept, revocable,
+  revoked by a password reset, refused for inactive people) and their sign-in name or address. Agent tokens and Bearer
+  are never accepted. Plain http is refused before any password is looked at, unless both the peer and the Host are
+  loopback; `X-Forwarded-Proto: https` from the proxy counts as https. Failed sign-ins: 10 per name and 50 per address
+  per 15 minutes (SQLite, like the web sign-in) → 429.
+- **What.** `Access.forPerson` like the web; only managed team folders are listed (in-place NAS folders are hidden:
+  they change where they live, and read-only folders on a drive invite saves that can only fail). Hidden == missing
+  (404, or 409 "the folder does not exist" for a new name under it — the same answer as for a folder that is not there).
+- **Writes** go through `Managed` with tool `webdav`: write on the folder that changes, quota (507), the largest file
+  (413), a PUT over a file is a new version, `MOVE` of a file onto a file makes a new version of the destination (its
+  history stays) and sends the source to the trash; copies of folders copy what the person sees.
+- **Audit.** Every change; every full `GET`; ranged reads of one file once per 10 minutes; a folder listing once per
+  folder per 10 minutes (Finder lists constantly); probes of missing names are not logged.
+- **Client files.** `._*`, `.DS_Store`, `~$*`, `Thumbs.db`, `desktop.ini`, `.localized` are held in memory per person
+  for a day (so the client gets its answers) and never stored or shown to anyone else.
+- **Bodies.** Bun's request limit is raised to the largest file size when WebDAV is on; every other path keeps
+  `LIMITS.requestBytes` (`capBody` in src/web/server.ts). File bytes are always `application/octet-stream`, attachment,
+  `nosniff`, `CSP: sandbox` (the app's session lives on this origin).
+
+## Google Drive import
+
+`src/gdrive/`. Plan: `drive.file` (non-sensitive: no Google verification, no user cap) + the Google Picker.
+On when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_API_KEY` are set and storage is managed; otherwise every
+route is 404 and the app shows nothing. In the Google Cloud console: an OAuth web client with the redirect URI
+`<public url>/api/gdrive/callback`, the Drive API and the Picker API enabled, and a browser key restricted to the Picker
+API and the site's address.
+
+- **Connect** (Settings → Google Drive, or Files → New → Import from Google Drive): `POST /api/gdrive/connect` answers
+  Google's consent URL (`openid email drive.file`, offline, PKCE S256) and sets a 10-minute `tdrive_gdrive` cookie
+  (SameSite=Lax, path = the callback) binding the round trip to this browser. The callback needs the state (once, 10
+  min) and that cookie: a person cannot slip their Google account into someone else's Trina. A Drive scope left unticked
+  on Google's granular consent → nothing is stored. Tokens are sealed (AES-256-GCM, purpose bound to the person) with the
+  data key (`src/secretbox.ts`). **Disconnect** revokes the grant at Google and deletes the row.
+- **Pick.** `GET /api/gdrive/picker` gives the browser the person's own access token (≤ 1 h), the browser key and the
+  app id; the Picker grants the picked files to the app.
+- **Import** (`POST /api/gdrive/import`): the target folder is judged first (404/403 as for an upload), then a job runs
+  in the server and the app polls it (progress panel). Per file: metadata, then Google Docs/Sheets/Slides exported as
+  docx/xlsx/pptx (Drawings as pdf; over files.export's 10 MB limit, the file's own export link), other files downloaded
+  as they are; streamed to staging, then `Managed.put` (tool `web`, via `gdrive-import`): write rule, quota, largest
+  file, audit, the text mirror (so the extraction is there for agents like any upload), and a taken name gets " (1)".
+  Forms, sites and shortcuts fail per item. Google's 429 / rate-limit answers are retried with backoff; an expired token
+  is refreshed once; a revoked grant marks the connection broken.
+- **Re-import.** `gdrive_files` maps (Google file id, folder row) → the file row: importing the same file into the same
+  folder again replaces that file (wherever it was renamed to inside the folder) as a new version, or does nothing when
+  Google's `modifiedTime` and `version` are unchanged. Another folder → another file.
+- **Folders.** Only with `TDRIVE_GDRIVE_READONLY=1` (adds `drive.readonly`, a restricted scope: Google's unverified
+  screen and a lifetime cap of 100 users per Cloud project until verified + CASA): a picked folder is imported
+  recursively (≤ 20 levels, ≤ 5000 files per import), subfolders made with "exist ok". Without it a picked folder fails
+  with "pick the files inside".
+- **Limits.** One-shot imports, not a sync (re-import to update). Jobs live in memory (a restart ends running ones).
+  The app page's CSP allows `apis.google.com` scripts and Google frames only when the feature is on.
 
 ## In-place reconciler
 
