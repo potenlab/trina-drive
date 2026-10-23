@@ -1,13 +1,14 @@
 ---
 // Variant B: "Shared with the whole team, safely" — three cards with small UI illustrations in plain terms (who sees
-// which folder, a draft with its sources, the access log). Illustrations are decorative; the card text says it in words.
+// which folder, a draft with its sources, the access log), then the limits in three lines (full promise on /security).
+// Illustrations are decorative; the card text says it in words.
 import type { CopyB } from '../../content/en-b'
 import Icon from '../Icon.astro'
 interface Props { t: CopyB }
 const { t } = Astro.props
 const s = t.safe
 ---
-<section class="section section-tint" id="safe" aria-labelledby="safe-title">
+<section class="section section-tint" id="security" aria-labelledby="safe-title">
   <div class="container">
     <div class="section-head" data-reveal>
       <span class="eyebrow">{s.eyebrow}</span>
@@ -58,10 +59,15 @@ const s = t.safe
           <div class="bento-text">
             <span class="bento-icon"><Icon name={it.icon} /><span class="bento-label">{it.label}</span></span>
             <h3>{it.title}</h3>
-            <p>{it.body}</p>
+            {it.body && <p>{it.body}</p>}
           </div>
         </li>
       ))}
     </ul>
+    <div class="lim" data-reveal>
+      <p class="lim-title"><Icon name="eye" />{t.security.limitsTitle}</p>
+      <ul>{t.security.limits.map((x) => <li>{x}</li>)}</ul>
+      <a class="lim-link" href="/security">{t.security.link}<span aria-hidden="true">→</span></a>
+    </div>
   </div>
 </section>

@@ -3,7 +3,7 @@
 // non-developer reads first is rewritten in plain language here.
 //
 // Accuracy rules (same as en.ts): no "real bash"; AI can't change originals *through Trina Drive*; open source =
-// "release coming soon"; never say Drive connectors can't read files; no fake logos, testimonials or YC claims; USD.
+// "source on GitHub, license coming soon"; never say Drive connectors can't read files; no fake logos, testimonials or YC claims; USD.
 // Client logos: only official files the brand allows (public/logos/SOURCES.md); Claude stays text (needs approval).
 // claude.ai / Claude apps and ChatGPT connect over OAuth in v0.2 ("rolling out"); Codex app, Codex CLI, Claude Code
 // and Cursor connect today. Drafts are Markdown or CSV. PDFs are read by their text layer (no OCR before v0.3).
@@ -43,7 +43,7 @@ const enB = {
     pill: 'Claude and ChatGPT connections rolling out now',
     title: 'Your company folders,',
     titleAccent: 'as your team’s AI knowledge base.',
-    sub: 'Ask Claude or ChatGPT about anything in your company’s files — last quarter’s numbers, past proposals, every contract — and get answers from the real documents. No uploading, no setting up a knowledge base. Each person’s AI only sees what they’re allowed to.',
+    sub: 'Ask Claude or ChatGPT about your company’s files. No uploads. Everyone sees only what they should.',
     primary: 'See what your team can ask',
     secondary: 'Book a setup call',
   },
@@ -155,64 +155,45 @@ const enB = {
       },
     ] as ChatTurn[],
   },
-  // Use cases by role. `before` is the pain in the person's own words.
+  // Use cases by role: the question as asked, and what comes back.
   useCases: {
     eyebrow: 'What your team can do',
-    title: 'Questions your team asks every week — answered from your own files.',
-    sub: 'The jobs small teams ask AI for most — find it, draft it, summarize it — done with your own files. Everyone asks in their own AI app, and every answer names the files it came from.',
+    title: 'Questions your team asks every week.',
+    sub: 'Ask in your own AI app. Every answer names its files.',
     all: 'All',
     roles: ['Founder', 'Ops & Finance', 'Sales', 'Projects', 'HR & People'],
     askLabel: 'Ask',
     getLabel: 'You get',
-    beforeLabel: 'Before',
     items: [
       {
         role: 'Founder',
-        prompt: 'Summarize Q3’s close for the partners: revenue, margin and cash against budget, the biggest variances, and what to ask our accountant.',
-        get: 'A one-page table with a short explanation, every number traced to the spreadsheet it came from.',
-        before: 'The bookkeeper sends five spreadsheets, and turning them into “how did we actually do?” takes an evening.',
+        prompt: 'Summarize Q3’s close: revenue, margin and cash against budget.',
+        get: 'A one-page table, each number traced to its file.',
       },
       {
         role: 'Sales',
-        prompt: 'Draft a proposal for Lumen Coffee — brand refresh and a new website, about $60k, 12 weeks — modeled on our last three retail proposals and our rate card.',
-        get: 'A draft in your house style with a pricing table, saved for a teammate to review before it goes out.',
-        before: 'Every proposal starts with digging through old ones, copy-pasting sections and fixing prices by hand.',
+        prompt: 'Draft a Lumen Coffee proposal like our last three.',
+        get: 'A draft in your house style, saved for review.',
       },
       {
         role: 'Projects',
-        prompt: 'I have a call with Oakline tomorrow. What’s in our signed scope, what have we promised since, and what’s still open?',
-        get: 'A one-page brief — scope, promises, open items, risks — each line pointing to the contract or meeting note.',
-        before: 'Rereading the contract and three months of meeting notes before every client call.',
+        prompt: 'Oakline call tomorrow: what’s in scope, and what’s still open?',
+        get: 'A one-page brief, each line with its source.',
       },
       {
         role: 'Ops & Finance',
-        prompt: 'Across all active client contracts, which ones let us show the work in our portfolio, and what’s the termination notice?',
-        get: 'A table of clients, clauses and notice periods, with the contract each came from.',
-        before: 'Opening thirty PDFs one by one whenever a client asks about rights or notice periods.',
+        prompt: 'Which client contracts let us show the work publicly?',
+        get: 'Clients and clauses in one table.',
       },
       {
         role: 'HR & People',
-        prompt: 'I’m working from Lisbon for two weeks in December. What do I need to do, and can I expense a coworking space?',
-        get: 'A short answer quoted from the handbook and the expense policy, with section numbers.',
-        before: 'The office manager answers the same leave and expense questions every week.',
-      },
-      {
-        role: 'Projects',
-        prompt: 'Go through this week’s Lumen meeting notes: action items by owner and due date, then a recap email for the client.',
-        get: 'An action table and a client-ready email draft, with internal comments left out.',
-        before: 'Notes sit in five documents, action items get lost, and the recap goes out a day late.',
+        prompt: 'Working from Lisbon for two weeks. Can I expense coworking?',
+        get: 'A short answer quoted from the handbook.',
       },
       {
         role: 'Ops & Finance',
-        prompt: 'Compare the three print quotes for the packaging run: unit price, minimum order, lead time and payment terms.',
-        get: 'One comparison table, plus what each quote leaves out.',
-        before: 'Quotes arrive as PDFs in three formats, and someone rebuilds the comparison by hand.',
-      },
-      {
-        role: 'Sales',
-        prompt: 'Answer the supplier questionnaire in the Acme folder from our past bids and certifications. Mark anything you can’t find.',
-        get: 'A filled-in draft with sources, and a short list of gaps for you to answer.',
-        before: 'Every tender asks the same sixty questions, answered from scratch.',
+        prompt: 'Compare the three print quotes: price, minimum, lead time.',
+        get: 'One table, plus what each quote leaves out.',
       },
     ],
   },
@@ -220,32 +201,32 @@ const enB = {
   // Not customers and not testimonials: these are about AI tools in general, not about Trina Drive.
   pains: {
     title: 'Sound familiar?',
-    sub: 'What people say about using AI with their company’s files today.',
+    sub: '',
     items: [
       {
         quote: 'A lot of my AI chats are about copy pasting bits of information into a chat just to create enough of a context',
         where: 'Hacker News',
         href: 'https://news.ycombinator.com/item?id=45692241',
-        answer: 'Nothing to paste or upload: the AI reads your folders directly.',
+        answer: 'Nothing to paste. The AI reads your folders.',
       },
       {
         quote: 'If ChatGPT continues using an older uploaded version, it can give outdated guidance while appearing confident.',
         where: 'OpenAI Developer Community',
         href: 'https://community.openai.com/t/chatgpt-projects-live-updating-project-source-documents/1383881',
-        answer: 'Always the current file, from where it lives.',
+        answer: 'Always the current file.',
       },
       {
         quote: 'There’s ZERO way our legal team will let us connect ChatGPT to Google Drive for example.',
         where: 'Hacker News',
         href: 'https://news.ycombinator.com/item?id=45692241',
-        answer: 'You choose, folder by folder, whose AI may read what.',
+        answer: 'You choose whose AI reads which folder.',
       },
     ],
   },
   works: {
     eyebrow: 'Works where you already work',
     title: 'Keep your AI app. Keep your folders.',
-    sub: 'Nobody learns a new tool and nothing moves. Trina Drive sits between the AI apps your team already pays for and the folders your files already live in.',
+    sub: 'Nothing moves, and nobody learns a new tool.',
     appsTitle: 'The AI apps your team uses',
     apps: [
       { name: 'Claude app & claude.ai', note: 'desktop, web and mobile', status: 'soon' },
@@ -258,60 +239,28 @@ const enB = {
     soon: 'rolling out (v0.2)',
     filesTitle: 'Where your files already live',
     files: [
-      { icon: 'nas', name: 'A NAS', note: 'Synology, QNAP and other shared drives on your network' },
-      { icon: 'mac', name: 'A folder on the office Mac', note: 'Including scans and exports saved there' },
-      { icon: 'folder', name: 'A synced cloud folder', note: 'A Google Drive or Dropbox folder synced to that Mac' },
+      { icon: 'nas', name: 'A NAS', note: 'Synology, QNAP and others' },
+      { icon: 'mac', name: 'A folder on the office Mac', note: 'Scans and exports too' },
+      { icon: 'folder', name: 'A synced cloud folder', note: 'Google Drive or Dropbox, synced' },
     ],
-    filesNote: 'Files stay where they are. People keep opening them in Finder, Explorer and Office as before.',
+    filesNote: 'People keep using Finder, Explorer and Office.',
     center: 'Trina Drive',
     centerNote: 'on a Mac mini in your office',
   },
-  // Enterprise way vs small-team way, in plain language. Same shape as en.kb.
-  kb: {
-    eyebrow: 'No knowledge-base project',
-    title: 'Enterprises build ontologies. Small teams have folders.',
-    sub: 'Big companies spend months turning their documents into something an AI can use. Your team already has that: your folders.',
-    cols: [
-      {
-        name: 'The enterprise way',
-        tag: 'Knowledge graphs · data pipelines · consultants',
-        points: [
-          'Months of mapping your documents before anyone can ask a question',
-          'Consultants to design it, a team to keep it up to date',
-          'Every new file has to be processed before the AI can find it',
-          'Answers stitched together from fragments — hard to check',
-        ],
-        foot: 'Built for companies with a data team and a budget',
-        us: false,
-      },
-      {
-        name: 'The small-team way',
-        tag: 'Trina Drive',
-        points: [
-          'Point it at the folders you already have',
-          'Your AI looks through the files themselves, the way a colleague would',
-          'Every answer names the files it came from',
-          'Running in an afternoon — we set it up, or self-host it free',
-        ],
-        foot: 'For teams of 5 to 20',
-        us: true,
-      },
+  // One compact comparison in plain language (same shape as en.compare). Never say Drive connectors can't read files.
+  compare: {
+    eyebrow: 'Why it’s different',
+    title: 'No knowledge-base project. No one-file connector.',
+    sub: 'Your AI searches inside every shared folder at once, where files already live.',
+    cols: ['Knowledge-base project', 'Drive connector', 'Trina Drive'],
+    rows: [
+      { label: 'Getting started', cells: ['Months of mapping documents', 'Files in Google Drive first', 'Point at the folders you have'] },
+      { label: '“Which contracts…?”', cells: ['Answers from fragments', 'Opens files one at a time', 'Searches inside all of them at once'] },
+      { label: 'A file changes', cells: ['Processed again first', 'Read it again', 'Next question sees it'] },
     ],
-  },
-  // vs. a cloud-drive connector. Don't claim connectors can't read files: they read one at a time.
-  gdrive: {
-    eyebrow: 'vs. a Google Drive connector',
-    title: 'Ask across all your files, not one at a time.',
-    sub: 'The Drive connectors in Claude and ChatGPT find a file and read it — fine for one document. Questions like “which contracts…” need every file checked. Trina Drive lets your AI search inside all of them at once.',
-    left: {
-      name: 'Drive connector',
-      points: ['Reads files one at a time', 'Can’t check every file for a phrase in one go', 'Your files must live in Google Drive first'],
-    },
-    right: {
-      name: 'Trina Drive',
-      points: ['Searches inside every shared folder at once', 'Reads PDFs, Word, Excel and PowerPoint', 'Answers name the files they came from', 'Works with the NAS and folders you already have'],
-    },
+    demoLabel: 'One question, every folder',
     demo: [] as string[],
+    types: ['PDF', 'Word', 'Excel', 'PowerPoint'],
     search: {
       query: 'renewal date',
       count: '3 files across Contracts, Projects and Shared',
@@ -326,25 +275,25 @@ const enB = {
   safe: {
     eyebrow: 'Safe to share',
     title: 'Shared with the whole team, safely.',
-    sub: 'One AI knowledge base for the whole team doesn’t mean everyone sees everything.',
+    sub: 'One knowledge base doesn’t mean everyone sees everything.',
     items: [
       {
         icon: 'filter',
         label: 'Access',
         title: 'Each person’s AI sees only what they may.',
-        body: 'Choose, folder by folder, whose AI may read it. Sam in Finance can ask about the numbers; for everyone else’s AI, the finance folder simply isn’t there.',
+        body: '',
       },
       {
         icon: 'draft',
         label: 'Originals',
         title: 'Through Trina Drive, AI writes drafts, not originals.',
-        body: 'AI can’t change or delete your files through Trina Drive. It saves drafts that remember which folders they came from, and a teammate moves them where they belong.',
+        body: '',
       },
       {
         icon: 'log',
         label: 'Record',
         title: 'Every file an AI opens is on the record.',
-        body: 'Who asked, from which app, which file. Owners see it in one log, and a quiet rewrite of that log gets caught.',
+        body: '',
       },
     ],
     views: [
@@ -360,60 +309,40 @@ const enB = {
     ],
     logNote: 'Checked against a copy kept off the server',
   },
-  // Same promise (word for word) as en.security; protect/limits rewritten in plain language.
+  // Same promise (word for word) as en.security, which /security shows; the three limits in plain language.
   security: {
     ...en.security,
-    protect: [
-      'Each person’s AI can read only the folders that person is allowed to — and you can narrow it further.',
-      'Folders an AI isn’t allowed to see don’t show up at all, not even their names.',
-      'Through Trina Drive nobody can change or delete your original files — not even admins.',
-      'A newly added folder is hidden from every AI until you choose who may use it.',
-      'Connections expire, can be cut off instantly, and a new device triggers an alert.',
-      'Every file an AI opens is recorded, and a quiet edit to that record gets caught.',
-    ],
     limits: [
-      'What an AI reads goes to the AI company you use. Mark folders that must never leave as “No AI”.',
-      'The protection covers access through Trina Drive. Someone opening the NAS directly from a laptop goes around it.',
-      'It can’t make an AI immune to instructions hidden in documents (prompt injection). It limits what the AI can reach and records what it read.',
-      'Copies an AI keeps in its own memory, or that someone saves to their laptop, aren’t tracked.',
-      'It doesn’t copy your NAS permissions automatically: you choose, folder by folder, whose AI may read it.',
+      'What AI reads goes to your AI company; use “No AI” folders.',
+      'Covers access through Trina Drive only.',
+      'Can’t stop instructions hidden in documents; it limits and records.',
     ],
   },
   pricing: {
     ...en.pricing,
     title: 'We set it up and run it. Or self-host it free.',
-    sub: 'Built for teams of 5 to 20. On a managed plan we install and run Trina Drive on your office Mac mini — updates, backups and monitoring included. Priced on AI-connected people; everyone who only opens files is free. Every security feature is also free to self-host.',
+    sub: 'Priced on AI-connected people. File-only people are free.',
   },
   setup: {
     eyebrow: 'Set up for you',
-    title: 'One call, and your team is asking questions.',
-    sub: 'We set it up on a Mac mini in your office, connect your folders, and get your team’s AI apps connected — in one call. No IT team needed.',
+    title: 'One call, and your team is asking.',
+    sub: 'We set it up in your office. No IT team needed.',
     steps: [
-      {
-        title: 'Book a call',
-        body: 'We go through your folders with you and decide together who should see what.',
-      },
-      {
-        title: 'We set it up in your office',
-        body: 'Trina Drive runs on a Mac mini on your own network, and we connect the folders you chose. We install it remotely, or on site in Korea.',
-      },
-      {
-        title: 'Everyone connects their AI app',
-        body: 'Each person signs in once from their AI app. We walk the team through it on the call, then keep it running: updates, backups and monitoring.',
-      },
+      { title: 'Book a call', body: 'Decide together who should see what.' },
+      { title: 'We set it up in your office', body: 'A Mac mini on your network. Remote, or on-site in Korea.' },
+      { title: 'Everyone connects their AI app', body: 'One sign-in each. We keep it updated and backed up.' },
     ],
     selfTitle: 'Have someone technical?',
-    selfBody: 'The same software is free to self-host, with every security feature. It needs someone comfortable with a terminal.',
+    selfBody: 'Self-host free, with every security feature.',
     selfLink: 'Install guide',
   },
   devs: {
     eyebrow: 'For developers',
     title: 'Also in Claude Code, Codex CLI and Cursor.',
-    sub: 'Developers connect with one command. Their agents use the commands they already know — ls, grep, cat — over only the folders their person may read, including the text inside PDF and Office files.',
+    sub: 'One command. ls, grep and cat over only the folders they may read.',
     points: [
-      'A personal token per person, kept in the Keychain, 7 days by default',
-      'Narrow any token to one folder, read-only, or a shorter time',
-      'Writes go to the draft box; every call lands in the audit log',
+      'Personal token in the Keychain, 7 days by default',
+      'Narrow to one folder, read-only, or less time',
     ],
     install: 'tdrive mcp add claude',
     link: 'Developer docs',
@@ -423,48 +352,34 @@ const enB = {
     items: [
       {
         q: 'Do I need to know anything technical?',
-        a: 'No. On a managed plan we set everything up on a Mac mini in your office, connect your folders and walk your team through connecting their AI apps. After that, people just ask questions in Claude, ChatGPT or Codex as they do today. Self-hosting is free, but it needs someone comfortable with a terminal.',
+        a: 'No. We set it up and connect your team’s AI apps. Self-hosting is free but needs someone comfortable with a terminal.',
       },
       {
         q: 'Which AI apps work?',
-        a: 'The Codex app and the developer tools (Claude Code, Codex CLI, Cursor) work today. Connections for Claude (claude.ai and the desktop and mobile apps) and ChatGPT are built and rolling out in v0.2. In ChatGPT, Trina Drive is added as a custom connector, which needs developer mode; which ChatGPT plans allow it is up to OpenAI.',
+        a: 'The Codex app, Claude Code, Codex CLI and Cursor today. Claude and ChatGPT connections are rolling out in v0.2; ChatGPT adds it as a custom connector in developer mode, on plans where OpenAI allows it.',
       },
       {
         q: 'Do I have to move our files?',
-        a: 'No. Trina Drive reads the folders where your files already are — a NAS, a folder on the office Mac, or a Google Drive or Dropbox folder synced to that Mac. There is no direct connection to Google Drive itself. Nothing is copied to us, and people keep using Finder, Explorer and Office.',
+        a: 'No. It reads them where they are: a NAS, the office Mac, or a Google Drive or Dropbox folder synced to it. Nothing is copied to us.',
       },
       {
         q: 'Is our data used to train AI?',
-        a: 'Trina Drive doesn’t train any AI model, and your files aren’t copied to us. When someone’s AI reads a file, that text goes to the AI company they use (Anthropic, OpenAI and others), under the terms of your plan with that company — whether it may be used for training is set there, not by us. Folders that must never reach an AI company can be marked “No AI”.',
+        a: 'Trina Drive trains no model. Text an AI reads goes to your AI company, under your plan with them. Mark folders “No AI” to keep them out.',
       },
       {
-        q: 'How is this different from uploading files to ChatGPT or Claude?',
-        a: 'Uploads are copies: each person uploads their own, and they go out of date the moment someone edits the original. With Trina Drive the AI reads the current files where they live, and only the folders that person is allowed to see.',
+        q: 'How is this different from uploading files?',
+        a: 'Uploads are copies that go stale. Here the AI reads the current file, and only where that person may look.',
       },
       {
         q: 'Can the AI change or delete our files?',
-        a: 'Not through Trina Drive. Originals are read-only there, for everyone including admins. The AI saves drafts (text or spreadsheet files) in a separate draft box, and a person decides where they go.',
+        a: 'Not through Trina Drive: originals are read-only there, even for admins. The AI saves drafts, and a person decides where they go.',
       },
-      {
-        q: 'Why not just use a Google Drive connector?',
-        a: 'If your files already live in Google Drive and your questions are about one document at a time, that is a sensible choice. A connector reads one file at a time; it can’t check every file for a phrase in one go. Trina Drive searches inside every registered folder at once, on the NAS or Mac you already have.',
-      },
-      {
-        q: 'How is this different from a RAG or knowledge-graph product?',
-        a: 'There is nothing to model or pre-process. The AI searches your folders and reads the files themselves, so when a file changes, the next question sees the change. Text inside PDF and Office files is pulled out the first time it’s needed and kept for next time.',
-      },
-      {
-        q: 'Someone left, or a laptop was lost. Now what?',
-        a: 'Cut off their connection in the web app; the very next request fails. Connections also expire on their own, and the owner is alerted when a new device starts using one.',
-      },
-      en.faq.items[9]!,
-      en.faq.items[10]!,
     ],
   },
   cta: {
     ...en.cta,
-    title: 'Give your team an AI knowledge base without building one.',
-    sub: 'Book a call. We set it up on a Mac mini in your office and connect your team’s AI apps.',
+    title: 'An AI knowledge base, without building one.',
+    sub: 'Book a call. We set it up and connect your team.',
     primary: 'Book a setup call',
     secondary: 'See pricing',
   },
