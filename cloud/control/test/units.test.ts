@@ -91,12 +91,13 @@ describe('slugs and config', () => {
 describe('docker commands for a team', () => {
   class Rec implements Runner {
     calls: string[][] = []
+    constructor(private initOut = 'web setup token (one use, 7 days; ...):\ntdrive_setup_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345\n') {}
     async run(_h: string, argv: string[]) {
       this.calls.push(argv)
       const a = argv.join(' ')
       if (a.includes('inspect -f {{.State.Running}}')) return { code: 1, stdout: '', stderr: 'No such object' }
       if (a.includes('inspect -f')) return { code: 0, stdout: 'running healthy', stderr: '' }
-      if (argv.includes('init')) return { code: 0, stdout: 'web setup token (one use, 7 days; ...):\ntdrive_setup_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345\n', stderr: '' }
+      if (argv.includes('init')) return { code: 0, stdout: this.initOut, stderr: '' }
       if (argv.includes('keygen')) return { code: 0, stdout: 'tdrive_bksec1_xyz\n', stderr: '' }
       return { code: 0, stdout: '', stderr: '' }
     }
@@ -106,6 +107,13 @@ describe('docker commands for a team', () => {
     dataMount: (s, ro) => `type=volume,src=tdc-data-${s},dst=/data${ro ? ',readonly' : ''}`, stagingMount: (s) => `type=bind,src=/st/${s},dst=/backup`, envFile: (s) => `/st/${s}.env`,
     prepare: async () => {}, cleanup: async () => {}, ship: async () => [], publicIp: async () => '198.51.100.7',
   }
+  test('SSO-only drives print no setup token: create still succeeds; any other silence fails', async () => {
+    const spec = { slug: 'acme', number: 3, uid: 20003, url: 'https://acme.cloud.example.com', plan: PLANS.team, net: teamNet(DEFAULT_TEAM_SUBNETS, 3), image: 'trina-drive:1', env: {} }
+    const sso = new DockerDriver({ name: 't', runner: new Rec('web setup is already done (an admin can sign in)\n'), layout, caddyContainer: 'tdc-caddy', helperImage: 'h', pickHost: async () => 'x' })
+    expect((await sso.create('x', spec)).setupToken).toBeNull()
+    const mute = new DockerDriver({ name: 't', runner: new Rec(''), layout, caddyContainer: 'tdc-caddy', helperImage: 'h', pickHost: async () => 'x' })
+    await expect(mute.create('x', spec)).rejects.toThrow('printed no setup token')
+  })
   test('the container gets its own uid, network, limits and the bwrap settings; no ports, no docker socket', async () => {
     const rec = new Rec()
     const d = new DockerDriver({ name: 't', runner: rec, layout, caddyContainer: 'tdc-caddy', helperImage: 'h', pickHost: async () => 'x' })

@@ -517,7 +517,8 @@ The link works once, for 15 minutes. If you didn't ask for it, ignore this mail.
       // SSO (review #6): the setup token is never mailed — people come in through the console ("Open drive"); the
       // token made by `tdrive init` dies unused (the drive refuses /api/setup under TDRIVE_SSO_ONLY)
       if (this.cfg.sso) await this.sendReadyMail(t)
-      else await this.sendSetupLink(t, r.setupToken)
+      else if (r.setupToken) await this.sendSetupLink(t, r.setupToken)
+      else throw new Error('tdrive init printed no setup token')
     } catch (e) {
       audit(this.db, { actor: 'system', action: 'team.setup_link_failed', teamId: t.id, detail: { error: (e as Error).message.slice(0, 300) } })
       await this.alertOps(`setup link for ${t.slug} not sent`, `${(e as Error).message}\n\nWhen mail works: teams resend-setup ${t.slug}`)
