@@ -34,7 +34,7 @@ const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>':
 const paint = (cmd) => esc(cmd).replace(/\$MINA/g, '<span class="mina">$MINA</span>').replace(/\$SAM/g, '<span class="sam">$SAM</span>')
 let timeline = [], DURATION = 0
 function build(steps) {
-  let t = 0.4
+  let t = 0
   timeline = steps.map((s) => {
     const e = { s, noteAt: s.note ? t : null }
     if (s.note) t += NOTE_GAP
