@@ -86,7 +86,8 @@ test('not hosted: nothing changes', async () => {
 })
 
 test('the allowlist is only session, sign-out and enrolment', () => {
-  for (const k of ENROLL_ALLOWED) expect(k).toMatch(/^(GET \/api\/(state|session|me\/2fa)|POST \/api\/(logout|me\/(reauth|passkeys|passkeys\/options|totp\/setup|totp\/confirm|recovery-codes)))$/)
+  // Trina Cloud: re-authenticating through the console (or with a passkey / code) to be able to enrol
+  for (const k of ENROLL_ALLOWED) expect(k).toMatch(/^(GET \/api\/(state|session|me\/2fa|sso\/start)|POST \/api\/(logout|sso\/(callback|second)|me\/(reauth|reauth\/options|passkeys|passkeys\/options|totp\/setup|totp\/confirm|recovery-codes)))$/)
 })
 
 test('--hosted or TDRIVE_HOSTED', () => {

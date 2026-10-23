@@ -18,8 +18,9 @@ describe('route registry', () => {
     expect(authRoutes.some((r) => r.method === 'POST' && r.re.test('/api/login'))).toBe(true)
   })
 
-  test('no route skips the Origin check yet; R() keeps the old raw flag', () => {
-    expect(routes.filter((r) => r.crossOrigin)).toEqual([])
+  test('only the SSO callback skips the Origin check (the console form_posts to it); R() keeps the old raw flag', () => {
+    const open = routes.filter((r) => r.crossOrigin)
+    expect(open.map((r) => [r.method, r.re.test('/api/sso/callback')])).toEqual([['POST', true]])
     expect(R('POST', '/x', true, () => 1, true).raw).toBe(true)
     const cb = R('POST', '/sso/callback', false, () => 1, { raw: true, crossOrigin: true })
     expect([cb.raw, cb.crossOrigin, cb.re.test('/api/sso/callback')]).toEqual([true, true, true])

@@ -71,7 +71,7 @@ export async function create(op: Op, sessionIdHash: string, body: { name?: unkno
   if (!davEnabled(op.w)) throw notFound()
   if (typeof body.name !== 'string' || !body.name.trim() || [...body.name].length > 64 || /\p{Cc}/u.test(body.name)) throw bad('bad_name', 'give it a name (which computer it is for)')
   if (body.password !== undefined) await reauth(op, sessionIdHash, body)
-  if (!freshLogin(db, sessionIdHash)) throw new ApiError(403, 'reauth_required', 'type your password again to make an app password')
+  if (!freshLogin(db, sessionIdHash)) throw new ApiError(403, 'reauth_required', 'prove it is you again to make an app password (password, passkey, authenticator code, or Trina Cloud)')
   const live = db.query<{ n: number }, [number]>('SELECT count(*) AS n FROM app_passwords WHERE person_id = ? AND revoked_at IS NULL').get(op.actor.personId)!.n
   if (live >= APP_PASSWORDS_PER_PERSON) throw new ApiError(409, 'too_many', `you have ${live} app passwords; revoke one you no longer use`)
   const secret = newSecret(), name = nfc(body.name.trim())

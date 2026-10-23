@@ -63,6 +63,21 @@ export function revokeGrant(rt: OAuthRuntime, db: DB, grantId: number) {
   })()
 }
 
+/**
+ * Every OAuth grant of a person, and everything issued under them: access and refresh tokens, and codes not yet
+ * exchanged (Trina Cloud member removal, review finding 5: a person let back in later must not find an old connection
+ * working). Returns the number of grants that were live.
+ */
+export function revokeGrantsOf(db: DB, personId: number, t = Date.now()): number {
+  let n = 0
+  db.transaction(() => {
+    db.query(`UPDATE oauth_tokens SET revoked_at = ? WHERE revoked_at IS NULL AND grant_id IN (SELECT id FROM tokens WHERE person_id = ? AND kind = 'oauth')`).run(t, personId)
+    db.query('DELETE FROM oauth_codes WHERE person_id = ? AND used_at IS NULL').run(personId)
+    n = db.query(`UPDATE tokens SET revoked_at = ? WHERE person_id = ? AND kind = 'oauth' AND revoked_at IS NULL`).run(t, personId).changes
+  })()
+  return n
+}
+
 const grantName = (db: DB, personId: number, base: string) => {
   const taken = db.query<{ id: number }, [number, string]>('SELECT id FROM tokens WHERE person_id = ? AND name = ?')
   for (let n = 1; ; n++) { const name = n === 1 ? base : `${base} ${n}`; if (!taken.get(personId, name)) return name }
